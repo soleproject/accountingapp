@@ -400,27 +400,151 @@ def _prompt_for_uncategorized(t: dict) -> str:
             f"on {date} {direction} {who} was for?")
 
 
-async def collect_batch_items(company_id: str) -> list[dict]:
-    """Walk all 9 sources, return the deduped item list ready for batching.
+async def _collect_no_vendor(company_id: str) -> list[dict]:
+    """Item 3 ("No Vendor") — Review-Chat step-2 style. Every txn in
+    the past 7 days that has NO contact_id AND is either flagged
+    `needs_review=True` OR still sits on an Uncategorized-* account
+    gets bucketed by descriptor (e.g. "AMZN MKTPLC ...", "SQ *NAME
+    ...") and surfaced as one card per group. Client picks the vendor
+    and category for the whole group at once.
 
-    Deduplication has two layers:
-      1. Source-level: each `_collect_*` helper already excludes rows
-         with a live `batch_id` or `client_question_id`.
-      2. Cross-source: within this call, items with the same
-         (source_collection, source_id) pair are collapsed — a single
-         finding can only surface once even if two callers race.
+    Groups by ``(descriptor_key, direction)`` via
+    :func:`routes.transactions._desc_group_key`, matching the exact
+    Review Chat "Transactions · No-contact groups" behaviour so the
+    two flows stay in sync. Excludes checks (they surface under item
+    13, "Checks w/out Payee"). Caps 10 groups per batch.
+    """
+    from routes.transactions import _desc_group_key
+    try:
+        from routes.check_review import is_check_transaction
+    except Exception:  # noqa: BLE001
+        def is_check_transaction(t: dict):  # type: ignore[misc]
+            return (False, "")
+
+    def _is_check(t: dict) -> bool:
+        # `is_check_transaction` returns a tuple (bool, reason) — the
+        # bool is `.` the first element. Truthy-check on the tuple
+        # itself would always fire because a non-empty tuple is truthy.
+        r = is_check_transaction(t)
+        if isinstance(r, tuple):
+            return bool(r[0]) if r else False
+        return bool(r)
+
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).date().isoformat()
+
+    # "Uncategorized-*" account ids — matches the Review Chat rule.
+    uncat_ids: set[str] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id,
+         "name": {"$regex": "^Uncategorized", "$options": "i"}},
+        {"id": 1},
+    ):
+        if a.get("id"):
+            uncat_ids.add(a["id"])
+
+    groups: dict[tuple[str, str], dict] = {}
+    async for t in db.transactions.find({
+        "company_id": company_id,
+        "date":       {"$gte": week_ago},
+        # Spend only — deposits without a contact live under their
+        # dedicated Type 12 (Deposits) flow, not here.
+        "amount":     {"$lt": 0},
+        # NO contact linked
+        "$and": [
+            {"$or": [{"contact_id": None}, {"contact_id": ""},
+                     {"contact_id": {"$exists": False}}]},
+            {"$or": [{"needs_review": True},
+                     {"category_account_id": {"$in": [None, ""] + list(uncat_ids)}}]},
+        ],
+        "batch_id": {"$in": [None, ""]},
+    }).sort("date", -1).limit(200):
+        if _is_check(t):
+            continue
+        amount = float(t.get("amount") or 0)
+        direction = "in" if amount >= 0 else "out"
+        key, label = _desc_group_key(t.get("description") or "")
+        g = groups.setdefault((key, direction), {
+            "label":      label or "Misc / one-off",
+            "direction":  direction,
+            "txn_ids":    [],
+            "samples":    [],
+            "total":      0.0,
+        })
+        g["txn_ids"].append(t["id"])
+        g["total"] += amount
+        if len(g["samples"]) < 6:
+            g["samples"].append({
+                "id":          t["id"],
+                "date":        t.get("date"),
+                "amount":      t.get("amount"),
+                "description": t.get("description"),
+                "account":     t.get("bank_account_name"),
+            })
+
+    items: list[dict] = []
+    for (key, direction), g in list(groups.items())[:10]:
+        count = len(g["txn_ids"])
+        total_abs = abs(g["total"])
+        verb = "deposits" if direction == "in" else "spend"
+        prompt = (
+            f"No vendor on {g['label']}'s {verb} — "
+            f"{count} transaction{'s' if count != 1 else ''}, "
+            f"${total_abs:,.2f} total. Who's this from?"
+        )
+        items.append({
+            "item_id":           str(uuid.uuid4()),
+            "item_type":         ITEM_VENDOR_MEMO,   # repurposed as "No Vendor"
+            "source_id":         f"no-vendor-{key}-{direction}",
+            "source_collection": "batch",
+            "prompt":            prompt,
+            "context": {
+                "grouped":     True,
+                "descriptor":  g["label"],
+                "direction":   direction,
+                "txn_ids":     g["txn_ids"],
+                "count":       count,
+                "total":       round(g["total"], 2),
+                "samples":     g["samples"],
+            },
+            "answered_at":  None, "answer": None,
+            "deferred":     False, "action_taken": None,
+            "state":        "gathering",
+            "draft":        {},
+            "bookable":     False,
+        })
+    return items
+
+
+
+async def collect_batch_items(company_id: str) -> list[dict]:
+    """Walk the 10 official Quick Check-in sources, return the deduped
+    item list ready for batching.
+
+    Owner-approved 10-type lineup (2026-02):
+      1. Missing Receipt         (ITEM_MISSING_RECEIPT · type 3)
+      2. Uncategorized txn       (ITEM_UNCATEGORIZED · type 1)
+      3. No Vendor               (ITEM_VENDOR_MEMO · type 2 — repurposed
+                                  from the old vendor-dedupe finding to
+                                  Review-Chat-style no-contact groups)
+      4. Owner's Draw            (ITEM_OWNER_DRAW · type 11)
+      5. Deposits                (ITEM_DEPOSIT · type 12)
+      6. Liability Payment       (ITEM_LIABILITY_SPLIT · type 9)
+      7. Meals                   (ITEM_IRS_MEALS · type 10)
+      8. Travel & Lodging        (ITEM_IRS_TRAVEL · type 14)
+      9. Checks w/out Payee      (ITEM_CHECK_NO_CONTACT · type 13)
+     10. W-9 Collection          (ITEM_W9_NEEDED · type 4)
+
+    Deprecated (no longer collected): types 5 (Ambiguous Transfer),
+    6 (Recurring), 7 (Setup), 8 (Split), 15 (AI cleanup), and the
+    original type-2 contact-dedupe finding. Existing legacy items of
+    those types still render if a batch already carries them.
     """
     items: list[dict] = []
     items.extend(await _collect_aged_uncategorized(company_id))
-    items.extend(await _collect_ai_cleanup(company_id))
+    items.extend(await _collect_no_vendor(company_id))
     for item_type in (
-        ITEM_VENDOR_MEMO,
         ITEM_MISSING_RECEIPT,
         ITEM_W9_NEEDED,
-        ITEM_AMBIGUOUS_TRANSFER,
-        ITEM_RECURRING,
-        ITEM_SETUP,
-        ITEM_SPLIT,
         ITEM_LIABILITY_SPLIT,
         ITEM_IRS_MEALS,
         ITEM_OWNER_DRAW,
@@ -449,28 +573,24 @@ async def collect_batch_items(company_id: str) -> list[dict]:
     # (Vendor confirmation, Recurring, Setup, Split) still work if
     # findings arrive, but sort to the end.
     _TYPE_ORDER = {
-        # Receipts go FIRST (2026-02): the AI parses the receipt (vendor +
-        # split + category) and that resolved data cascades forward to
-        # pre-fill sibling Uncategorized items for the same vendor/week,
-        # so front-loading receipts closes out downstream questions.
-        ITEM_MISSING_RECEIPT:    0.5,  # #0 Missing Receipts — moved to front
-        ITEM_UNCATEGORIZED:      1,    # #1 Uncategorized Transactions
-        ITEM_AI_CLEANUP:         1.5,  # #1b AI auto-cleanup — surfaces right after Uncategorized
-        ITEM_OWNER_DRAW:         2,    # #2 Owner's Draw / personally-marked
-        ITEM_DEPOSIT:            3,    # #3 Deposits
-        ITEM_LIABILITY_SPLIT:    4,    # #4 Liability Payments
-        ITEM_CHECK_NO_CONTACT:   5,    # #5 Checks without contacts
-        ITEM_AMBIGUOUS_TRANSFER: 7,    # #7 Ambiguous Transfer
-        ITEM_IRS_MEALS:          8,    # #8 IRS Compliance (Meals + future travel/vehicle/gifts/charitable)
-        ITEM_IRS_TRAVEL:         8.5,  # #8b IRS Travel — surfaces right after Meals inside the IRS group
-        # ITEM_PAYPAL_CONNECT (future) — #9
-        # ITEM_BANK_STATEMENT (future) — #10
-        ITEM_W9_NEEDED:          11,   # #11 W-9 Collection
-        # Dormant — surface last if a finding trickles in:
-        ITEM_VENDOR_MEMO:        90,
-        ITEM_SPLIT:              91,
-        ITEM_RECURRING:          92,
-        ITEM_SETUP:              93,
+        # Owner-approved 10-type lineup (2026-02):
+        ITEM_MISSING_RECEIPT:    0.5,  # #1 Missing Receipt
+        ITEM_UNCATEGORIZED:      1,    # #2 Uncategorized transaction
+        ITEM_VENDOR_MEMO:        1.5,  # #3 No Vendor (Review-Chat no-contact groups)
+        ITEM_OWNER_DRAW:         2,    # #4 Owner's Draw
+        ITEM_DEPOSIT:            3,    # #5 Deposits
+        ITEM_LIABILITY_SPLIT:    4,    # #6 Liability Payment
+        ITEM_IRS_MEALS:          5,    # #7 Meals
+        ITEM_IRS_TRAVEL:         6,    # #8 Travel & Lodging
+        ITEM_CHECK_NO_CONTACT:   7,    # #9 Checks w/out Payee
+        ITEM_W9_NEEDED:          8,    # #10 W-9 Collection
+        # Deprecated 2026-02 (no longer collected — legacy items in
+        # existing batches still render but sort to the end):
+        ITEM_AI_CLEANUP:         95,
+        ITEM_AMBIGUOUS_TRANSFER: 96,
+        ITEM_SPLIT:              97,
+        ITEM_RECURRING:          98,
+        ITEM_SETUP:              99,
     }
 
     def _sort_key(it: dict) -> tuple:

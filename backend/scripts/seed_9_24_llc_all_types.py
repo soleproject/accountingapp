@@ -421,19 +421,33 @@ async def main() -> int:
     # shortcut on item 1 has real docs to demo against.
     await _seed_open_bill_and_invoice(cid)
 
-    # 2. Vendor confirmation (`contact_mismatch`)
-    ct = await _seed_contact(cid, "Reno Business Supply")
-    await _seed_finding(
-        cid, kind="contact_mismatch",
-        title="Confirm vendor: Reno Business Supply",
-        detail="We're seeing 3 charges labeled 'RBS RENO' — is this the same "
-               "vendor as 'Reno Business Supply' from your contact list? "
-               "Confirm and we'll auto-map future charges.",
-        meta={"contact_name": ct["name"], "contact_id": ct["id"],
-              "descriptor": "RBS RENO", "sample_count": 3,
-              "txn_amount": -284.10},
-        contact_id=ct["id"], action_label="Confirm binding",
+    # 2. No Vendor (repurposed) — Review-Chat-style no-contact groups.
+    # Seed 4 no-contact transactions with the same descriptor so the
+    # collector's descriptor-grouping bucket produces a real group card.
+    _nv_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
     )
+    for i, (days, amt) in enumerate([(1, -37.42), (3, -84.19), (4, -22.50), (6, -128.77)]):
+        d = _date_days_ago(days)
+        await db.transactions.insert_one({
+            "id":                 f"demo-t-novend-{i}-{uuid.uuid4()}",
+            "company_id":         cid,
+            "date":               d,
+            "amount":             amt,
+            "description":        "AMZN MKTPLC US*A1B2C3",
+            "original_description": "AMZN MKTPLC US*A1B2C3",
+            # No merchant, no contact — that's the whole point.
+            "bank_account_id":    (_nv_bank or {}).get("id"),
+            "bank_account_name":  (_nv_bank or {}).get("name") or "Business Checking",
+            "posted":             True,
+            "needs_review":       True,
+            "batch_id":           None,
+            "created_at":         _iso_days_ago(days),
+            "updated_at":         _iso_days_ago(days),
+            "demo_tag":           DEMO_TAG,
+        })
 
     # 3. Missing receipt — IRS §274 requires a receipt for any expense over $75.
     # Seed as a Home Depot charge so uploading the receipt showcases the
@@ -498,78 +512,57 @@ async def main() -> int:
         action_label="Collect W-9",
     )
 
-    # 5. Ambiguous transfer
-    pseudo = await _seed_contact(cid, "Internal Transfer #4291-9876",
-                                  is_pseudo_contact=True)
-    await _seed_finding(
-        cid, kind="ambiguous_transfer",
-        title="Is this $5,000 movement a transfer or a payment?",
-        detail="A $5,000 debit on Checking-4291 and matching credit on "
-               "Savings-9876 look like an internal transfer, but landed "
-               "2 days apart. Confirm.",
-        contact_id=pseudo["id"],
-        meta={"amount": 5000.00, "txn_amount": -5000.00,
-              "txn_desc":  "TRANSFER TO SAVINGS ····9876",
-              "txn_date":  _date_days_ago(6),
-              "debit_acct": "Business Checking ····4291",
-              "credit_acct": "Business Savings ····9876",
-              "days_apart": 2},
-        action_label="Confirm transfer",
-    )
+    # 5-8. (Deprecated types 5 Ambiguous Transfer / 6 Recurring /
+    # 7 Setup / 8 Split — no longer part of the 10-type Quick Check-in
+    # lineup, so we don't seed them.)
 
-    # 6. Recurring charge
-    await _seed_finding(
-        cid, kind="new_recurring_charge",
-        title="New recurring charge: Adobe Creative Cloud · $47.99/mo",
-        detail="First appeared 22 days ago. Business or personal — we'll "
-               "write a rule for future charges either way.",
-        meta={"amount":   -47.99, "txn_amount": -47.99,
-              "vendor":   "Adobe Creative Cloud",
-              "txn_desc": "ADOBE *CREATIVE CLD 800-833-6687",
-              "txn_date": _date_days_ago(2),
-              "cadence":  "monthly",
-              "first_seen_days_ago": 22},
-        action_label="Business or personal",
+    # 9. Liability payment split — seed the underlying transaction too
+    # so confirming the split actually posts to the GL (via the new
+    # `_handle_liability_payment`). Same pattern the deposit / owner-
+    # draw seeds use. Stamp a contact so this transaction doesn't
+    # ALSO get flagged as No-Vendor / Uncategorized by the auditor —
+    # a liability-split finding is the ONLY finding it should produce.
+    _lp_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
     )
-
-    # 7. Setup detail
-    await _seed_finding(
-        cid, kind="setup_missing",
-        title="Set up sales-tax rate for Nevada",
-        detail="You've had 4 invoices this month with tax lines but no "
-               "default sales-tax rate configured for Nevada. Set it now "
-               "so future invoices auto-populate.",
-        meta={"state": "NV", "affected_invoices": 4,
-              "txn_amount": None},
-        action_label="Configure tax",
+    _lp_lender = await _seed_contact(
+        cid, "Wells Fargo Home Mortgage",
+        email="mortgage-service@wellsfargo.example.test",
     )
-
-    # 8. Split transaction
-    await _seed_finding(
-        cid, kind="split_suggested",
-        title="Split this $1,200 Costco run?",
-        detail="AI thinks this Costco charge is a mix — supplies (~$720) "
-               "and groceries (~$480). Confirm the split or say 100% biz.",
-        meta={"txn_amount": -1200.00,
-              "txn_desc":   "COSTCO WHSE #1148 RENO NV",
-              "txn_date":   _date_days_ago(5),
-              "suggested_splits": [
-                  {"account_name": "Office Supplies",      "amount": 720.00, "percent": 60},
-                  {"account_name": "Owner Personal Draws", "amount": 480.00, "percent": 40},
-              ]},
-        action_label="Choose split",
-    )
-
-    # 9. Liability payment split
+    _lp_date = _date_days_ago(1)
+    _lp_tid  = f"demo-t9-{uuid.uuid4()}"
+    await db.transactions.insert_one({
+        "id":                   _lp_tid,
+        "company_id":           cid,
+        "date":                 _lp_date,
+        "amount":               -2145.67,
+        "description":          "WELLS FARGO HOME MTG PMT 4291",
+        "original_description": "WELLS FARGO HOME MTG PMT 4291",
+        "merchant":             "Wells Fargo Home Mortgage",
+        "contact_id":           _lp_lender["id"],
+        "contact_name":         _lp_lender["name"],
+        "bank_account_id":      (_lp_bank or {}).get("id"),
+        "bank_account_name":    (_lp_bank or {}).get("name") or "Business Checking",
+        "posted":               True,
+        "needs_review":         True,   # awaiting client split
+        "human_reviewed":       False,
+        "batch_id":             None,
+        "created_at":           _iso_days_ago(1),
+        "updated_at":           _iso_days_ago(1),
+        "demo_tag":             DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="liability_split_needed",
         title="$2,145 loan payment — how should we split it?",
         detail="Looks like a mortgage / credit card / auto-loan bill. "
                "Upload the statement and I'll pull out principal, "
                "interest, escrow, and fees.",
-        meta={"txn_amount": -2145.67,
+        meta={"txn_id":     _lp_tid,
+              "txn_amount": -2145.67,
               "txn_desc":   "WELLS FARGO HOME MTG PMT 4291",
-              "txn_date":   _date_days_ago(1),
+              "txn_date":   _lp_date,
               "expected_buckets": ["Principal", "Interest", "Escrow", "Fees"]},
         action_label="Split liability",
     )
@@ -629,16 +622,42 @@ async def main() -> int:
         action_label="Confirm draw",
     )
 
-    # 12. Deposit
+    # 12. Deposit — seed the underlying transaction too so classifying
+    # it actually books to the GL (via the new `_handle_deposit`).
+    _dep_bank = await db.accounts.find_one(
+        {"company_id": cid, "code": "1010"}, {"id": 1, "name": 1},
+    ) or await db.accounts.find_one(
+        {"company_id": cid, "type": "asset"}, {"id": 1, "name": 1},
+    )
+    _dep_date = _date_days_ago(2)
+    _dep_tid = f"demo-t12-{uuid.uuid4()}"
+    await db.transactions.insert_one({
+        "id":                 _dep_tid,
+        "company_id":         cid,
+        "date":               _dep_date,
+        "amount":             12400.00,
+        "description":        "DEPOSIT — BATCH #DEP-2809",
+        "original_description": "DEPOSIT — BATCH #DEP-2809",
+        "bank_account_id":    (_dep_bank or {}).get("id"),
+        "bank_account_name":  (_dep_bank or {}).get("name") or "Business Checking",
+        "posted":             True,
+        "needs_review":       True,   # awaiting client classification
+        "human_reviewed":     False,
+        "batch_id":           None,
+        "created_at":         _iso_days_ago(2),
+        "updated_at":         _iso_days_ago(2),
+        "demo_tag":           DEMO_TAG,
+    })
     await _seed_finding(
         cid, kind="deposit_check",
         title="Deposit of $12,400 — customer payment or something else?",
-        detail="A $12,400 deposit landed on " + _date_days_ago(2) +
+        detail="A $12,400 deposit landed on " + _dep_date +
                ". Is this a customer payment (revenue), an owner contribution, "
                "or a loan? Different books treatment for each.",
-        meta={"txn_amount": 12400.00,
+        meta={"txn_id":     _dep_tid,
+              "txn_amount": 12400.00,
               "txn_desc":   "DEPOSIT — BATCH #DEP-2809",
-              "txn_date":   _date_days_ago(2)},
+              "txn_date":   _dep_date},
         action_label="Categorize deposit",
     )
 
@@ -662,8 +681,8 @@ async def main() -> int:
         action_label="Substantiate travel",
     )
 
-    # 15. AI auto-cleanup confirmation
-    await _seed_ai_cleanup(cid)
+    # 15. (Deprecated — AI auto-cleanup removed from the 10-type
+    # Quick Check-in lineup 2026-02.)
 
     # ------------------------------------------------------------------
     # Compile items via the real aggregator so per-type shapes match
@@ -723,22 +742,25 @@ async def main() -> int:
     # Enforce canonical type ordering across the whole batch so the
     # seed matches production ordering — Receipts first, Uncategorized
     # next, then Owner/Deposit/Liability/etc.
+    # Owner-approved 10-type lineup (2026-02). Mirrors _TYPE_ORDER in
+    # client_review.collect_batch_items exactly.
     _type_priority = {
-        cr.ITEM_MISSING_RECEIPT:    0.5,
-        cr.ITEM_UNCATEGORIZED:      1,
-        cr.ITEM_AI_CLEANUP:         1.5,
-        cr.ITEM_OWNER_DRAW:         2,
-        cr.ITEM_DEPOSIT:            3,
-        cr.ITEM_LIABILITY_SPLIT:    4,
-        cr.ITEM_CHECK_NO_CONTACT:   5,
-        cr.ITEM_AMBIGUOUS_TRANSFER: 7,
-        cr.ITEM_IRS_MEALS:          8,
-        cr.ITEM_IRS_TRAVEL:         8.5,
-        cr.ITEM_W9_NEEDED:          11,
-        cr.ITEM_VENDOR_MEMO:        90,
-        cr.ITEM_SPLIT:              91,
-        cr.ITEM_RECURRING:          92,
-        cr.ITEM_SETUP:              93,
+        cr.ITEM_MISSING_RECEIPT:    0.5,   # #1 Missing Receipt
+        cr.ITEM_UNCATEGORIZED:      1,     # #2 Uncategorized transaction
+        cr.ITEM_VENDOR_MEMO:        1.5,   # #3 No Vendor
+        cr.ITEM_OWNER_DRAW:         2,     # #4 Owner's Draw
+        cr.ITEM_DEPOSIT:            3,     # #5 Deposits
+        cr.ITEM_LIABILITY_SPLIT:    4,     # #6 Liability Payment
+        cr.ITEM_IRS_MEALS:          5,     # #7 Meals
+        cr.ITEM_IRS_TRAVEL:         6,     # #8 Travel & Lodging
+        cr.ITEM_CHECK_NO_CONTACT:   7,     # #9 Checks w/out Payee
+        cr.ITEM_W9_NEEDED:          8,     # #10 W-9 Collection
+        # Deprecated (legacy items still sort but come last):
+        cr.ITEM_AI_CLEANUP:         95,
+        cr.ITEM_AMBIGUOUS_TRANSFER: 96,
+        cr.ITEM_SPLIT:              97,
+        cr.ITEM_RECURRING:          98,
+        cr.ITEM_SETUP:              99,
     }
     items.sort(key=lambda it: _type_priority.get(it.get("item_type") or 0, 99))
 
@@ -794,7 +816,7 @@ async def main() -> int:
 
     fresh = await db.client_review_batches.find_one({"id": batch["id"]})
     print("\n" + "=" * 72)
-    print(f"  9-24 LLC — ALL 15 CHECK-IN ITEM TYPES SEEDED")
+    print(f"  {COMPANY_NAME} — 10-TYPE QUICK CHECK-IN SEEDED")
     print("=" * 72)
     print(f"  batch_id:     {batch['id']}")
     print(f"  client_email: {CLIENT_EMAIL}")
@@ -806,11 +828,17 @@ async def main() -> int:
         seen_types.add(it["item_type"])
         prompt = (it.get("prompt") or "")[:90]
         print(f"  type={it['item_type']:>2}  {prompt}")
-    missing = sorted(set(range(1, 16)) - seen_types)
+    # The 10 official types (owner-approved 2026-02):
+    _official = {cr.ITEM_MISSING_RECEIPT, cr.ITEM_UNCATEGORIZED,
+                 cr.ITEM_VENDOR_MEMO, cr.ITEM_OWNER_DRAW,
+                 cr.ITEM_DEPOSIT, cr.ITEM_LIABILITY_SPLIT,
+                 cr.ITEM_IRS_MEALS, cr.ITEM_IRS_TRAVEL,
+                 cr.ITEM_CHECK_NO_CONTACT, cr.ITEM_W9_NEEDED}
+    missing = sorted(_official - seen_types)
     print("-" * 72)
     print(f"  types seen:   {sorted(seen_types)}")
     if missing:
-        print(f"  MISSING:      {missing}")
+        print(f"  MISSING from 10-type set: {missing}")
     print("=" * 72 + "\n")
     return 0
 
@@ -818,7 +846,7 @@ async def main() -> int:
 if __name__ == "__main__":
     import sys
     # Optional: `python seed_9_24_llc_all_types.py "Test 519 LLC"` to
-    # seed the same 15 item types under a different company. Falls back
+    # seed the 10 item types under a different company. Falls back
     # to the default "9-24 LLC" when no arg is passed.
     if len(sys.argv) > 1 and sys.argv[1].strip():
         _apply_company_override(sys.argv[1].strip())

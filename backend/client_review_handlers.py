@@ -1298,6 +1298,685 @@ async def _cascade_category_to_siblings(
 # Router
 # --------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Item 12 — deposit classification
+# --------------------------------------------------------------------------
+
+_DEPOSIT_FLOW_TO_SEMANTIC = {
+    "customer_payment":   "revenue_generic",
+    "owner_contribution": "owner_contribution",
+    "loan_received":      "loan_payment",     # Loans Payable — same account
+    "refund":             "sales_refunds",    # Refunds & Returns (income-contra)
+}
+_DEPOSIT_FLOW_LABELS = {
+    "customer_payment":   "Customer payment (revenue)",
+    "owner_contribution": "Owner contribution (equity)",
+    "loan_received":      "Loan received (liability)",
+    "refund":             "Vendor refund",
+}
+
+
+async def _handle_deposit(item: dict, batch: dict, *,
+                           answer: str, payload: dict) -> dict:
+    """Classifies a deposit into one of 4 buckets and books it to
+    the right CoA account:
+
+      * ``customer_payment``   → Sales Revenue (income)
+      * ``owner_contribution`` → Owner's Contribution (equity)
+      * ``loan_received``      → Loans Payable (liability)
+      * ``refund``             → Refunds & Returns (income-contra)
+
+    Payload shape:  ``{"flow": "<one of above>"}`` — matches the
+    Deposit tile row on the client. Falls through to
+    ``_handle_generic_finding`` if the flow key is missing / unknown
+    so the finding still closes with a stashed answer for the pro.
+    """
+    import canonical_semantic_accounts as csa
+
+    payload = payload or {}
+    flow = (payload.get("flow") or "").strip().lower()
+    semantic = _DEPOSIT_FLOW_TO_SEMANTIC.get(flow)
+    if not semantic:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_id = meta.get("txn_id")
+
+    # Resolve the underlying deposit transaction — prefer explicit
+    # meta.txn_id; fall back to amount + date match. Mirrors the
+    # Missing-Receipt resolver.
+    txn = None
+    if txn_id:
+        txn = await db.transactions.find_one(
+            {"id": txn_id, "company_id": company_id},
+            {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount")
+        date = meta.get("txn_date")
+        q: dict = {"company_id": company_id}
+        if amt is not None:
+            try:
+                a = round(abs(float(amt)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, a]}
+            except (TypeError, ValueError):
+                pass
+        if date:
+            q["date"] = date
+        txn = await db.transactions.find_one(
+            q, {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    # Resolve / auto-create the target CoA account.
+    # An explicit `payload.category_account_id` overrides the semantic
+    # default — used by the Refund → "against a bill" / "to a category"
+    # flows so the client can pick the exact expense account to
+    # credit back to, instead of dumping every refund into
+    # "Refunds & Returns".
+    override_id = (payload.get("category_account_id") or "").strip() or None
+    acct = None
+    if override_id:
+        acct = await db.accounts.find_one(
+            {"id": override_id, "company_id": company_id},
+            {"id": 1, "name": 1, "code": 1, "type": 1},
+        )
+    if not acct:
+        acct = await csa.ensure_semantic_account(db, company_id, semantic)
+    if not acct or not acct.get("id"):
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    label = _DEPOSIT_FLOW_LABELS.get(flow, flow)
+    now = _now_iso()
+    memo = (payload.get("memo") or "").strip()
+
+    # Optional contact tagging — used by the Deposit → Customer
+    # payment → Link to customer flow. If the client selected an
+    # existing contact, `contact_id` is passed straight through. If
+    # they typed a brand-new name, `create_contact=True` + a
+    # `contact_name` string arrives instead → we mint the contact
+    # first, then stamp its id on the txn.
+    contact_id = (payload.get("contact_id") or "").strip() or None
+    contact_name = (payload.get("contact_name") or "").strip() or None
+    if not contact_id and contact_name and payload.get("create_contact"):
+        try:
+            import uuid as _uuid
+            new_c = {
+                "id":         str(_uuid.uuid4()),
+                "company_id": company_id,
+                "name":       contact_name,
+                "type":       "customer",
+                "created_at": now,
+                "updated_at": now,
+                "created_via": "client_review:deposit_customer_payment",
+            }
+            await db.contacts.insert_one(new_c)
+            contact_id = new_c["id"]
+        except Exception:  # noqa: BLE001
+            contact_id = None
+
+    # Book the deposit to the classified account. Deposits post at
+    # face value (positive amount stays positive on income/equity/
+    # liability accounts — the sign convention is preserved by the
+    # journal-entry layer at post time).
+    upd = {
+        "category_account_id":   acct["id"],
+        "category_account_name": acct.get("name"),
+        "category_account_code": acct.get("code"),
+        "needs_review":          False,
+        "human_reviewed":        True,
+        "posted":                True,
+        "ai_source":             f"client_deposit_{flow}",
+        "ai_comment":            (f"Client classified deposit as {label}."
+                                  + (f" Note: {memo}" if memo else "")),
+        "deposit_classification": flow,
+        "updated_at":            now,
+    }
+    if contact_id:
+        upd["contact_id"] = contact_id
+    if contact_name:
+        upd["contact_name"] = contact_name
+        upd["merchant"] = contact_name
+    # If this refund is being credited against a specific bill, track
+    # the linkage on the txn so the pro can see which bill it
+    # relates to during Reconciliation.
+    bill_id = (payload.get("bill_id") or "").strip() or None
+    if bill_id:
+        upd["linked_bill_id"] = bill_id
+    await db.transactions.update_one(
+        {"id": txn["id"], "company_id": company_id}, {"$set": upd},
+    )
+
+    # Re-open a fully-paid bill when this refund reverses it. Keeps
+    # A/P accurate: after the vendor sends money back, the client
+    # effectively owes it again (or the bill should be voided). We
+    # take the "increase balance_due" path so a pro can decide
+    # whether to void, re-pay, or leave it open.
+    if flow == "refund" and bill_id:
+        try:
+            bill = await db.bills.find_one(
+                {"id": bill_id, "company_id": company_id},
+                {"total": 1, "balance_due": 1, "status": 1, "history": 1},
+            )
+        except Exception:  # noqa: BLE001
+            bill = None
+        if bill:
+            total   = float(bill.get("total") or 0)
+            cur_bal = float(bill.get("balance_due") or 0)
+            refund_amt = abs(float(txn.get("amount") or 0))
+            # Cap the re-open so balance_due never exceeds the original
+            # bill total (edge case: vendor over-refunds).
+            new_bal = min(cur_bal + refund_amt, total) if total > 0 else cur_bal + refund_amt
+            # Only flip status if we actually raised the balance above
+            # the zero threshold — a partial-refund on a partially-open
+            # bill should stay "open"/"partial" without a status flip.
+            new_status = ("open" if new_bal > 0.005 and cur_bal <= 0.005
+                          else (bill.get("status") or "open"))
+            entry = {
+                "at":         now,
+                "by":         "client_review:refund_reopen",
+                "action":     "balance_reopened_by_refund",
+                "delta":      round(new_bal - cur_bal, 2),
+                "refund_txn": txn["id"],
+                "note":       f"Vendor refund of ${refund_amt:,.2f} reversed part of this bill.",
+            }
+            await db.bills.update_one(
+                {"id": bill_id, "company_id": company_id},
+                {"$set": {
+                    "balance_due": round(new_bal, 2),
+                    "status":      new_status,
+                    "updated_at":  now,
+                    "reopened_at": now,
+                }, "$push": {"history": entry}},
+            )
+
+    # Close the source finding so the pro Cockpit reflects the answer.
+    await _close_source_finding(item, resolved_by="client:deposit_classified")
+    if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set": {"client_answer":       answer or label,
+                      "client_answered_at":  now,
+                      "meta.matched_txn_id": txn["id"],
+                      "meta.client_payload": payload,
+                      "meta.deposit_flow":   flow}},
+        )
+
+    return {
+        "action_taken": "deposit_classified",
+        "detail":       f"Booked ${abs(float(txn.get('amount') or 0)):,.2f} as {label} → {acct.get('name')}.",
+        "txn_id":       txn["id"],
+        "flow":         flow,
+        "account_id":   acct["id"],
+        "account_name": acct.get("name"),
+    }
+
+
+# --------------------------------------------------------------------------
+# Item 9 — liability payment split (mortgage / credit card / auto loan)
+# --------------------------------------------------------------------------
+#
+# Vision-analyzed statement OR client-typed split arrives as
+#   payload = {
+#     "flow": "liability_split",
+#     "statement_type": "mortgage" | "credit_card" | "auto_loan" | "generic_loan",
+#     "lender_name":    "...",
+#     "buckets": [{"label": "Principal", "amount": 812.45}, ...],
+#     "totals":  {"grand_total": 2145.67},
+#     "payment_amount": 2145.67,
+#     "narrative":      "...",
+#     # optional overrides:
+#     "principal_account_id": "<liability sub-account id — e.g. specific
+#                              Vehicle Loan the client picked>",
+#   }
+#
+# We turn each bucket into a `db.transactions.splits[]` row pointing at
+# the right canonical semantic account:
+#   Principal → liability paydown (statement-type aware)
+#   Interest  → Interest Expense
+#   Escrow    → Escrow (Prepaid) asset
+#   Fees      → Bank & Merchant Fees
+# The transaction gets `posted=True`, `human_reviewed=True`, its prior
+# single-category fields cleared (splits win), and the source finding
+# is closed.
+# --------------------------------------------------------------------------
+
+# Bucket label (case-insensitive, whitespace-tolerant) → semantic key.
+# Escrow is only valid for mortgages; for CC/auto/generic_loan the AI
+# should not emit an Escrow bucket, but if it does we still book it to
+# the escrow asset (safest — the pro can move it later).
+_LIABILITY_LABEL_TO_SEMANTIC = {
+    "principal":            None,        # resolved dynamically from statement_type
+    "principal_payment":    None,
+    "loan principal":       None,
+    "curtailment":          None,        # extra principal paydown → same acct
+    "principal curtailment": None,
+    "payoff adjustment":    None,        # servicer's final principal true-up
+    "interest":             "interest_expense",
+    "mortgage interest":    "interest_expense",
+    "finance charges":      "interest_expense",
+    "finance charge":       "interest_expense",
+    "escrow":               "escrow_prepaid",
+    "escrow deposit":       "escrow_prepaid",
+    "escrow shortage":      "escrow_prepaid",
+    "taxes & insurance":    "escrow_prepaid",
+    "property tax":         "property_tax_expense",
+    "property taxes":       "property_tax_expense",
+    "real estate tax":      "property_tax_expense",
+    "real estate taxes":    "property_tax_expense",
+    "county tax":           "property_tax_expense",
+    "county taxes":         "property_tax_expense",
+    "school tax":           "property_tax_expense",
+    "homeowners insurance": "insurance_expense",
+    "homeowner's insurance": "insurance_expense",
+    "hazard insurance":     "insurance_expense",
+    "flood insurance":      "insurance_expense",
+    "wind insurance":       "insurance_expense",
+    "pmi":                  "insurance_expense",
+    "pmi premium":          "insurance_expense",
+    "mortgage insurance":   "insurance_expense",
+    "mortgage insurance premium": "insurance_expense",
+    "mip":                  "insurance_expense",
+    "insurance":            "insurance_expense",
+    "insurance premium":    "insurance_expense",
+    "hoa":                  "hoa_dues",
+    "hoa dues":             "hoa_dues",
+    "hoa fees":             "hoa_dues",
+    "condo dues":           "hoa_dues",
+    "condo fees":           "hoa_dues",
+    "association dues":     "hoa_dues",
+    "association fees":     "hoa_dues",
+    "master association dues": "hoa_dues",
+    "fees":                 "bank_fees",
+    "fee":                  "bank_fees",
+    "late fee":             "bank_fees",
+    "late fees":            "bank_fees",
+    "late payment charge":  "bank_fees",
+    "nsf fee":              "bank_fees",
+    "nsf":                  "bank_fees",
+    "return fee":           "bank_fees",
+    "service charge":       "bank_fees",
+    "service fee":          "bank_fees",
+    "other":                "bank_fees",
+}
+
+
+async def _semantic_classify_liability_bucket(
+    label: str, statement_type: str,
+) -> str | None:
+    """Ask Claude Haiku to classify a novel bucket label (one that
+    doesn't match any exact key or keyword substring in
+    `_LIABILITY_LABEL_TO_SEMANTIC`) into a canonical semantic account.
+    Returns the semantic key on high confidence, else None (caller
+    falls through to `unresolved`). This is the safety net so weird
+    servicer labels like "Late Payment Charge - Grace Period" or
+    "Deferred Interest" or "Modification Fee" don't silently drop.
+
+    We deliberately KEEP this behind the exact-match/keyword table
+    so the fast path stays synchronous and costs zero LLM calls in
+    the common case."""
+    label = (label or "").strip()
+    if not label:
+        return None
+    valid_keys = [
+        "interest_expense", "escrow_prepaid", "insurance_expense",
+        "property_tax_expense", "hoa_dues", "bank_fees",
+        # "loan_payment" == principal — caller handles via
+        # `_principal_semantic_for(statement_type)` when we return
+        # "principal".
+        "principal",
+    ]
+    try:
+        from ai_service import _new_chat, _extract_json, MODEL_HAIKU
+        from llm_client import UserMessage
+        system = (
+            "You are a bookkeeping classifier. A liability-payment "
+            "statement has a line-item bucket labeled `{LABEL}` on a "
+            "{STMT_TYPE} statement. Pick which canonical semantic "
+            "account should receive that dollar amount. Reply STRICT "
+            "JSON only: {\"key\": \"<one of: interest_expense | "
+            "escrow_prepaid | insurance_expense | property_tax_expense "
+            "| hoa_dues | bank_fees | principal>\", \"confidence\": "
+            "<0.0-1.0>}. Return null key when unsure. No prose, no "
+            "code fences."
+        )
+        prompt = system.replace("{LABEL}", label).replace(
+            "{STMT_TYPE}", statement_type or "generic_loan"
+        )
+        chat = _new_chat(prompt, f"liab-bucket-classify",
+                          model_name=MODEL_HAIKU,
+                          feature="liability-bucket-classify")
+        text = await chat.send_message(UserMessage(text=label))
+    except Exception:  # noqa: BLE001
+        return None
+    parsed = _extract_json(text or "") or {}
+    key = (parsed.get("key") or "").strip()
+    try:
+        conf = float(parsed.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    if key not in valid_keys:
+        return None
+    if conf < 0.65:
+        return None
+    return key
+
+
+def _principal_semantic_for(statement_type: str) -> str:
+    """Which canonical liability account gets DR'd for the principal
+    portion of the payment. Credit cards use the contra `credit_card_payment`
+    account; everything else uses generic `loan_payment`."""
+    st = (statement_type or "").strip().lower()
+    if st == "credit_card":
+        return "credit_card_payment"
+    return "loan_payment"
+
+
+async def _handle_liability_payment(item: dict, batch: dict, *,
+                                     answer: str, payload: dict) -> dict:
+    """Split a mortgage / credit-card / auto-loan payment transaction
+    into its principal / interest / escrow / fees buckets and post
+    each to the right GL account. This is the ONLY handler that turns
+    Quick Check-in liability-statement uploads into real ledger rows.
+    """
+    import canonical_semantic_accounts as csa
+
+    payload = payload or {}
+    flow = (payload.get("flow") or "").strip().lower()
+    # We accept both "liability_split" (post-vision confirm) and
+    # the older "liability_categorize" naming just in case older UI
+    # payloads leak through.
+    if flow not in ("liability_split", "liability_categorize"):
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    buckets = payload.get("buckets") or []
+    if not isinstance(buckets, list) or not buckets:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    statement_type = (payload.get("statement_type") or "generic_loan").strip().lower()
+    principal_semantic_default = _principal_semantic_for(statement_type)
+    principal_override = (payload.get("principal_account_id") or "").strip() or None
+
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_id = meta.get("txn_id")
+
+    # Resolve the underlying transaction — same pattern used by
+    # `_handle_deposit`: prefer explicit txn_id, fall back to amount +
+    # date match on the batch's company.
+    txn = None
+    if txn_id:
+        txn = await db.transactions.find_one(
+            {"id": txn_id, "company_id": company_id},
+            {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount")
+        date = meta.get("txn_date")
+        q: dict = {"company_id": company_id}
+        if amt is not None:
+            try:
+                a = round(abs(float(amt)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, a]}
+            except (TypeError, ValueError):
+                pass
+            if date:
+                q["date"] = date
+        txn = await db.transactions.find_one(
+            q, {"id": 1, "amount": 1, "date": 1, "description": 1, "contact_id": 1},
+        )
+    if not txn:
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    txn_amount_abs = abs(float(txn.get("amount") or 0))
+    txn_sign = 1.0 if float(txn.get("amount") or 0) >= 0 else -1.0
+
+    # Resolve each bucket → account. Skip zero / non-numeric entries so
+    # the splits don't include garbage rows. Auto-create the target
+    # account via csa.ensure_semantic_account when it doesn't exist.
+    splits: list[dict] = []
+    auto_created: list[dict] = []
+    unresolved: list[str] = []
+
+    async def _resolve_semantic(sem_key: str):
+        """ensure_semantic_account with a small memo of what was minted
+        this call so we can surface it in the response summary."""
+        acct = await csa.ensure_semantic_account(db, company_id, sem_key)
+        if acct and acct.get("id") and acct.get("__auto_created__"):
+            auto_created.append({
+                "id":   acct["id"],
+                "code": acct.get("code"),
+                "name": acct.get("name"),
+            })
+        return acct
+
+    for b in buckets:
+        try:
+            amt = round(float(b.get("amount") or 0), 2)
+        except (TypeError, ValueError):
+            amt = 0.0
+        if amt <= 0:
+            continue
+        label = (b.get("label") or "").strip()
+        key = label.lower()
+
+        # Per-bucket account override (from the "Change" affordance
+        # on the LiabilityBreakdown UI). Highest priority — if the
+        # client picked a specific CoA row for THIS bucket, use it.
+        # We accept a few field names since different UI paths stamp
+        # different keys onto the bucket.
+        bucket_override = (
+            (b.get("account_id") or "").strip()
+            or (b.get("category_account_id") or "").strip()
+            or (b.get("principal_account_id") or "").strip()
+            or None
+        )
+        if bucket_override:
+            override_acct = await db.accounts.find_one(
+                {"id": bucket_override, "company_id": company_id},
+                {"id": 1, "name": 1, "code": 1, "type": 1},
+            )
+            if override_acct and override_acct.get("id"):
+                splits.append({
+                    "amount":                amt * txn_sign,
+                    "category_account_id":   override_acct["id"],
+                    "category_account_name": override_acct.get("name") or "",
+                    "category_account_code": override_acct.get("code") or "",
+                    "description":           label or override_acct.get("name") or "",
+                    "bucket":                key,
+                    "user_overridden":       True,
+                })
+                continue
+            # If the override id doesn't exist / retired, fall through
+            # to the semantic-default resolver below so the split
+            # still posts.
+
+        semantic = _LIABILITY_LABEL_TO_SEMANTIC.get(key)
+        # Loose match: "principal" appears in "Principal Payment", etc.
+        # Ordering matters: check more-specific keywords BEFORE the
+        # generic "tax"/"fee"/"charge" so "property tax" → property
+        # tax expense (not escrow), "hoa fees" → HOA dues (not bank
+        # fees), etc.
+        if semantic is None:
+            if ("principal" in key or "curtailment" in key
+                    or "payoff adjustment" in key):
+                semantic = None  # sentinel: use principal_semantic_default
+                is_principal = True
+            elif "interest" in key or "finance" in key:
+                semantic = "interest_expense"
+                is_principal = False
+            elif ("hoa" in key or "association" in key or "condo" in key):
+                semantic = "hoa_dues"
+                is_principal = False
+            elif ("property tax" in key or "real estate tax" in key
+                    or "county tax" in key or "school tax" in key):
+                semantic = "property_tax_expense"
+                is_principal = False
+            elif ("pmi" in key or "mip" in key
+                    or "mortgage insurance" in key
+                    or "homeowner" in key or "hazard" in key
+                    or "flood insurance" in key or "wind insurance" in key
+                    or key == "insurance" or "insurance premium" in key):
+                semantic = "insurance_expense"
+                is_principal = False
+            elif "escrow" in key:
+                semantic = "escrow_prepaid"
+                is_principal = False
+            elif "fee" in key or "charge" in key or "penalt" in key or "nsf" in key:
+                semantic = "bank_fees"
+                is_principal = False
+            else:
+                # Ask Haiku to classify novel labels ("Deferred
+                # Interest", "Modification Fee", "Rate Buy-down",
+                # etc.) rather than silently dropping to unresolved.
+                try:
+                    ai_key = await _semantic_classify_liability_bucket(
+                        label, statement_type,
+                    )
+                except Exception:  # noqa: BLE001
+                    ai_key = None
+                if ai_key == "principal":
+                    semantic = None
+                    is_principal = True
+                elif ai_key:
+                    semantic = ai_key
+                    is_principal = False
+                else:
+                    unresolved.append(f"{label or '(unlabeled)'} ${amt:.2f}")
+                    continue
+        else:
+            is_principal = False
+
+        # Principal is statement-type-aware; allow explicit override
+        # so a client who paid down a specific Vehicle Loan sub-account
+        # gets THAT account credited (not the generic Loans Payable).
+        if semantic is None:
+            if principal_override:
+                acct = await db.accounts.find_one(
+                    {"id": principal_override, "company_id": company_id,
+                     "type": "liability"},
+                    {"id": 1, "name": 1, "code": 1, "type": 1},
+                )
+                if not acct:
+                    # Override doesn't exist / wrong type — fall through
+                    # to the canonical default so the split still posts.
+                    acct = await _resolve_semantic(principal_semantic_default)
+            else:
+                acct = await _resolve_semantic(principal_semantic_default)
+        else:
+            acct = await _resolve_semantic(semantic)
+
+        if not acct or not acct.get("id"):
+            unresolved.append(f"{label or '(unlabeled)'} ${amt:.2f}")
+            continue
+
+        splits.append({
+            "amount":                amt * txn_sign,
+            "category_account_id":   acct["id"],
+            "category_account_name": acct.get("name") or "",
+            "category_account_code": acct.get("code") or "",
+            "description":           label or acct.get("name") or "",
+            "bucket":                key,  # for reporting/audit
+        })
+
+    if not splits:
+        # Nothing resolved — fall back to the stash-only path so the
+        # bookkeeper can pick it up on the pro side.
+        return await _handle_generic_finding(item, batch,
+                                              answer=answer, payload=payload)
+
+    # Sanity: buckets must sum (roughly) to the transaction amount. A
+    # small (<0.02) rounding delta is acceptable; anything bigger, we
+    # log and continue — the client's split is what they explicitly
+    # confirmed, so we don't refuse to post.
+    split_sum = round(sum(abs(s["amount"]) for s in splits), 2)
+    if abs(split_sum - txn_amount_abs) > 0.02:
+        logger.warning(
+            "liability_split: sum of buckets (%.2f) does not match txn "
+            "amount (%.2f) on txn %s — posting anyway per client confirm",
+            split_sum, txn_amount_abs, txn.get("id"),
+        )
+
+    now = _now_iso()
+    lender_name = (payload.get("lender_name") or "").strip()
+    narrative = (payload.get("narrative") or "").strip()
+
+    update_set = {
+        "splits":                 splits,
+        "posted":                 True,
+        "human_reviewed":         True,
+        "needs_review":           False,
+        # Splits win — clear any prior single-category stamp so the
+        # ledger doesn't double-count.
+        "category_account_id":    None,
+        "category_account_code":  None,
+        "category_account_name":  None,
+        "split_source":           "client_review_liability",
+        "split_narrative":        narrative,
+        "liability_statement_type": statement_type,
+        "liability_lender_name":  lender_name,
+        "updated_at":             now,
+    }
+    await db.transactions.update_one(
+        {"id": txn["id"], "company_id": company_id},
+        {"$set": update_set},
+    )
+
+    # Invalidate dashboard cache so the CPA sees the new split
+    # immediately without a manual refresh.
+    try:
+        from routes.transactions import _invalidate_dash
+        await _invalidate_dash(company_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+    await _close_source_finding(item, resolved_by="client:answered")
+    if item.get("source_collection") == "agent_findings":
+        await db.agent_findings.update_one(
+            {"id": item["source_id"]},
+            {"$set": {
+                "client_answer":       answer,
+                "client_answered_at":  now,
+                "meta.client_payload": payload or {},
+            }},
+        )
+
+    # Detail line for the summary bubble — the client sees the exact
+    # posting so there's zero ambiguity.
+    bit_parts = [
+        f"{s['description']} ${abs(s['amount']):,.2f} → {s['category_account_name']}"
+        for s in splits
+    ]
+    detail = f"Split ${txn_amount_abs:,.2f} into: {', '.join(bit_parts)}."
+    if unresolved:
+        detail += (f" (Skipped {len(unresolved)} unresolved bucket"
+                   f"{'s' if len(unresolved) != 1 else ''}: "
+                   + ", ".join(unresolved) + ")")
+
+    return {
+        "action_taken":  "liability_split",
+        "detail":        detail,
+        "txn_id":        txn["id"],
+        "statement_type": statement_type,
+        "splits":        [{"amount":        s["amount"],
+                            "account_id":    s["category_account_id"],
+                            "account_name":  s["category_account_name"],
+                            "account_code":  s["category_account_code"],
+                            "bucket":        s["bucket"]}
+                           for s in splits],
+        "auto_created":  auto_created,
+        "unresolved":    unresolved,
+    }
+
+
 _HANDLERS = {
     cr.ITEM_UNCATEGORIZED:      _handle_uncategorized,
     cr.ITEM_VENDOR_MEMO:        _handle_vendor_memo,
@@ -1307,10 +1986,11 @@ _HANDLERS = {
     cr.ITEM_RECURRING:          _handle_generic_finding,
     cr.ITEM_SETUP:              _handle_generic_finding,
     cr.ITEM_SPLIT:              _handle_generic_finding,
-    cr.ITEM_LIABILITY_SPLIT:    _handle_generic_finding,
+    cr.ITEM_LIABILITY_SPLIT:    _handle_liability_payment,
     cr.ITEM_IRS_MEALS:          _handle_irs_substantiation,
     cr.ITEM_IRS_TRAVEL:         _handle_irs_substantiation,
     cr.ITEM_OWNER_DRAW:         _handle_owner_draw,
+    cr.ITEM_DEPOSIT:            _handle_deposit,
     cr.ITEM_AI_CLEANUP:         _handle_ai_cleanup,
 }
 

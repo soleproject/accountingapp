@@ -19,6 +19,7 @@ authorization is possible.
 from __future__ import annotations
 import base64
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -471,7 +472,6 @@ _W9_LINK = "https://www.irs.gov/pub/irs-pdf/fw9.pdf"
 
 
 def _valid_email(s: str) -> bool:
-    import re
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (s or "").strip()))
 
 
@@ -819,6 +819,290 @@ async def list_contacts_for_review(token: str, q: str | None = None):
     ]}
 
 
+class _CreateLiabilityIn(BaseModel):
+    name: str
+    # Optional — auto-assigned from the 2200-2999 block when blank.
+    code: Optional[str] = None
+    # Canonical Wave-style detail_type (e.g. "loan_and_line_of_credit",
+    # "credit_card", "other_short_term_liability"). Required so the
+    # balance sheet groups the account correctly.
+    detail_type: Optional[str] = None
+    # Legacy field — kept for callers that still pass a subtype-only
+    # value. Ignored when `detail_type` is present.
+    subtype: Optional[str] = None
+    # Explicit parent — when null/blank, we auto-resolve the canonical
+    # parent (Loans Payable / Credit Cards Payable) if the name/subtype
+    # qualifies.
+    parent_account_id: Optional[str] = None
+
+
+@router.post("/{token}/accounts/liability")
+async def create_liability_account_for_review(token: str, inp: _CreateLiabilityIn):
+    """Token-scoped inline creation of a Liability CoA account. Used by
+    the Deposit → Loan received flow so the client can mint a new
+    account (e.g. "Vehicle Loan — Toyota") without leaving the
+    check-in wizard or requiring firm auth. Mirrors the firm-side "New
+    Account" modal shape (code / name / sub-type / sub-account of).
+    Auto-parents under the canonical "Loans Payable" / "Credit Cards
+    Payable" bucket when no explicit parent is passed and the
+    name/subtype qualifies. Auto-assigns a free code in the liability
+    block (2200-2999) when `code` is blank."""
+    from account_normalize import normalize_account_fields
+
+    batch = await _resolve_batch(token)
+    company_id = batch["company_id"]
+    name = (inp.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Account name is required.")
+    if len(name) > 100:
+        raise HTTPException(400, "Account name is too long (100 char max).")
+
+    # Snap sub-type/detail_type to canonical Wave keys — same
+    # normalizer the firm-side create endpoint uses so the balance
+    # sheet renders the account in the right group.
+    caller_dt = (inp.detail_type or "").strip() or None
+    caller_st = (inp.subtype or "").strip() or None
+    subtype, detail_type = normalize_account_fields(
+        acct_type="liability", name=name,
+        subtype=caller_st, detail_type=caller_dt,
+    )
+    if not detail_type:
+        # Fallback so `list_accounts_for_review` doesn't render a
+        # groupless orphan. "Other Long-Term Liability" is the safest
+        # default for the Loan-received flow.
+        detail_type = "other_long_term_liability"
+        subtype = "long_term_liability"
+
+    # Reject exact-name duplicates so the picker doesn't grow a forest of
+    # "Vehicle Loan" / "Vehicle Loan " variants when the client hits
+    # Save twice on a flaky network.
+    import re as _re
+    name_norm = _re.sub(r"\s+", " ", name).lower()
+    async for existing in db.accounts.find(
+        {"company_id": company_id, "type": "liability"},
+        {"id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1,
+         "detail_type": 1, "parent_account_id": 1},
+    ):
+        if _re.sub(r"\s+", " ", (existing.get("name") or "").strip()).lower() == name_norm:
+            return {
+                "id": existing["id"], "name": existing.get("name") or "",
+                "code": existing.get("code") or "",
+                "type": "liability",
+                "subtype": existing.get("subtype") or "",
+                "detail_type": existing.get("detail_type") or "",
+                "parent_account_id": existing.get("parent_account_id"),
+                "reused": True,
+            }
+
+    # Resolve parent: explicit override wins; else auto-parent when the
+    # name/subtype qualifies (loan/HELOC/credit card).
+    parent_id = (inp.parent_account_id or "").strip() or None
+    if parent_id:
+        par = await db.accounts.find_one(
+            {"id": parent_id, "company_id": company_id, "type": "liability"},
+            {"id": 1, "parent_account_id": 1})
+        if not par:
+            raise HTTPException(400, "Parent account not found or wrong type.")
+        if par.get("parent_account_id"):
+            raise HTTPException(400, "Parent must be a top-level account.")
+    else:
+        from routes.accounts import _resolve_liability_parent
+        parent_id = await _resolve_liability_parent(company_id, name, subtype or "")
+
+    # Code: user-supplied wins (uniqueness enforced); else auto-assign.
+    supplied_code = (inp.code or "").strip() or None
+    used: set[str] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id, "code": {"$exists": True}},
+        {"code": 1},
+    ):
+        used.add(str(a.get("code") or ""))
+    if supplied_code:
+        if supplied_code in used:
+            raise HTTPException(400, f"Code {supplied_code} is already used.")
+        code = supplied_code
+    else:
+        code = None
+        for n in range(2200, 3000, 10):
+            if str(n) in ("2100", "2500"):
+                continue
+            if str(n) not in used:
+                code = str(n); break
+        if not code:
+            for n in range(2200, 3000):
+                if str(n) not in used:
+                    code = str(n); break
+
+    aid = str(uuid.uuid4()); now = _now_iso()
+    doc = {
+        "id": aid, "company_id": company_id, "code": code, "name": name,
+        "type": "liability", "subtype": subtype or "",
+        "detail_type": detail_type,
+        "active": True, "balance": 0.0,
+        "parent_account_id": parent_id,
+        "created_at": now, "updated_at": now,
+        "source": "client_review_loan_picker",
+    }
+    await db.accounts.insert_one(doc)
+    return {
+        "id": aid, "name": name, "code": code,
+        "type": "liability",
+        "subtype": subtype or "",
+        "detail_type": detail_type,
+        "parent_account_id": parent_id,
+        "reused": False,
+    }
+
+
+# Code block per account type, used to auto-assign a free code when
+# the caller doesn't supply one. Ranges mirror the seeded DEFAULT_COA
+# so hand-built lines cluster with their neighbors.
+_CODE_BLOCK_BY_TYPE: dict[str, tuple[int, int]] = {
+    "asset":     (1300, 1999),
+    "liability": (2200, 2999),
+    "equity":    (3300, 3999),
+    "income":    (4300, 4999),
+    "revenue":   (4300, 4999),
+    "expense":   (6100, 8999),
+    "cogs":              (5100, 5999),
+    "cost_of_goods_sold": (5100, 5999),
+}
+
+
+class _CreateAccountIn(BaseModel):
+    # Type must be one of the standard buckets — this endpoint
+    # deliberately does NOT allow "bank" / "credit_card" / etc.
+    # sub-types (they need a bank account setup flow).
+    type: str
+    name: str
+    code: Optional[str] = None
+    detail_type: Optional[str] = None
+    subtype: Optional[str] = None
+    parent_account_id: Optional[str] = None
+
+
+@router.post("/{token}/accounts")
+async def create_account_for_review(token: str, inp: _CreateAccountIn):
+    """Token-scoped inline creation of a CoA account of ANY standard
+    type (asset / liability / equity / income / expense / cogs). Used
+    by the Liability Payment "Change" affordance on each bucket so
+    the client can mint a specific expense/asset account (e.g.
+    "Vehicle Insurance", "Prepaid Property Tax") without leaving the
+    check-in wizard. Auto-assigns a free code in the type's block
+    when blank; auto-parents under a canonical bucket if the name /
+    subtype qualifies (currently only wired for liability — other
+    types get inserted top-level unless an explicit parent is
+    passed)."""
+    from account_normalize import normalize_account_fields
+
+    batch = await _resolve_batch(token)
+    company_id = batch["company_id"]
+
+    atype = (inp.type or "").strip().lower()
+    if atype not in _CODE_BLOCK_BY_TYPE:
+        raise HTTPException(400, f"Unsupported account type: {atype!r}. "
+                                  "Use one of: asset, liability, equity, "
+                                  "income, expense, cogs.")
+    # Route liability creates through the specialized endpoint's
+    # logic so all the parent-bucket / detail_type policies stay
+    # consistent (loan sub-accounts nest under Loans Payable, etc.).
+    if atype == "liability":
+        return await create_liability_account_for_review(
+            token,
+            _CreateLiabilityIn(
+                name=inp.name, code=inp.code,
+                detail_type=inp.detail_type, subtype=inp.subtype,
+                parent_account_id=inp.parent_account_id,
+            ),
+        )
+
+    name = (inp.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Account name is required.")
+    if len(name) > 100:
+        raise HTTPException(400, "Account name is too long (100 char max).")
+
+    subtype, detail_type = normalize_account_fields(
+        acct_type=atype, name=name,
+        subtype=(inp.subtype or "").strip() or None,
+        detail_type=(inp.detail_type or "").strip() or None,
+    )
+
+    # Dedup by exact name within the same type — repeated "Save" on
+    # a flaky connection shouldn't multiply account rows.
+    name_norm = re.sub(r"\s+", " ", name).lower()
+    async for existing in db.accounts.find(
+        {"company_id": company_id, "type": atype},
+        {"id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1,
+         "detail_type": 1, "parent_account_id": 1},
+    ):
+        if re.sub(r"\s+", " ", (existing.get("name") or "").strip()).lower() == name_norm:
+            return {
+                "id": existing["id"], "name": existing.get("name") or "",
+                "code": existing.get("code") or "",
+                "type": atype,
+                "subtype": existing.get("subtype") or "",
+                "detail_type": existing.get("detail_type") or "",
+                "parent_account_id": existing.get("parent_account_id"),
+                "reused": True,
+            }
+
+    # Validate parent (if given) is same-type + top-level.
+    parent_id = (inp.parent_account_id or "").strip() or None
+    if parent_id:
+        par = await db.accounts.find_one(
+            {"id": parent_id, "company_id": company_id, "type": atype},
+            {"id": 1, "parent_account_id": 1})
+        if not par:
+            raise HTTPException(400, "Parent account not found or wrong type.")
+        if par.get("parent_account_id"):
+            raise HTTPException(400, "Parent must be a top-level account.")
+
+    # Code: user-supplied wins (uniqueness enforced); else auto-assign
+    # from the type's block.
+    lo, hi = _CODE_BLOCK_BY_TYPE[atype]
+    supplied_code = (inp.code or "").strip() or None
+    used: set[str] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id, "code": {"$exists": True}},
+        {"code": 1},
+    ):
+        used.add(str(a.get("code") or ""))
+    if supplied_code:
+        if supplied_code in used:
+            raise HTTPException(400, f"Code {supplied_code} is already used.")
+        code = supplied_code
+    else:
+        code = None
+        for n in range(lo, hi + 1, 10):   # prefer round decades
+            if str(n) not in used:
+                code = str(n); break
+        if not code:
+            for n in range(lo, hi + 1):
+                if str(n) not in used:
+                    code = str(n); break
+
+    aid = str(uuid.uuid4()); now = _now_iso()
+    doc = {
+        "id": aid, "company_id": company_id, "code": code, "name": name,
+        "type": atype, "subtype": subtype or "",
+        "detail_type": detail_type or "",
+        "active": True, "balance": 0.0,
+        "parent_account_id": parent_id,
+        "created_at": now, "updated_at": now,
+        "source": "client_review_generic_picker",
+    }
+    await db.accounts.insert_one(doc)
+    return {
+        "id": aid, "name": name, "code": code,
+        "type": atype,
+        "subtype": subtype or "",
+        "detail_type": detail_type or "",
+        "parent_account_id": parent_id,
+        "reused": False,
+    }
+
+
 @router.get("/{token}/accounts")
 async def list_accounts_for_review(token: str):
     """Chart-of-accounts for the batch's company — used by the check-
@@ -828,7 +1112,8 @@ async def list_accounts_for_review(token: str):
     batch = await _resolve_batch(token)
     cursor = db.accounts.find({
         "company_id": batch["company_id"],
-    }, {"id": 1, "name": 1, "type": 1, "code": 1, "retired_at": 1})
+    }, {"id": 1, "name": 1, "type": 1, "code": 1,
+        "retired_at": 1, "parent_account_id": 1})
     rows = await cursor.to_list(1000)
     exclude_codes = {"9999", "6999", "4999"}
     out = []
@@ -843,6 +1128,7 @@ async def list_accounts_for_review(token: str):
             "name": a.get("name") or "",
             "type": a.get("type") or "",
             "code": code,
+            "parent_account_id": a.get("parent_account_id"),
         })
     out.sort(key=lambda r: (r["code"] or "999", r["name"]))
     return {"accounts": out}
@@ -1906,6 +2192,118 @@ ITEM_TYPE_LABEL = {
 }
 
 
+async def _semantic_lender_to_liability_account(
+    company_id: str, lender_name: str,
+) -> Optional[dict]:
+    """Ask Claude Haiku whether `lender_name` (extracted from a
+    statement — e.g. "Wells Fargo Home Mortgage") refers to the same
+    real-world institution as any of the company's existing liability
+    sub-accounts. Returns the account dict `{id, name, code}` when the
+    LLM is confident (>=0.75), else None.
+
+    Same pattern as `routes.accounts._semantic_contact_match` — catches
+    institution rebrands ("Chase Auto" ↔ "JPMorgan Chase Auto Loan"),
+    DBA variants ("Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage
+    — 123 Main"), and casual spellings ("BofA" ↔ "Bank of America
+    Auto Loan"). We only consider SUB-accounts (has parent_account_id)
+    — the canonical "Loans Payable" / "Credit Cards Payable" parents
+    are catch-alls, not specific loan records worth pre-selecting.
+    """
+    lender_name = (lender_name or "").strip()
+    if not lender_name:
+        return None
+
+    # Candidate pool: liability sub-accounts on this company's CoA.
+    # Skip retired accounts and the canonical parent buckets.
+    candidates: list[dict] = []
+    async for a in db.accounts.find(
+        {"company_id": company_id, "type": "liability"},
+        {"id": 1, "name": 1, "code": 1, "parent_account_id": 1,
+         "subtype": 1, "detail_type": 1, "retired_at": 1},
+    ):
+        if a.get("retired_at"):
+            continue
+        if not a.get("parent_account_id"):
+            # Top-level (parent) — skip. We want the specific loan
+            # record, not the catch-all "Loans Payable" bucket.
+            continue
+        candidates.append({
+            "id": a["id"],
+            "name": a.get("name") or "",
+            "code": a.get("code") or "",
+            "subtype": a.get("subtype") or "",
+            "detail_type": a.get("detail_type") or "",
+        })
+
+    if not candidates:
+        return None
+
+    # Fast path: exact case-insensitive name match — no need to burn a
+    # Haiku call when the lender name IS the account name.
+    lender_norm = re.sub(r"\s+", " ", lender_name).lower()
+    for c in candidates:
+        if re.sub(r"\s+", " ", c["name"]).lower() == lender_norm:
+            return c
+
+    # Bounded prompt — keep costs sane on large CoAs.
+    cands = candidates[:40]
+    lines = "\n".join(
+        f"- id={c['id']} · name={c['name']}"
+        + (f" · code={c['code']}" if c.get("code") else "")
+        + (f" · subtype={c['subtype']}" if c.get("subtype") else "")
+        for c in cands
+    )
+    system = (
+        "You are helping a bookkeeping app auto-route a mortgage / "
+        "credit-card / auto-loan payment to the correct liability "
+        "sub-account on the company's chart of accounts. "
+        "Judge SEMANTICALLY, not by string similarity alone. Treat "
+        "institution rebrands (\"Chase Auto\" ↔ \"JPMorgan Chase Auto "
+        "Loan\"), DBA variants (\"Wells Fargo Home Mortgage\" ↔ "
+        "\"Wells Fargo Mortgage — 123 Main\"), abbreviations (\"BofA\" "
+        "↔ \"Bank of America\"), and legal-form suffixes (LLC, N.A., "
+        "Inc, Corp) as SAME. Distinct institutions (\"Chase\" vs "
+        "\"Chase Freedom Credit Card\" — probably a specific card "
+        "sub-account) can still match if it's clearly the same lender. "
+        "When multiple candidates plausibly match, prefer the one "
+        "whose name most specifically matches the lender's product "
+        "line (mortgage → mortgage sub-acct, auto → auto sub-acct). "
+        "When in doubt, return null — do NOT force a match. "
+        "Reply with STRICT JSON only, no prose, no code fences."
+    )
+    user = (
+        f"LENDER (from statement): \"{lender_name}\"\n\n"
+        f"EXISTING LIABILITY SUB-ACCOUNTS:\n{lines}\n\n"
+        "Respond as:\n"
+        "{ \"match_id\": \"<candidate id or null>\", "
+        "\"confidence\": <0.0-1.0>, "
+        "\"reason\": \"<one short line>\" }"
+    )
+    try:
+        from ai_service import _new_chat, _extract_json, MODEL_HAIKU
+        from llm_client import UserMessage
+        chat = _new_chat(system, f"lender-match-{company_id}",
+                          model_name=MODEL_HAIKU,
+                          feature="lender-semantic-match",
+                          company_id=company_id)
+        text = await chat.send_message(UserMessage(text=user))
+    except Exception:  # noqa: BLE001
+        return None
+    parsed = _extract_json(text or "") or {}
+    mid  = parsed.get("match_id")
+    conf = parsed.get("confidence")
+    try:
+        conf = float(conf) if conf is not None else 0.0
+    except (TypeError, ValueError):
+        conf = 0.0
+    if not mid or mid in ("null", "None"):
+        return None
+    if conf < 0.75:
+        return None
+    valid = {c["id"]: c for c in cands}
+    return valid.get(mid)
+
+
 @router.post("/{token}/items/{item_id}/upload")
 async def post_upload(
     token: str, item_id: str,
@@ -2115,6 +2513,39 @@ async def post_upload(
         except Exception:  # noqa: BLE001
             liab_analysis = None
         if liab_analysis:
+            # Auto-match the extracted lender name to an existing
+            # liability sub-account on the company's CoA — if we're
+            # confident, stamp `principal_account_id` on the Principal
+            # bucket so the client doesn't have to click "Change" in
+            # the LiabilityBreakdown UI. Semantic match (Haiku) handles
+            # "Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage —
+            # 123 Main", "Chase Auto" ↔ "JPMorgan Chase Auto Loan",
+            # etc. Silently no-ops when no confident match exists —
+            # the user picks manually via the "Change" affordance.
+            lender = (liab_analysis.get("lender_name") or "").strip()
+            if lender:
+                try:
+                    matched = await _semantic_lender_to_liability_account(
+                        batch["company_id"], lender,
+                    )
+                except Exception:  # noqa: BLE001
+                    matched = None
+                if matched and matched.get("id"):
+                    liab_analysis["matched_principal_account"] = {
+                        "id":   matched["id"],
+                        "name": matched.get("name") or "",
+                        "code": matched.get("code") or "",
+                    }
+                    # Also stamp onto the Principal bucket so the
+                    # frontend LiabilityBreakdown picks it up on first
+                    # render (matches the shape the "Change" affordance
+                    # already produces via editBucket).
+                    for b in (liab_analysis.get("buckets") or []):
+                        label = (b.get("label") or "").lower()
+                        if "principal" in label:
+                            b["principal_account_id"] = matched["id"]
+                            b["account_name"] = matched.get("name") or b.get("account_name") or ""
+                            break
             resp["liability_analysis"] = liab_analysis
             await db.client_review_batches.update_one(
                 {"id": batch["id"], "items.item_id": item_id},
@@ -2384,6 +2815,551 @@ async def open_latest_batch_for_company(
         raise HTTPException(404, "No open review session for this company")
     return RedirectResponse(url=f"/client-review/{batch['client_token']}",
                             status_code=302)
+
+
+# --------------------------------------------------------------------------
+# Missing Receipt · Dismiss ("no receipt needed — drop from Quick Check-in")
+# --------------------------------------------------------------------------
+@router.post("/{token}/items/{item_id}/dismiss-receipt")
+async def dismiss_missing_receipt(token: str, item_id: str):
+    """Client-initiated dismissal of a Missing-Receipt item.
+
+    Marks the underlying transaction as intentionally receipt-free
+    (``receipt_dismissed: True``) so future receipt-required agent
+    scans skip it, closes the source agent_finding, and stamps the
+    batch item as answered so the queue advances past it.
+
+    Type-3 items only. No file upload, no GL mutation.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("item_type") != 3:
+        raise HTTPException(400, "Dismiss only applies to Missing Receipt items")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+
+    now = _now_iso()
+    company_id = batch["company_id"]
+    meta = (item.get("context") or {}).get("meta") or {}
+    txn_id = meta.get("txn_id")
+
+    # Prefer the explicit meta.txn_id (set by the seed + real detectors);
+    # fall back to fuzzy amount+date match to mirror
+    # `_handle_missing_receipt`'s resolver.
+    txn = None
+    if txn_id:
+        txn = await db.transactions.find_one(
+            {"id": txn_id, "company_id": company_id}, {"id": 1},
+        )
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount")
+        date = meta.get("txn_date")
+        q: dict = {"company_id": company_id}
+        if amt is not None:
+            try:
+                a = round(abs(float(amt)), 2)
+                q["$expr"] = {"$eq": [{"$round": [{"$abs": "$amount"}, 2]}, a]}
+            except (TypeError, ValueError):
+                pass
+        if date:
+            q["date"] = date
+        txn = await db.transactions.find_one(q, {"id": 1})
+
+    if txn:
+        await db.transactions.update_one(
+            {"id": txn["id"], "company_id": company_id},
+            {"$set": {
+                "receipt_dismissed":    True,
+                "receipt_dismissed_at": now,
+                "receipt_dismissed_by": "client",
+                "updated_at":           now,
+            }},
+        )
+
+    # Close the source agent_finding so the pro Cockpit reflects the
+    # client's dismissal too.
+    src_coll = item.get("source_collection")
+    if src_coll == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set": {"status":       "resolved",
+                      "resolved_at":  now,
+                      "resolved_by":  "client:receipt_dismissed",
+                      "resolve_note": "Client marked no receipt needed",
+                      "client_answer":      "Dismiss receipt",
+                      "client_answered_at": now,
+                      "meta.matched_txn_id": (txn or {}).get("id"),
+                      "updated_at":   now}},
+        )
+
+    # Stamp the batch item so the queue moves on.
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {
+            "items.$.answered_at":         now,
+            "items.$.answer":              "Dismiss receipt",
+            "items.$.action_taken":        "receipt_dismissed",
+            "items.$.action_detail":       "Client dismissed — no receipt required.",
+            "items.$.answered_by_client":  True,
+            "updated_at":                  now,
+        },
+         "$inc": {"answer_count": 1}},
+    )
+    return {"ok": True, "txn_id": (txn or {}).get("id"),
+            "action_taken": "receipt_dismissed"}
+
+
+# --------------------------------------------------------------------------
+# Undo / re-open an answered item — restores the underlying transaction /
+# bill / invoice / payment state so the client can redo the answer.
+# --------------------------------------------------------------------------
+@router.post("/{token}/items/{item_id}/reopen")
+async def reopen_review_item(token: str, item_id: str):
+    """Client-initiated undo of a previously-answered Quick Check-in
+    item. Reverses whatever side effects the answer produced
+    (payment doc, transaction category, split rows, receipt-dismiss
+    flag, bill/invoice balance) and clears the item's answered state
+    so it re-appears in the wizard queue.
+
+    Reversal is action-taken-aware:
+      * ``bill_payment_applied`` / ``invoice_payment_applied`` →
+        delegates to ``routes.transactions._reverse_and_delete_payment``
+        (restores balance_due/status on every applied doc, reverses
+        inventory JE for inventory-tracked bills, deletes the
+        ``db.payments`` row, and restores the transaction's pre-link
+        category snapshot).
+      * ``deposit_classified`` → clears category on the underlying
+        transaction, unposts it, and (if it was a Refund that
+        re-opened a bill) unwinds the last balance_reopened_by_refund
+        history entry.
+      * ``liability_split`` → wipes ``splits[]`` and liability metadata
+        off the underlying transaction, unposts it.
+      * ``receipt_dismissed`` → clears ``receipt_dismissed*`` fields
+        on the underlying transaction.
+      * All actions also reopen the source ``agent_findings`` row
+        (``status`` back to ``open``, clears ``resolved_*`` /
+        ``dismissed_*``) and reset the batch item.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if not (item.get("answered_at") or item.get("deferred")):
+        raise HTTPException(409, "Item is not answered yet — nothing to undo")
+
+    company_id = batch["company_id"]
+    action = (item.get("action_taken") or "").lower()
+    payload = item.get("answered_payload") or {}
+    ctx = item.get("context") or {}
+    meta = ctx.get("meta") or {}
+    now = _now_iso()
+
+    reversed_bits: list[str] = []
+
+    # --- 1. Reverse the transaction-level side effects. ---
+    if action in ("bill_payment_applied", "invoice_payment_applied"):
+        # Look up the underlying transaction and delegate to the
+        # canonical reverse-and-delete helper that receive_payment
+        # itself uses when a link is re-linked. This restores the
+        # bills/invoices' balance_due & status, reverses any
+        # inventory JE, deletes the db.payments doc, and restores
+        # the transaction's pre-link category snapshot.
+        txn_id = None
+        # tid is stashed on the finding's meta at link-time
+        if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if not txn_id:
+            txn_id = ctx.get("txn_id") or meta.get("txn_id")
+        if txn_id:
+            txn = await db.transactions.find_one(
+                {"id": txn_id, "company_id": company_id},
+                {"id": 1, "linked_payment_id": 1,
+                 "_pre_link_category_id":   1,
+                 "_pre_link_category_code": 1,
+                 "_pre_link_category_name": 1,
+                 "_pre_link_posted":        1},
+            )
+            pid = (txn or {}).get("linked_payment_id")
+            if pid:
+                try:
+                    from routes.transactions import _reverse_and_delete_payment
+                    await _reverse_and_delete_payment(company_id, pid)
+                    reversed_bits.append(f"reversed payment {pid[:8]}")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("reopen: payment reverse failed: %s", exc)
+            # Clear the txn's link-target fields and restore the
+            # pre-link category snapshot (mirrors the explicit-unlink
+            # branch of `link_transaction`). Without this the txn
+            # keeps pointing at the deleted payment and shows a
+            # stale "Accounts Payable" category.
+            if txn:
+                unset_fields: dict[str, str] = {
+                    "linked_payment_id":         "",
+                    "linked_bill_id":            "",
+                    "linked_invoice_id":         "",
+                }
+                set_fields: dict[str, object] = {
+                    "human_reviewed": False,
+                    "needs_review":   True,
+                    "updated_at":     now,
+                }
+                pre = txn.get("_pre_link_category_id")
+                if pre:
+                    set_fields["category_account_id"]   = pre
+                    set_fields["category_account_code"] = txn.get("_pre_link_category_code") or ""
+                    set_fields["category_account_name"] = txn.get("_pre_link_category_name") or ""
+                    set_fields["posted"]                = bool(txn.get("_pre_link_posted"))
+                    unset_fields["_pre_link_category_id"]   = ""
+                    unset_fields["_pre_link_category_code"] = ""
+                    unset_fields["_pre_link_category_name"] = ""
+                    unset_fields["_pre_link_posted"]        = ""
+                else:
+                    # No snapshot (shouldn't happen for a
+                    # freshly-linked txn, but be safe) — just clear
+                    # the category so the txn re-enters the review
+                    # queue as uncategorized.
+                    unset_fields["category_account_id"]   = ""
+                    unset_fields["category_account_code"] = ""
+                    unset_fields["category_account_name"] = ""
+                    set_fields["posted"] = False
+                await db.transactions.update_one(
+                    {"id": txn_id, "company_id": company_id},
+                    {"$set": set_fields, "$unset": unset_fields},
+                )
+                reversed_bits.append("cleared txn link + restored pre-link category")
+
+    elif action == "deposit_classified":
+        # Find the transaction and undo the classification. If this
+        # deposit was a Refund that re-opened a paid bill, unwind
+        # the bill re-open too by consuming the most recent
+        # `balance_reopened_by_refund` history entry.
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            txn = await db.transactions.find_one(
+                {"id": txn_id, "company_id": company_id},
+                {"id": 1, "linked_bill_id": 1},
+            )
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "posted":               False,
+                    "human_reviewed":       False,
+                    "needs_review":         True,
+                    "updated_at":           now,
+                },
+                 "$unset": {
+                    "category_account_id":    "",
+                    "category_account_name":  "",
+                    "category_account_code":  "",
+                    "ai_source":              "",
+                    "ai_comment":             "",
+                    "deposit_classification": "",
+                    "linked_bill_id":         "",
+                }},
+            )
+            reversed_bits.append("cleared deposit classification")
+            # If a bill was re-opened by this refund, roll back its
+            # balance_due using the pushed history entry.
+            bill_id = (txn or {}).get("linked_bill_id") \
+                       or (payload.get("bill_id"))
+            if bill_id and (payload.get("flow") or "").lower() == "refund":
+                bill = await db.bills.find_one(
+                    {"id": bill_id, "company_id": company_id},
+                    {"balance_due": 1, "total": 1, "history": 1, "status": 1},
+                )
+                if bill:
+                    hist = list((bill.get("history") or []))
+                    # Pop the most-recent `balance_reopened_by_refund`
+                    # entry — its delta tells us how much to reduce
+                    # the current balance_due by.
+                    for idx in range(len(hist) - 1, -1, -1):
+                        if (hist[idx].get("action") == "balance_reopened_by_refund"
+                                and float(hist[idx].get("delta") or 0) > 0):
+                            delta = float(hist[idx].get("delta") or 0)
+                            new_bal = round(max(0.0, float(bill.get("balance_due") or 0) - delta), 2)
+                            new_status = "paid" if new_bal <= 0.005 else (
+                                "partial" if new_bal < float(bill.get("total") or 0) else "unpaid"
+                            )
+                            hist.pop(idx)
+                            hist.append({
+                                "at":     now,
+                                "action": "refund_reversed_by_client_undo",
+                                "delta":  -delta,
+                                "note":   "Client undid the refund via Quick Check-in.",
+                            })
+                            await db.bills.update_one(
+                                {"id": bill_id, "company_id": company_id},
+                                {"$set": {"balance_due": new_bal,
+                                          "status":       new_status,
+                                          "history":      hist,
+                                          "updated_at":   now}},
+                            )
+                            reversed_bits.append(f"restored bill balance ${new_bal:.2f}")
+                            break
+
+    elif action == "liability_split":
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "posted":         False,
+                    "human_reviewed": False,
+                    "needs_review":   True,
+                    "updated_at":     now,
+                },
+                 "$unset": {
+                    "splits":                    "",
+                    "split_source":              "",
+                    "split_narrative":           "",
+                    "liability_statement_type":  "",
+                    "liability_lender_name":     "",
+                    "category_account_id":       "",
+                    "category_account_name":     "",
+                    "category_account_code":     "",
+                }},
+            )
+            reversed_bits.append("cleared liability split")
+
+    elif action == "receipt_dismissed":
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$unset": {"receipt_dismissed":     "",
+                             "receipt_dismissed_at":  "",
+                             "receipt_dismissed_by":  ""},
+                 "$set":   {"updated_at": now}},
+            )
+            reversed_bits.append("un-dismissed receipt")
+
+    # --- 2. Reopen the source agent_findings row. ---
+    if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set":   {"status":     "open",
+                        "updated_at": now},
+             "$unset": {"resolved_at":         "",
+                        "resolved_by":         "",
+                        "resolve_note":        "",
+                        "dismissed_at":        "",
+                        "dismissed_by":        "",
+                        "client_deferred":     "",
+                        "client_deferred_at":  "",
+                        "deferred_note":       "",
+                        "client_answer":       "",
+                        "client_answered_at":  ""}},
+        )
+        reversed_bits.append("reopened finding")
+
+    # --- 3. Reset the batch item — the wizard picks it back up. ---
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set":   {"items.$.state":       "gathering",
+                    "items.$.status":      "open",
+                    "updated_at":          now},
+         "$unset": {"items.$.answered_at":        "",
+                    "items.$.answer":             "",
+                    "items.$.action_taken":       "",
+                    "items.$.action_detail":      "",
+                    "items.$.answered_payload":   "",
+                    "items.$.answered_by_client": "",
+                    "items.$.deferred":           "",
+                    "items.$.result":             ""}},
+    )
+
+    # Invalidate any dashboard cache so reports reflect the undo.
+    try:
+        from routes.transactions import _invalidate_dash
+        await _invalidate_dash(company_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "ok":               True,
+        "action_reversed":  action or "answered",
+        "reversed_bits":    reversed_bits,
+        "item_id":          item_id,
+    }
+
+
+# --------------------------------------------------------------------------
+# Deposit · Link-to-invoice (multi-invoice apply) — client-facing mirror
+# of `/companies/{cid}/transactions/{tid}/receive-payment`
+# --------------------------------------------------------------------------
+@router.get("/{token}/invoices/open")
+async def list_open_invoices_for_review(token: str):
+    """Token-scoped mirror of ``/companies/{cid}/invoices/open`` used by
+    the client-facing Deposit → Customer payment → Link to invoice
+    modal (Feb 2026). Returns every open invoice on the batch's
+    company sorted oldest-first (FIFO)."""
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    docs = await db.invoices.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("issue_date", 1).to_list(2000)
+    return {"invoices": [
+        {"id": d["id"], "number": d.get("number") or "",
+         "issue_date": d.get("issue_date") or d.get("date") or "",
+         "due_date": d.get("due_date") or "",
+         "total": float(d.get("total") or 0),
+         "balance_due": float(d.get("balance_due") or 0),
+         "status": d.get("status") or "",
+         "contact_id": d.get("contact_id"),
+         "contact_name": d.get("contact_name") or ""}
+        for d in docs
+    ]}
+
+
+@router.get("/{token}/bills/open")
+async def list_open_bills_for_review(token: str, include_paid: bool = False):
+    """Token-scoped mirror of ``/companies/{cid}/bills/open``.
+
+    ``include_paid=1`` also returns bills fully paid within the last
+    90 days — used by the Refund → Against a bill flow so a client
+    can credit a refund against a bill they already paid off (the
+    "vendor overpaid me back" scenario).
+    """
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+    open_docs = await db.bills.find({
+        "company_id": cid,
+        "balance_due": {"$gt": 0.005},
+        "status": {"$nin": ["paid", "void", "cancelled"]},
+    }).sort("date", 1).to_list(2000)
+    paid_docs: list[dict] = []
+    if include_paid:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+        paid_docs = await db.bills.find({
+            "company_id": cid,
+            "balance_due": {"$lte": 0.005},
+            "status": {"$nin": ["void", "cancelled"]},
+            "$or": [{"date": {"$gte": cutoff}},
+                    {"paid_date": {"$gte": cutoff}},
+                    {"updated_at": {"$gte": cutoff}}],
+        }).sort("date", -1).limit(500).to_list(500)
+
+    def _row(d: dict, is_paid: bool) -> dict:
+        return {
+            "id": d["id"], "number": d.get("number") or "",
+            "date": d.get("date") or "",
+            "due_date": d.get("due_date") or "",
+            "total": float(d.get("total") or 0),
+            "balance_due": float(d.get("balance_due") or 0),
+            "status": d.get("status") or "",
+            "is_paid": bool(is_paid),
+            "contact_id": d.get("contact_id") or d.get("vendor_id"),
+            "contact_name": d.get("contact_name") or d.get("vendor_name") or "",
+            "category_account_id": d.get("category_account_id"),
+        }
+    return {"bills": [_row(d, False) for d in open_docs] +
+                     [_row(d, True)  for d in paid_docs]}
+
+
+@router.post("/{token}/transactions/{tid}/receive-payment")
+async def client_receive_payment(
+    token: str, tid: str, payload: dict = Body(...),
+    item_id: str | None = None,
+):
+    """Token-scoped mirror of the multi-doc Receive/Pay endpoint used
+    by the client-side Deposit → Customer payment → Link to invoice
+    flow. Delegates to ``routes.transactions.receive_payment_multi``
+    via a synthetic superadmin user (auth is already covered by the
+    token → batch resolver).
+
+    If ``item_id`` is passed, we also close that batch item + agent
+    finding so the Quick Check-in queue advances past the deposit.
+    """
+    from routes import transactions as txn_routes
+    batch = await _resolve_batch(token)
+    cid = batch["company_id"]
+
+    # Validate the txn belongs to the batch's company before delegating.
+    txn = await db.transactions.find_one(
+        {"id": tid, "company_id": cid}, {"id": 1, "amount": 1},
+    )
+    if not txn:
+        raise HTTPException(404, "Transaction not in this company")
+
+    # Synthetic superadmin user so `require_company` passes without an
+    # actual pro JWT — the token itself is the authenticator here.
+    synthetic = {"id": f"client-review:{token[:8]}", "role": "superadmin"}
+    result = await txn_routes.receive_payment_multi(
+        cid, tid, payload, user=synthetic,
+    )
+
+    # Optionally close the associated batch item so `unfinished-count`
+    # decrements and the queue advances.
+    if item_id:
+        now = _now_iso()
+        item = next((i for i in (batch.get("items") or [])
+                     if i.get("item_id") == item_id), None)
+        # Sniff bill vs invoice from the payload so the audit trail
+        # says "bill_payment_applied" for AP flows and
+        # "invoice_payment_applied" for AR — Uncategorized→Bill and
+        # MissingReceipt→Bill both use this endpoint now.
+        # Prefer the enriched apps from the response (they carry
+        # bill_number / invoice_number + new_balance_due, which the
+        # frontend rehydration uses to render a nice audit chip on
+        # scroll-back). Fall back to the raw payload apps if the
+        # response didn't return them.
+        enriched_apps = (result or {}).get("payment", {}).get("applications") \
+                        or payload.get("applications") or []
+        apps = enriched_apps
+        is_bill = bool(apps and (apps[0].get("bill_id")))
+        doc_word = "bill" if is_bill else "invoice"
+        if item and not item.get("answered_at") and not item.get("deferred"):
+            await db.client_review_batches.update_one(
+                {"id": batch["id"], "items.item_id": item_id},
+                {"$set": {
+                    "items.$.answered_at":        now,
+                    "items.$.answer":             f"Link to {doc_word}",
+                    "items.$.action_taken":       f"{doc_word}_payment_applied",
+                    "items.$.action_detail":      f"Applied ${abs(float(txn.get('amount') or 0)):,.2f} across {doc_word}(s).",
+                    "items.$.answered_by_client": True,
+                    "items.$.answered_payload":   {"flow": ("vendor_payment" if is_bill else "customer_payment"),
+                                                    "sub_flow": f"link_{doc_word}",
+                                                    "applications": apps},
+                    "updated_at":                 now,
+                }, "$inc": {"answer_count": 1}},
+            )
+            if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+                await db.agent_findings.update_one(
+                    {"id": item["source_id"], "company_id": cid},
+                    {"$set": {"status":       "resolved",
+                              "resolved_at":  now,
+                              "resolved_by":  f"client:txn_linked_to_{doc_word}",
+                              "client_answer":       f"Link to {doc_word}",
+                              "client_answered_at":  now,
+                              "meta.matched_txn_id": tid}},
+                )
+    return result
+
+
+
+
+
 
 
 

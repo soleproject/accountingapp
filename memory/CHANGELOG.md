@@ -1,5 +1,188 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 12) — Answered items: "↺ Undo — reopen this one" ✅
+
+- **Feature**: Every rehydrated answered bubble now has a **↺ Undo — reopen this one** chip. Tapping it prompts for confirmation, reverses the underlying side effects, and re-opens the item in the wizard so the client can redo the answer.
+- **Backend** — new `POST /api/client-review/{token}/items/{item_id}/reopen`:
+  - Action-taken-aware reversal:
+    - `bill_payment_applied` / `invoice_payment_applied` → calls `routes.transactions._reverse_and_delete_payment` (restores bill/invoice `balance_due` + `status`, reverses inventory JE for inventory-tracked bills, deletes `db.payments` row) AND now also clears the transaction's `linked_payment_id` / `linked_bill_id` / `linked_invoice_id` and restores the `_pre_link_category_*` snapshot (matches the explicit-unlink path of `link_transaction`).
+    - `deposit_classified` → unsets category on the underlying txn, unposts, flags `needs_review`. If it was a Refund that re-opened a paid bill, unwinds the last `balance_reopened_by_refund` history entry and restores the bill's balance/status.
+    - `liability_split` → wipes `splits[]` and liability metadata off the txn, unposts.
+    - `receipt_dismissed` → clears `receipt_dismissed*` fields on the txn.
+  - Common: reopens the source `agent_findings` row (`status → open`, unsets `resolved_*` / `dismissed_*` / `client_deferred*`) and resets the batch item (`state → gathering`, unsets `answered_at` / `answer` / `action_taken` / `action_detail` / `answered_payload` / `answered_by_client` / `deferred`).
+  - Response: `{ok, action_reversed, reversed_bits: ["reversed payment abc12345", "cleared txn link + restored pre-link category"], item_id}` — for audit & debugging.
+- **Frontend** (`ClientReviewPage.jsx`):
+  - `hydrateMessages` now attaches `quickReplies: ["↺ Undo — reopen this one"]` to the answered bubble.
+  - New `reopenItem()` function: confirm dialog → `POST /reopen` → refetch batch → rehydrate messages with the reopened item → clear `justCompleted` and `input`.
+  - Main `onQuickReply` handler intercepts strings starting with `"↺ Undo"` and calls `reopenItem()` — placed BEFORE other quick-reply branches so it can't be shadowed.
+- **Verified end-to-end via curl**: apply $483.29 to bill HD-88410 → transaction becomes `posted:true`, `category:"Accounts Payable (A/P)"`, `linked_payment_id` set; bill balance $0/paid; payment doc exists. Then `POST /reopen` → payment deleted, bill balance $483.29/open, transaction back to `posted:false`, category cleared, `needs_review:true`, `linked_payment_id` gone — **exactly matching the pre-apply state**. Batch item back in `state:"gathering"`, `answered_at:null`.
+
+
+## 2026-02-21 (later 11) — Answered items: full rehydration on scroll-back ✅
+
+- **Problem**: When the client navigated back to an already-answered check-in item via the header chevrons, the confirmation bubble was a generic `"✓ Answered on YYYY-MM-DD — Your answer was submitted to your bookkeeper."` — even though the item had rich structured data (`action_taken`, `action_detail`, `answered_payload.applications[]`, attachments) about exactly what happened.
+- **Fix — `hydrateMessages(item)`** (`ClientReviewPage.jsx:625-696`): re-derives a specific human-readable summary from the structured fields:
+  - **Bill/invoice apply** → enumerates each application: `🔗 Linked to N bill(s):\n• $483.29 → BILL-HD-88410 · balance now $0.00`
+  - **Receipt dismissed** → `✕ Marked as receipt-not-needed and dropped from the queue.`
+  - **Deposit classified / liability split / categorized** → uses `action_detail` (already carries the full readout like `"Booked $12,400 as Loan received → Rocket Mortgage"` or `"Split $2,145.67 into: Principal $812.45 → Loan Payable, ..."`).
+  - **W-9 email sent** → `📧 W-9 request emailed to <addr>.`
+  - **Deferred (sent to bookkeeper)** → `📮 Sent to your bookkeeper — they'll take it from here.`
+  - **Receipt uploaded** (fallback when no richer action taken) → `📎 Receipt uploaded — <filename>`
+- **Fix — backend `client_receive_payment`** (`routes/client_review.py:3030`): stamps the ENRICHED applications array (with `bill_number` / `invoice_number` and `new_balance_due` from the `receive_payment_multi` response) onto `item.answered_payload.applications`, not the raw input. This is what powers the "BILL-HD-88410 · balance now $0.00" line.
+- **UI**: `ChatBubble` content now uses `whiteSpace: pre-wrap` so the multi-line summary renders each application on its own row.
+- **Verified via screenshot**: answered Home Depot uncategorized item now shows `✓ Answered on 2026-09-29 · 🔗 Linked to 1 bill: · • $483.29 → BILL-HD-88410 · balance now $0.00` in place of the generic message.
+
+
+## 2026-02-21 (later 10) — Uncategorized/Missing-Receipt → Bill: real payments + multi-select ✅
+
+**Two-in-one fix**: the Quick Check-in "Link to a bill" flow was using a simplified single-select picker (`LinkDocPicker`) that hit `/link-doc`. That endpoint mutated `bills.balance_due` directly but never inserted into `db.payments`. Since `routes/bills.py` recomputes `paid` from `db.payments` (and self-heals `balance_due` on every read), the bill would report "Total Paid $0 · No payments applied yet" on the very next load — while the check-in kept claiming success.
+
+**Fix**: Swap the picker for the rich `LinkModal` (already imported and used by Deposit → Customer payment). Its multi-doc `receive-payment` endpoint delegates to `routes.transactions.receive_payment_multi`, which:
+- Creates a real `db.payments` doc with `linked_bill_id` / `applications[]` / `source_transaction_id`.
+- Handles multi-select (pick 1..N bills in a single view with per-row apply amounts).
+- Auto-reconciles the totals so the applied amount == the withdrawal.
+
+**Changes**:
+- `ClientReviewPage.jsx`:
+  - `UncategorizedShortcuts`: pulls `singleTxnId` from `ctx.txn_id ?? ctx.meta.txn_id`. When present, opens `LinkModal` instead of `LinkDocPicker`. Grouped items (no single txn_id) still get the legacy picker.
+  - `MissingReceiptShortcuts`: same swap; `LinkModal` is opened with a negative amount so the modal shows the Bill tab by default.
+  - `onApplied` shim: translates `LinkModal`'s `{applications: [...], remaining, ...}` output into the legacy `onLinked({message, applied, new_balance, contact_name, doc_type})` contract so upstream chat-bubble + Continue-gate logic doesn't need to change.
+- `routes/client_review.py · client_receive_payment`: detects `bill_id` vs `invoice_id` in the applications array and now stamps `action_taken="bill_payment_applied"` / audit `resolved_by="client:txn_linked_to_bill"` for AP flows (previously hard-coded to invoice).
+- **Verified via curl end-to-end**: apply -$483.29 Home Depot txn to bill HD-88410 → `db.payments` doc created with proper `linked_bill_id` + `applications[]`; bill `balance_due` → 0, `status` → "paid"; Payment History on the bill-edit page will now render the applied payment.
+
+
+## 2026-02-21 (later 9) — Liability Payment: "Change" on every bucket + generic account picker ✅
+
+- **Feature**: Every row in the LiabilityBreakdown pink area now has a **Change** link — not just Principal. Client can retarget Interest, Escrow, Fees, PMI, HOA, Property Tax (or any custom bucket) to a specific expense/asset account, or mint a brand-new account inline.
+- **Backend**:
+  - New generic `POST /api/client-review/{token}/accounts` (`_CreateAccountIn`). Accepts `type` ∈ `{asset, liability, equity, income, revenue, expense, cogs}` + name + optional code/detail_type/parent_account_id. Auto-assigns a free code from the type's block (asset 1300-1999, cogs 5100-5999, expense 6100-8999, income/revenue 4300-4999, equity 3300-3999). Liability creates trampoline to the specialized endpoint so auto-parenting policy stays consistent. Dedup by name (returns `reused: true`). Rejects `bank`/`credit_card` sub-types (those need a bank-setup flow).
+  - `_handle_liability_payment` extended: each bucket may carry a top-level `account_id` (or `category_account_id` / `principal_account_id`) as an override. The override takes highest priority and short-circuits the semantic mapping / substring / Haiku fallback. Persisted with `user_overridden: true` on the split for audit.
+- **Frontend** (`ClientReviewPage.jsx`):
+  - New `CategoryAccountPickerModal` — searchable list grouped by section (Expense / Asset / COGS / Income), inline "+ Create new account" form with type selector (Expense / Asset / COGS / Income), name auto-prefill from the bucket label ("PMI Premium" → "PMI Premium" pre-typed).
+  - `LiabilityBreakdown` now shows a `Change` link on every row (both when an account_name is already suggested AND when it's blank). Principal opens `LoanAccountPickerModal` (liability-only, with sub-account parent nesting); every other row opens the new `CategoryAccountPickerModal`. Selection stamps `account_id` + `account_name` onto the bucket via `editBucket` — the override rides along in the "Use this split" payload.
+- **Verified via curl**:
+  - Generic `POST /accounts` created an Expense (Loan Interest - Commercial @ 6510), an Asset (Prepaid Property Tax @ 1320, auto-code from asset block), and routed Liability through the specialized endpoint (Test Auto Loan @ 2220 parented under Loans Payable). Invalid type ("bank") → 400.
+  - Split with `interest.account_id=<Loan Interest - Commercial>` and `escrow.account_id=<Prepaid Property Tax>` posted with those exact accounts (not the canonical defaults). Splits marked `user_overridden: true`.
+
+
+## 2026-02-21 (later 8) — Liability Payment: unlimited itemized buckets + Haiku fallback classifier ✅
+
+- **Problem**: The pink liability breakdown was effectively limited to 4 rows (Principal / Interest / Escrow / Fees). Statements with distinct line items for PMI, Property Tax, HOA Dues, Homeowners Insurance, etc. would either get lumped into Escrow (correct amount, wrong account) or dropped to `unresolved` (silent data loss). Novel labels like "Deferred Interest" or "Modification Fee" fell through entirely.
+- **Fix — Vision prompt** (`client_review_engine.py`): rewrote `_LIABILITY_VISION_SYSTEM_PROMPT` to explicitly permit ONE bucket per distinct line item on the statement (preserving the statement's own label), added a 7-line example (Principal / Interest / Escrow / PMI Premium / Property Tax / HOA Dues / Late Fee), and gave account-name guidance for PMI/MIP, Homeowners/Hazard/Flood/Wind Insurance, Property Tax, HOA/Condo/Association Dues, Curtailment, Payoff Adjustment.
+- **Fix — Three new canonical semantic accounts** (`canonical_semantic_accounts.py`):
+  - `insurance_expense` — Insurance Expense (6250, Sched C-15)
+  - `property_tax_expense` — Property Tax Expense (6260, Sched C-23)
+  - `hoa_dues` — HOA & Association Dues (6270, Sched C-20b)
+- **Fix — `_LIABILITY_LABEL_TO_SEMANTIC`** (`client_review_handlers.py`): extended from 16 → 47 exact-match keys covering all common mortgage/CC/loan line items, plus curtailment/payoff-adjustment → principal.
+- **Fix — Substring fallback**: reordered to check specific keywords FIRST (property tax, HOA, PMI, homeowners, hazard, flood) before the generic "tax"/"fee"/"insurance"/"charge" catchalls so "Property Tax" no longer misroutes to Escrow and "HOA Dues" no longer misroutes to Bank Fees.
+- **Fix — Haiku semantic-classify fallback** (`_semantic_classify_liability_bucket`): for labels that STILL don't match any keyword, Claude Haiku classifies to one of `{interest_expense, escrow_prepaid, insurance_expense, property_tax_expense, hoa_dues, bank_fees, principal}` at confidence ≥0.65. Handles novel labels like "Deferred Interest", "Modification Fee", "Rate Buy-down" without silent drops.
+- **Verified end-to-end**: an 8-bucket split (including "PMI Premium", "Property Tax", "HOA Dues", "Late Fee", and the novel "Deferred Interest") posted all 8 splits summing exactly to $2,145.67. Deferred Interest was routed by Haiku to Interest Expense. Zero unresolved.
+
+
+## 2026-02-21 (later 7) — Account Detail: split-line amount fix + edit-modal split preservation + CoA defaults ✅
+
+### Issue 1: Account Detail showed misleading Amount column for split rows
+- **Problem**: A mortgage payment split into 4 buckets ($812.45 P / $1,104.22 I / $210 E / $19 F) showed the FULL parent amount (-$2,145.67) in every account's Amount column — even though the running balance was correct. The Edit Transaction modal opened with "Split into multiple categories" UNCHECKED because the account-detail row didn't carry the `splits` field.
+- **Root cause** (`reports.py:3192-3220` · `compute_account_detail`): `_row_delta` correctly used the split's own amount for the running-balance delta, but the row-building loop unconditionally set `"amount": t.get("amount")` (parent total). The row projection also dropped `splits`, `category_account_id`, `bank_account_id`, etc. — so the Edit modal saw a stripped shape.
+- **Fix**:
+  - `_row_delta` refactored to return `(delta, display_amount, matched_split)`. Split-line rows get `disp_amt = split.amount` (e.g. -$19), non-split rows keep parent total.
+  - Row builder now surfaces `splits`, `category_account_id`, `bank_account_id`, `account_id`, `contact_id`, `linked_invoice_id`, `linked_bill_id`, `attachments`, plus a new `txn_amount` (raw parent total) so the Edit modal can bind its Amount input to the correct value.
+  - When a row matches via a split, the split's `description` is appended to the parent's description (e.g. "WELLS FARGO HOME MTG PMT 4291 — Fees") and `_split_bucket` / `_is_split_line` markers are set.
+- **Frontend** (`Transactions.jsx` · `ManualTxnModal`): `amount` state now prefers `initialTxn.txn_amount` when present (the parent total for edit purposes) and falls back to `initialTxn.amount` (backward compat for non-report callers). `splits` continues to be read off `initialTxn.splits`, which is now populated on account-detail rows too — so the "Split into multiple categories" checkbox pre-checks correctly.
+- **Verified**: Bank Fees Account Detail shows the mortgage-payment row as -$19.00 with balance $536 (was -$2,145.67 / $536); Test Mortgage shows -$812.45 / $812.45; the row-sums-to-balance banner now matches; clicking a split row opens the Edit modal with the split checkbox checked and Amount = -$2,145.67.
+
+### Issue 2: Add "Interest Expense" (7050) and "Office Equipment" (1650) to standard initial CoA
+- **`backend/seed.py` · `DEFAULT_COA`**: added `("1650", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment")` and `("7050", "Interest Expense", "expense", "operating_expense", "operating_expense")` — every new US company gets them at creation.
+- **Backfilled Test 519 LLC** (`eae0bd47-0545-4f7c-9175-d838f8d1637b`): Office Equipment inserted at code 1650; Interest Expense (which existed without a code — that's why prior liability-split responses showed "no-code") patched to code 7050 with canonical subtype/detail_type.
+
+
+## 2026-02-21 (later 6) — Liability Payment: semantic lender → CoA auto-match ✅
+
+- **Feature**: after the AI Vision analyzer extracts a `lender_name` from an uploaded mortgage / credit-card / auto-loan statement, we now automatically pre-select the matching liability sub-account on the client's chart of accounts — the client no longer has to click "Change" every time.
+- **Backend** (`routes/client_review.py`):
+  - New helper `_semantic_lender_to_liability_account(company_id, lender_name)`. Pool: all liability accounts that are sub-accounts (`parent_account_id` set) — skips retired accounts and the canonical "Loans Payable" / "Credit Cards Payable" parent buckets.
+  - Fast path: case-insensitive exact-name match (no LLM burn when trivial).
+  - Semantic path: Claude Haiku via `ai_service._new_chat` (mirrors `routes.accounts._semantic_contact_match`). Handles institution rebrands ("Chase Auto" ↔ "JPMorgan Chase Auto Loan"), DBA variants ("Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage — 123 Main"), abbreviations ("BofA" ↔ "Bank of America"), and legal-form suffixes. Confidence gate ≥0.75; returns None on doubt (client picks manually).
+  - Wired into `POST /{token}/items/{item_id}/upload` right after `analyze_liability_statement_for_split` returns. On match: stamps `principal_account_id` + updated `account_name` onto the Principal bucket AND surfaces a top-level `matched_principal_account` field for optional "Auto-matched to X" hint on the frontend.
+- **Frontend**: no changes needed — `LiabilityBreakdown` already reads `b.account_name` for display and rides `b.principal_account_id` through the "Use this split" payload hoist added in the prior turn. The pre-selection just appears organically.
+- **Verified via direct helper calls**:
+  - "Rocket Mortgage" → exact-match fast path → 2520 (no LLM call).
+  - "Mercedes-Benz Financial Services USA LLC" → Haiku semantic match → 2540 "Mercedes-Benz Financial Services" (legal-form suffix ignored).
+  - "Wells Fargo Home Mortgage" / "Chase Sapphire" / "BofA Auto" → correctly returned None when no CoA candidate exists.
+
+
+## 2026-02-21 (later 5) — Liability Payment: Principal sub-account picker ✅
+
+- **Problem**: The Liability Payment (item-type 9) split UI showed which account each bucket would post to (Principal → Loans Payable, Interest → Interest Expense, etc.) but didn't let the client pick a SPECIFIC liability sub-account for the paydown. Every mortgage/loan payment fell into the canonical "Loans Payable" bucket, no matter which specific loan (Rocket Mortgage, Wells Fargo Auto, Vehicle Loan — Toyota) it was actually for.
+- **Fix — Frontend** (`ClientReviewPage.jsx` · `LiabilityBreakdown`):
+  - Component now accepts a `token` prop (threaded through `ChatBubble`).
+  - Principal row (loose keyword match on label — handles "Principal", "Principal Payment", "Loan Principal") gets a small inline **Change** link next to the "→ Loans Payable" hint. If the AI didn't propose an account name, a "→ Pick a liability account" fallback link renders instead.
+  - Clicking either opens the existing `LoanAccountPickerModal` (already built for Deposit → Loan received) with the Principal amount displayed.
+  - On pick, `editBucket(principalIdx, { principal_account_id: acct.id, account_name: acct.name })` — the picked account's id rides along on the Principal bucket AND the visible hint text updates in place.
+- **Fix — "Use this split" handler** (`ClientReviewPage.jsx:1436-1470`): finds the Principal bucket in the confirmed proposal and hoists its `principal_account_id` to a top-level payload field so the backend contract stays flat.
+- **Backend** (`client_review_handlers.py`): `_handle_liability_payment` already honored `payload.principal_account_id` (built in the prior turn) — the top-level override wins over the canonical semantic default when the sub-account exists on the company's CoA and has `type: liability`.
+- **Verified end-to-end via curl**: posted split with `principal_account_id="<Rocket Mortgage id>"` → response detail: *"Principal $812.45 → Rocket Mortgage (2520)"* (not "Loans Payable"). Interest / Escrow / Fees still route to their canonical semantic accounts.
+
+
+## 2026-02-21 (later 4) — Liability Payment GL handler wired ✅
+
+- **Problem**: Type 9 (Liability Payment) items were routed to `_handle_generic_finding` — a stash-only no-op. Client-approved splits (Principal / Interest / Escrow / Fees) never turned into ledger rows.
+- **Fix**: New `_handle_liability_payment` in `client_review_handlers.py`, registered as `_HANDLERS[cr.ITEM_LIABILITY_SPLIT]`. Takes the `liability_split` payload (statement_type, buckets[], lender_name, narrative, optional `principal_account_id` override), resolves each bucket to a canonical semantic account, writes `db.transactions.splits[]`, sets `posted=True`, `human_reviewed=True`, clears the prior single-category fields, stamps `split_source="client_review_liability"` + lender/statement metadata, and closes the source finding.
+- **Bucket → semantic mapping** (case-insensitive + loose keyword match):
+  - Principal → statement-type-aware: `mortgage`/`auto_loan`/`generic_loan` → `loan_payment` (Loans Payable); `credit_card` → `credit_card_payment` (Credit Card Payable). Optional `payload.principal_account_id` overrides so a specific liability sub-account (e.g. "Vehicle Loan — Toyota" from the Loan-received picker) gets the paydown directly.
+  - Interest / Finance charge → `interest_expense`.
+  - Escrow / insurance / tax bucket → **new** `escrow_prepaid` semantic (Escrow (Prepaid) asset, code 1350) added to `canonical_semantic_accounts.py`.
+  - Fees / charges / late fees → `bank_fees`.
+- **Sum-check**: bucket total is compared to transaction amount; a >$0.02 mismatch is logged and posted anyway (the client's explicit confirmation wins — we don't refuse to book).
+- **Seed script update** (`seed_9_24_llc_all_types.py`): the type-9 item now also inserts a matching `db.transactions` row (`WELLS FARGO HOME MTG PMT 4291`, -$2,145.67) with `txn_id` stamped into the finding's meta — mirrors the deposit/owner-draw seed pattern so the handler can actually resolve and post the split.
+- **Verified end-to-end via curl**:
+  - Mortgage split ($812.45 P / $1,104.22 I / $210 E / $19 F) posted 4 splits summing exactly to $2,145.67, Escrow (Prepaid) auto-created at code 1350.
+  - Credit-card split (Principal → Credit Card Payable, Interest → Interest Expense) posted correctly.
+  - Unknown bucket label ("Something Else") skipped with `unresolved: [...]` returned and a clear detail line.
+
+
+## 2026-02-21 (later 3) — Quick Check-in: no auto-advance, explicit Continue gate ✅
+
+- **Problem**: Every success handler in `ClientReviewPage.jsx` auto-advanced to the next item via `setTimeout(() => advance(), N)` (10 sites + 2 direct `advance()` calls in `applyAnswer`/`deferItem`). Users couldn't read the confirmation or stay put — the wizard jumped ahead on its own.
+- **Fix**: Single new state `justCompleted` + a `markCompleted({label, detail})` helper. Every success path now calls `markCompleted(...)` instead of `advance()`. When set:
+  - Composer is replaced with a persistent emerald **"✓ Completed — Continue →"** banner (data-testid `review-completed-gate`), autofocused Continue button (data-testid `review-continue-btn`).
+  - The item is locally flagged `answered_at` so shortcut tiles hide and the header ticks to "ANSWERED", but `activeIdx` stays put.
+  - Clicking **Continue** invokes the real `advance()` — moves to the next unfinished item, drops departure/arrival transition bubbles.
+  - Header chevrons (`jumpTo`) also clear the gate, so the user can back up or skip forward manually.
+- Sites rewired (all 12): applyAnswer, deferItem, DepositShortcuts.onBooked, SuggestedCategoryBanner.onApplied, UncategorizedShortcuts.onLinked, UncategorizedShortcuts.onCompleted, ChecksAssignTable.onAllDone, CheckinAnswerForm.onSubmitted (meals/travel), MissingReceiptShortcuts.onLinked, MissingReceiptShortcuts.onDismissed, ChatBubble.onW9Sent, CategoryQuickPicker.onCompleted.
+- Verified end-to-end: booked $12,400 deposit as Loan received → banner appeared and remained after 5 seconds (previous flow would have auto-advanced at 1.4s) → clicked Continue → wizard moved to the next item ("Liability payment 1 of 1") with proper transition messaging.
+
+
+## 2026-02-21 (later 2) — Loan-received picker: inline "New Account" mirrors firm-side CoA modal ✅
+
+- **Frontend** (`ClientReviewPage.jsx` · `LoanAccountPickerModal`): the inline "+ Create new liability account" form was rebuilt to match the firm-side New Account modal (`ChartOfAccounts.jsx` · `CreateAccount`) exactly:
+  - Header: "NEW ACCOUNT · Create a liability account"
+  - **Code** input (optional, placeholder `Code (e.g. 2250)`)
+  - **Account name** input
+  - **Type** dropdown locked to Liability (disabled, matches layout the user is trained on)
+  - **Sub-type*** dropdown with all 9 canonical liability keys (Credit Card, Loan and Line of Credit, Accounts Payable, Due For Payroll, Due to Owners, Customer Prepayments & Credits, Sales Tax Payable, Other Short-Term Liability, Other Long-Term Liability). Values match `DETAIL_TYPES.liability` in `ChartOfAccounts.jsx`.
+  - **Sub-account of (optional)** dropdown, populated by filtering the already-fetched liability list to top-level accounts (`!parent_account_id`) — same filter the firm-side modal uses.
+  - Save (slate-900 primary) / Cancel buttons.
+- **Backend** (`routes/client_review.py`): `POST /api/client-review/{token}/accounts/liability` extended to accept the full firm-side shape:
+  - `code` (optional; auto-assigns free slot in 2200-2999, prefers round decades; 400 on collision).
+  - `detail_type` snapped via `normalize_account_fields` for canonical Wave subtype/detail_type pairing → balance sheet groups the account correctly.
+  - `parent_account_id` explicit override (validates same-type + top-level); falls back to `_resolve_liability_parent` auto-parenting when blank.
+  - Name dedupe returns the existing account with `reused: true` (idempotent on double-click).
+- `GET /api/client-review/{token}/accounts` now returns `parent_account_id` so the frontend can filter top-level parents client-side without a second round-trip.
+- Verified via curl: explicit code + detail_type creates 2225 "Auto Loan — Honda" parented under 2500 Loans Payable; blank code + credit_card detail_type auto-assigns 2220 "Chase Visa Business" parented under 2100 Credit Cards Payable; duplicate code returns 400; duplicate name returns reused:true.
+
+
+## 2026-02-21 (later) — Deposit → Loan received: liability-account picker + inline create ✅
+
+- **Backend** (`routes/client_review.py`): new token-scoped endpoint `POST /api/client-review/{token}/accounts/liability` that mints a new Liability CoA row from inside the Quick Check-in wizard. Uses the same policy the firm-side CoA modal uses:
+  - Auto-parents under `Loans Payable` (2500) or `Credit Cards Payable` (2100) via the existing `_resolve_liability_parent` helper — balance sheet stays grouped consistently.
+  - Auto-assigns the next free code in the 2200-2999 block (prefers round decades).
+  - Idempotent: exact-name duplicates return the existing account with `reused: true` instead of forking the CoA.
+- **Frontend** (`ClientReviewPage.jsx`): new `LoanAccountPickerModal` component. Tapping the "**Loan received**" tile on a Deposit now opens a picker with the company's liability accounts + amber-bordered "**+ Create new liability account**" affordance. The inline create form has name + subtype selector (Long-term loan / Short-term loan / Line of credit / Credit card); on save it books the deposit straight to the just-created account (one round-trip, no double tap). `DepositShortcuts` gained a `loanAcctPickerOpen` state and swapped the direct-post `onClick` for the modal.
+- Booking uses the existing `_handle_deposit` `category_account_id` override path (already supported for the Refund flow) — no handler changes needed. The transaction's `category_account_id`/`category_account_name` are stamped, `posted=true`/`human_reviewed=true`, and the finding closes.
+- Verified: created "Vehicle Loan — Toyota" (code 2210, parented under 2500 Loans Payable), booked a $12,400 deposit to it, transaction row shows `category_account_id` = new UUID.
+
+
 ## 2026-02-21 — Collapsed sidebar: To Do 2 cards → icon-only rail ✅
 
 - **Sidebar.jsx** now passes `collapsed={showCollapsed}` to `Todo2CardList` and switches nav padding to `px-1` when the rail is collapsed.

@@ -143,6 +143,31 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "6800", "professional_services": "6800", "restaurant": "6800", "construction": "6800", "ecommerce": "6800"},
         "tax_line": "sched_c_27a_other",
     },
+    "insurance_expense": {
+        # PMI, homeowners/hazard insurance premium paid direct (not
+        # through escrow), business liability insurance, etc.
+        "name": "Insurance Expense", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "operating_expense",
+        "code_by_template": {"generic": "6250", "professional_services": "6250", "restaurant": "6250", "construction": "6250", "ecommerce": "6250"},
+        "tax_line": "sched_c_15",
+    },
+    "property_tax_expense": {
+        # Property tax remittance line on a mortgage statement OR a
+        # direct county-tax payment (i.e. NOT funded through escrow —
+        # escrow-funded property tax reduces the escrow asset when
+        # the servicer disburses it).
+        "name": "Property Tax Expense", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "operating_expense",
+        "code_by_template": {"generic": "6260", "professional_services": "6260", "restaurant": "6260", "construction": "6260", "ecommerce": "6260"},
+        "tax_line": "sched_c_23",
+    },
+    "hoa_dues": {
+        # HOA / condo / association / master-association dues.
+        "name": "HOA & Association Dues", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "operating_expense",
+        "code_by_template": {"generic": "6270", "professional_services": "6270", "restaurant": "6270", "construction": "6270", "ecommerce": "6270"},
+        "tax_line": "sched_c_20b",
+    },
     "marketing": {
         "name": "Marketing & Advertising", "type": "expense",
         "subtype": "operating_expense", "detail_type": "advertising_promotional",
@@ -245,6 +270,16 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "name": "Sales Tax Payable", "type": "liability",
         "subtype": "current_liability", "detail_type": "sales_tax_payable",
         "code_by_template": {"generic": "2200", "professional_services": "2200", "restaurant": "2200", "construction": "2200", "ecommerce": "2200"},
+        "tax_line": None,
+    },
+    "escrow_prepaid": {
+        # Mortgage escrow — property tax & homeowners insurance held
+        # in trust by the servicer. Booked as a prepaid asset so the
+        # ledger tracks the balance and can be released when the
+        # servicer actually pays the tax / insurance bill.
+        "name": "Escrow (Prepaid)", "type": "asset",
+        "subtype": "other_current_asset", "detail_type": "prepaid_expenses",
+        "code_by_template": {"generic": "1350", "professional_services": "1350", "restaurant": "1350", "construction": "1350", "ecommerce": "1350"},
         "tax_line": None,
     },
     "inter_account_transfer": {

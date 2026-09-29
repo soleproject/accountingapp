@@ -3189,35 +3189,75 @@ async def compute_account_detail(company_id: str, account_id: str,
     #   • For split lines that reference the account, use the split's own
     #     amount with the same sign flip.
 
-    def _row_delta(t: dict) -> float:
+    def _row_delta(t: dict) -> tuple[float, float, dict | None]:
+        """Returns (delta_for_running_balance, display_amount, matched_split).
+
+        `display_amount` is the amount that should appear in the row's
+        Amount column. For split lines matching the current account
+        that's the SPLIT's own amount (not the parent transaction
+        total), so the client sees exactly what got posted here.
+        `matched_split` is the split dict when the row matched via a
+        split — used to also surface the split's description/contact
+        override in the row.
+        """
         amt = float(t.get("amount") or 0.0)
-        # Bank-side match?
+        # Bank-side match — the full transaction amount lands here.
         if (t.get("bank_account_id") in acct_id_set) or (t.get("account_id") in acct_id_set):
-            return amt
-        # Split-line match?
+            return amt, round(amt, 2), None
+        # Split-line match — use the split's own amount, not the parent.
         for s in (t.get("splits") or []):
             sid = s.get("category_account_id") or s.get("account_id")
             if sid in acct_id_set:
-                return -float(s.get("amount") or 0.0)
-        # Category-side match (default).
-        return -amt
+                s_amt = float(s.get("amount") or 0.0)
+                return -s_amt, round(s_amt, 2), s
+        # Category-side match (default) — full transaction hits this account.
+        return -amt, round(amt, 2), None
 
     # Merge txn rows + JE rows, sort oldest → newest so the running balance
     # accumulates in ledger order.
     all_rows: list[dict] = []
     for t in filtered:
-        delta = _row_delta(t)
-        all_rows.append({
+        delta, disp_amt, matched_split = _row_delta(t)
+        row = {
             "id": t.get("id"),
             "date": t.get("date"),
             "merchant": t.get("merchant") or t.get("contact_name") or t.get("description"),
             "description": t.get("description"),
             "contact_name": t.get("contact_name") or "",
-            "amount": round(t.get("amount") or 0.0, 2),
+            "amount": disp_amt,
             "_delta": delta,
             "needs_review": bool(t.get("needs_review")),
             "source": "Txn",
-        })
+            # ── Full-txn fields the row-click Edit modal needs so the
+            # "Split into multiple categories" checkbox and split rows
+            # pre-populate correctly (the modal reads directly off the
+            # row object rather than re-fetching).
+            "splits":              t.get("splits") or [],
+            "category_account_id": t.get("category_account_id"),
+            "bank_account_id":     t.get("bank_account_id"),
+            "account_id":          t.get("account_id"),
+            "contact_id":          t.get("contact_id"),
+            "linked_invoice_id":   t.get("linked_invoice_id"),
+            "linked_bill_id":      t.get("linked_bill_id"),
+            "attachments":         t.get("attachments") or [],
+            # The raw (parent) transaction amount — the Edit modal
+            # binds its Amount input to `initialTxn.amount`, and the
+            # modal always edits the whole transaction, not one split
+            # line. Without this the modal would show the split-only
+            # amount and Save would clobber the parent total.
+            "txn_amount":          round(t.get("amount") or 0.0, 2),
+        }
+        # When the row matched via a split, surface the split's
+        # description so the client sees "Principal" / "Interest" /
+        # "Escrow" / "Fees" — not just the parent's "WELLS FARGO HOME
+        # MTG PMT 4291" for every one of the 4 rows.
+        if matched_split:
+            s_desc = (matched_split.get("description") or "").strip()
+            if s_desc:
+                row["description"] = f"{t.get('description') or ''} — {s_desc}".strip(" —")
+            row["_split_bucket"] = matched_split.get("bucket") or matched_split.get("description") or ""
+            row["_is_split_line"] = True
+        all_rows.append(row)
     for jr in je_rows:
         all_rows.append({
             "id": jr["id"],

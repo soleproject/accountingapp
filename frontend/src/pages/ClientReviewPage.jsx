@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
 import CheckinAnswerForm from "../components/CheckinAnswerForm";
+import { LinkModal } from "./Transactions";
 
 /**
  * ClientReviewPage — token-gated batch review flow.
@@ -20,19 +21,22 @@ const API = `${process.env.REACT_APP_BACKEND_URL}/api/client-review`;
 
 const ITEM_TYPE_LABELS = {
   1: "Uncategorized transaction",
-  2: "Vendor confirmation",
+  2: "No Vendor",
   3: "Missing receipt",
   4: "W-9 collection",
-  5: "Ambiguous transfer",
-  6: "Recurring charge",
-  7: "Setup detail",
-  8: "Split transaction",
   9: "Liability payment",
   10: "Meals & entertainment",
   11: "Owner's Draw check",
   12: "Deposit",
   13: "Checks without payee",
   14: "Travel & lodging",
+  // Deprecated (still labeled so legacy batches render, but no longer
+  // part of the 10-type Quick Check-in lineup):
+  5: "Ambiguous transfer",
+  6: "Recurring charge",
+  7: "Setup detail",
+  8: "Split transaction",
+  15: "AI cleanup",
 };
 
 // Item types that surface the 📎 paperclip in the composer:
@@ -61,6 +65,12 @@ export default function ClientReviewPage() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  // Persistent "✓ Completed — Continue" gate. Set by every success
+  // path (deposit booking, receipt upload, category pick, defer, chat
+  // answer, etc.) INSTEAD of auto-advancing. The user must tap
+  // Continue (or use the header chevrons) to move on. Payload shape:
+  // { label, detail } — rendered in the gate banner.
+  const [justCompleted, setJustCompleted] = useState(null);
   // ── Web Speech dictation (Milestone: mic on client review page) ────
   // Uses the browser's SpeechRecognition API — zero backend cost, no
   // key, no extra deps. Supported in Chrome / Edge / Safari. Unsupported
@@ -309,10 +319,14 @@ export default function ClientReviewPage() {
         `${API}/${token}/items/${currentItem.item_id}/answer`,
         { answer: answerText || payload.answer_text || "Answered", payload }
       );
-      advance();
+      markCompleted({
+        label:  "Answer sent",
+        detail: answerText || payload.answer_text || "Answered.",
+      });
     } catch (e) {
-      // 409 = already finalized; just advance
-      advance();
+      // 409 = already finalized; still gate on Continue so the flow
+      // is consistent whether or not this call actually mutated state.
+      markCompleted({ label: "Answer sent" });
     } finally {
       setBusy(false);
     }
@@ -326,9 +340,48 @@ export default function ClientReviewPage() {
         `${API}/${token}/items/${currentItem.item_id}/defer`,
         { note: note || "" }
       );
-      advance();
+      markCompleted({
+        label:  "Sent to bookkeeper",
+        detail: "Your bookkeeper will handle this one.",
+      });
     } catch (e) {
-      advance();
+      markCompleted({ label: "Sent to bookkeeper" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Undo / re-open an already-answered item. Reverses the underlying
+  // side effects (bill payment / txn categorization / liability split
+  // / receipt dismiss) on the backend, then reloads the batch so the
+  // wizard picks the item back up in `gathering` state.
+  const reopenItem = async () => {
+    if (!currentItem || busy) return;
+    // Guardrail — the button also shouldn't render when there's
+    // nothing to undo, but belt-and-braces.
+    if (!(currentItem.answered_at || currentItem.deferred)) return;
+    if (!window.confirm(
+      "Undo this answer? I'll reverse the booking and reopen this "
+      + "question so you can redo it."
+    )) return;
+    setBusy(true);
+    try {
+      await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/reopen`
+      );
+      // Refetch the whole batch so the item's answered fields clear
+      // and the chat rehydrates in "gathering" state.
+      const r = await axios.get(`${API}/${token}`);
+      setSession(r.data);
+      const reopened = (r.data?.items || []).find(
+        (i) => i.item_id === currentItem.item_id
+      );
+      setMessages(hydrateMessages(reopened));
+      setJustCompleted(null);
+      setInput("");
+    } catch (e) {
+      alert(e?.response?.data?.detail
+             || "Couldn't undo that one — please refresh and try again.");
     } finally {
       setBusy(false);
     }
@@ -405,7 +458,32 @@ export default function ClientReviewPage() {
   const pickDeparture = () => pickFrom(DEPARTURE_LINES, lastDepartureIdxRef);
   const pickArrival   = () => pickFrom(ARRIVAL_LINES,   lastArrivalIdxRef);
 
+  // Mark the current item as "just completed" — sets the persistent
+  // Continue gate INSTEAD of auto-advancing. The item is flagged
+  // `answered_at` locally so the shortcuts hide (they gate on this
+  // flag) and the header progress chip ticks over, but the wizard
+  // stays on the current item until the user taps Continue.
+  const markCompleted = (payload = {}) => {
+    setSession((s) => {
+      if (!s) return s;
+      const items = [...(s.items || [])];
+      if (currentItem) {
+        items[activeIdx] = {
+          ...items[activeIdx],
+          answered_at: items[activeIdx]?.answered_at || new Date().toISOString(),
+        };
+      }
+      return { ...s, items };
+    });
+    setJustCompleted({
+      label:  payload.label  || "Done",
+      detail: payload.detail || null,
+    });
+  };
+
   const advance = () => {
+    // Clear the Continue gate — the user tapped through.
+    setJustCompleted(null);
     const nextIdx = (session?.items || []).findIndex(
       (i, k) => k > activeIdx && !i.answered_at && !i.deferred
     );
@@ -578,16 +656,83 @@ export default function ClientReviewPage() {
       });
     }
     // Cap it off with a confirmation bubble so it's crystal clear the
-    // answer is locked. Includes the plain-English "Approved split: …"
-    // line the client sent, so they see exactly what got posted.
+    // answer is locked. Rehydrate the actual action taken from the
+    // structured fields the handlers stamp onto the item — so a
+    // client scrolling back sees "Applied $483.29 to BILL-566 (The
+    // Home Depot)" instead of a generic "your answer was submitted".
     if (answered) {
-      const note = item.client_answer ||
-                   item.answer_summary ||
-                   "Your answer was submitted to your bookkeeper.";
+      const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      })}`;
+
+      // Receipt uploaded → surface as its own bubble BEFORE the
+      // Answered bubble (matches the ordering when the client
+      // originally uploaded).
+      const receiptAtts = atts.filter((a) => {
+        const ct = (a.content_type || a.mime_type || "").toLowerCase();
+        return ct.startsWith("image/") || ct.includes("pdf");
+      });
+
+      // Try each answer shape in specificity order — richer wins.
+      const action = (item.action_taken || "").toLowerCase();
+      const detail = item.action_detail || "";
+      const payload = item.answered_payload || {};
+      const apps = payload.applications || [];
+      let summary = null;
+
+      if (item.deferred) {
+        summary = "📮 Sent to your bookkeeper — they'll take it from here.";
+      } else if (action === "receipt_dismissed") {
+        summary = "✕ Marked as receipt-not-needed and dropped from the queue.";
+      } else if (action.includes("payment_applied") && apps.length) {
+        // Bill or invoice apply — enumerate each application with
+        // number + amount so the client sees exactly what got posted.
+        const isBill = !!apps[0].bill_id;
+        const noun = isBill ? "bill" : "invoice";
+        const lines = apps.map((a) => {
+          const num = a.bill_number || a.invoice_number ||
+                       String(a.bill_id || a.invoice_id || "").slice(0, 8);
+          const bal = a.new_balance_due != null
+            ? ` · balance now ${money(a.new_balance_due)}`
+            : "";
+          return `• ${money(a.amount)} → ${noun.toUpperCase()}-${num}${bal}`;
+        });
+        summary = `🔗 Linked to ${apps.length} ${noun}${apps.length === 1 ? "" : "s"}:\n${lines.join("\n")}`;
+      } else if (action === "receipt_linked" || action === "linked_bill" || action === "linked_invoice") {
+        // Legacy `/link-doc` single-doc shape.
+        const isBill = action.includes("bill") || payload.doc_type === "bill";
+        summary = `🔗 Linked to ${isBill ? "bill" : "invoice"}${detail ? ` — ${detail}` : ""}`;
+      } else if (action === "deposit_classified" || action === "liability_split") {
+        summary = detail || "Booked to your ledger.";
+      } else if (action === "categorize" || action === "categorized") {
+        summary = detail || `Booked to ${payload.account_name || "the picked category"}.`;
+      } else if (action === "w9_email_sent") {
+        summary = `📧 W-9 request emailed${payload.sent_to ? ` to ${payload.sent_to}` : ""}.`;
+      }
+
+      // If we have a receipt attachment AND no other richer summary,
+      // lean on the attachment as the primary confirmation.
+      if (!summary && receiptAtts.length) {
+        const names = receiptAtts.map((a) => a.filename || "receipt").join(", ");
+        summary = `📎 Receipt uploaded — ${names}`;
+      }
+
+      // Final fallback — the generic string, preserving whatever
+      // detail the handler put on the item.
+      const fallback = detail ||
+                       item.client_answer ||
+                       item.answer_summary ||
+                       "Your answer was submitted to your bookkeeper.";
+
       hydrated.push({
         role: "assistant",
-        content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)} — ${note}`,
+        content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)}\n${summary || fallback}`,
         _readOnlyAnswered: true,
+        // Inline "Undo" chip — client tapped an answer they didn't
+        // want. The main onQuickReply handler intercepts this token
+        // and calls POST /items/{id}/reopen which reverses the side
+        // effects and reopens the item.
+        quickReplies: ["↺ Undo — reopen this one"],
       });
     }
     return hydrated;
@@ -598,6 +743,7 @@ export default function ClientReviewPage() {
   // what they told us. Restores that item's chat history on jump.
   const jumpTo = (idx) => {
     if (idx < 0 || idx >= totalCount) return;
+    setJustCompleted(null);
     setActiveIdx(idx);
     setMessages(hydrateMessages((session?.items || [])[idx]));
     setInput("");
@@ -1110,6 +1256,25 @@ ${companyName}`;
               }}
             />
           )}
+          {currentItem && currentItem.item_type === 12 && !currentItem.answered_at && !currentItem.deferred && (
+            <DepositShortcuts
+              currentItem={currentItem}
+              token={token}
+              onBooked={(res) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: res.label },
+                  { role: "assistant",
+                    content: res.detail || `Booked as ${res.label}.` },
+                ]);
+                markCompleted({
+                  label:  res.label || "Deposit booked",
+                  detail: res.detail || `Booked as ${res.label}.`,
+                });
+              }}
+            />
+          )}
+
           {currentItem && currentItem.item_type === 1 && !currentItem?.context?.grouped && currentItem?.context?.suggested_category_account_id && (
             <SuggestedCategoryBanner
               currentItem={currentItem}
@@ -1121,7 +1286,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Booked to ${res.account_name || "category"}`,
+                  detail: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}.`,
+                });
               }}
             />
           )}
@@ -1140,7 +1308,12 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Linked to ${res.contact_name || (res.doc_type === "bill" ? "bill" : "invoice")}`,
+                  detail: res.new_balance > 0.005
+                    ? `Remaining balance: $${res.new_balance.toFixed(2)}.`
+                    : "Balance is now zero.",
+                });
               }}
               onCompleted={(res) => {
                 setMessages((prev) => [
@@ -1149,7 +1322,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Booked to ${res.account_name || "category"}`,
+                  detail: res.contact_name ? `${res.account_name} · ${res.contact_name}` : null,
+                });
               }}
               onEdited={(res) => {
                 // Refresh the currentItem's context in-place so the ItemContextCard
@@ -1180,7 +1356,7 @@ ${companyName}`;
             <ChecksAssignTable
               token={token}
               item={currentItem}
-              onAllDone={() => setTimeout(() => advance(), 800)}
+              onAllDone={() => markCompleted({ label: "All checks assigned" })}
             />
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
@@ -1217,7 +1393,12 @@ ${companyName}`;
                     content: (res && res.detail)
                       || "Got it — filed under IRS §274 substantiation. Nice." },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  currentItem.item_type === 10
+                    ? "Meal substantiation filed"
+                    : "Trip substantiation filed",
+                  detail: (res && res.detail) || "Filed under IRS §274.",
+                });
               }}
             />
           )}
@@ -1263,7 +1444,24 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || "the vendor"}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Linked to ${res.contact_name || "vendor"}`,
+                  detail: res.new_balance > 0.005
+                    ? `Remaining balance: $${res.new_balance.toFixed(2)}.`
+                    : "Balance is now zero.",
+                });
+              }}
+              onDismissed={() => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "user", content: "Dismiss receipt" },
+                  { role: "assistant",
+                    content: "Done — I've marked this transaction as receipt-not-needed and dropped it from the queue." },
+                ]);
+                markCompleted({
+                  label:  "Receipt dismissed",
+                  detail: "Marked as receipt-not-needed.",
+                });
               }}
             />
           )}
@@ -1300,7 +1498,10 @@ ${companyName}`;
                     content: `Locked in — email sent to ${to || "them"}. As soon as they reply with the completed W-9, you'll see it back in your books.`,
                   }];
                 });
-                setTimeout(() => advance(), 1500);
+                setTimeout(() => markCompleted({
+                  label:  `W-9 request sent to ${to || "them"}`,
+                  detail: "You'll see the completed W-9 back in your books once they reply.",
+                }), 1500);
               }}
               onRemoveAttachment={(aid, itemId) => removeAttachment(aid, itemId, i)}
               onBreakdownChange={(next) => {
@@ -1316,6 +1517,14 @@ ${companyName}`;
                 }));
               }}
               onQuickReply={(t) => {
+                // "↺ Undo — reopen this one" chip on an answered
+                // bubble. Reverses the side effects and reopens the
+                // item. Placed first so a message that also carries
+                // a "Use this split" reply can't shadow it.
+                if (typeof t === "string" && t.startsWith("↺ Undo")) {
+                  reopenItem();
+                  return;
+                }
                 // Special: "Use this split" applies the AI's proposed
                 // receipt split immediately instead of round-tripping
                 // through Haiku.
@@ -1339,6 +1548,15 @@ ${companyName}`;
                 // Principal / Interest / Escrow / Fees buckets.
                 if (t === "Use this split" && m._liabilityProposal) {
                   const a = m._liabilityProposal;
+                  // Hoist principal_account_id (stamped on the
+                  // Principal bucket by the LoanAccountPickerModal
+                  // inside LiabilityBreakdown) to a top-level field
+                  // so the backend can route the paydown to the
+                  // specific liability sub-account the client picked.
+                  const principal = (a.buckets || []).find(
+                    (b) => ((b.label || "").toLowerCase().includes("principal"))
+                  );
+                  const principalAcctId = principal?.principal_account_id || null;
                   applyAnswer(
                     {
                       flow: "liability_split",
@@ -1347,6 +1565,7 @@ ${companyName}`;
                       buckets:        a.buckets || [],
                       totals:         a.totals || null,
                       payment_amount: a.payment_amount,
+                      principal_account_id: principalAcctId,
                     },
                     `Approved split: ${(a.buckets || [])
                       .map((b) => `${b.label} $${Number(b.amount || 0).toFixed(2)}`)
@@ -1458,6 +1677,33 @@ ${companyName}`;
       {/* Composer */}
       <footer className="bg-white border-t px-4 py-3 sticky bottom-0">
         <div className="max-w-2xl mx-auto">
+          {justCompleted ? (
+            <div className="flex items-center gap-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3" data-testid="review-completed-gate">
+              <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <Check size={18} className="text-emerald-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800 truncate">
+                  {justCompleted.label || "Done"}
+                </div>
+                {justCompleted.detail && (
+                  <div className="text-[11px] text-slate-500 leading-tight truncate">
+                    {justCompleted.detail}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={advance}
+                autoFocus
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-[0_6px_14px_-6px_rgba(5,150,105,0.6)] shrink-0"
+                data-testid="review-continue-btn"
+              >
+                {activeIdx >= totalCount - 1 ? "Finish →" : "Continue →"}
+              </button>
+            </div>
+          ) : (
+          <>
           <div className="flex items-end gap-2">
             {UPLOAD_ITEM_TYPES.has(currentItem?.item_type) && (
               <>
@@ -1550,6 +1796,8 @@ ${companyName}`;
               </span>
             )}
           </div>
+          </>
+          )}
         </div>
       </footer>
 
@@ -1591,7 +1839,10 @@ ${companyName}`;
               { role: "assistant",
                 content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
             ]);
-            setTimeout(() => advance(), 1400);
+            markCompleted({
+              label:  `Booked to ${res.account_name || "category"}`,
+              detail: res.contact_name ? `${res.account_name} · ${res.contact_name}` : null,
+            });
           }}
         />
       )}
@@ -1619,11 +1870,26 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   // `context.amount` is absent — fall back to `context.total` and
   // honor `context.direction` when it's set.
   const ctx = currentItem?.context || {};
+  const meta = ctx.meta || {};
   const amount = Number(ctx.amount ?? ctx.total ?? 0);
   const isMoneyOut = ctx.direction
     ? ctx.direction === "out"
     : amount < 0;
   const linkKind = isMoneyOut ? "bill" : "invoice";
+  // Use the rich multi-select LinkModal when we have a single
+  // underlying transaction id — it writes proper `db.payments`
+  // docs via /receive-payment (so Payment History on the bill /
+  // invoice actually reflects the applied amount, and the client
+  // can split ONE payment across multiple bills/invoices). Grouped
+  // items fall back to the simpler LinkDocPicker.
+  // txn_id lives on `context.txn_id` for uncategorized items and
+  // on `context.meta.txn_id` for missing-receipt / liability items —
+  // check both locations.
+  const singleTxnId = ctx.txn_id || meta.txn_id || null;
+  const singleTxnAmount = Number(
+    ctx.amount ?? meta.txn_amount ?? amount ?? 0
+  );
+  const singleTxnContactId = ctx.contact_id || meta.contact_id || null;
   return (
     <>
       <div className="grid grid-cols-4 gap-3 py-3" data-testid="uncat-shortcuts">
@@ -1713,7 +1979,40 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           Or type your answer below — "not sure" sends it to your bookkeeper.
         </div>
       )}
-      {pickerOpen && (
+      {pickerOpen && (singleTxnId ? (
+        <LinkModal
+          token={token}
+          itemId={currentItem.item_id}
+          currentId={""}  /* not used in token mode — endpoint is derived from token */
+          txn={{ id: singleTxnId, amount: singleTxnAmount, contact_id: singleTxnContactId }}
+          onClose={() => setPickerOpen(false)}
+          onApplied={(res) => {
+            setPickerOpen(false);
+            const apps = res?.applications || [];
+            const total = apps.reduce((s, a) => s + Number(a.amount || 0), 0);
+            const isBill = !!apps.find((a) => a.bill_id);
+            // Normalize LinkModal's `{applications: [...]}` shape to
+            // the legacy `onLinked` contract the ChatBubble / Continue
+            // gate expect: `{message, applied, new_balance,
+            // contact_name, doc_type}`. `new_balance` is set to 0 when
+            // fully paid (LinkModal's guard already refuses to submit
+            // unless remaining ≈ 0); otherwise pass through if the
+            // endpoint returned it.
+            const remaining = Number(res?.remaining || 0);
+            const contactName = apps[0]?.contact_name
+              || res?.contact_name
+              || (isBill ? "vendor" : "customer");
+            onLinked({
+              message:      `Linked to ${apps.length} ${isBill ? "bill" : "invoice"}${apps.length === 1 ? "" : "s"}`,
+              applied:      total,
+              new_balance:  remaining,
+              contact_name: contactName,
+              doc_type:     isBill ? "bill" : "invoice",
+              applications: apps,
+            });
+          }}
+        />
+      ) : (
         <LinkDocPicker
           token={token}
           itemId={currentItem.item_id}
@@ -1722,7 +2021,7 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           onClose={() => setPickerOpen(false)}
           onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
         />
-      )}
+      ))}
       {catPickerOpen && (
         <CategoryQuickPicker
           token={token}
@@ -1745,17 +2044,31 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   );
 }
 
-// Two-tile action row for Missing Receipt (item_type=3) items.
+// Three-tile action row for Missing Receipt (item_type=3) items.
 // Mirrors the top row of UncategorizedShortcuts so the client can jump
-// straight to "Upload a receipt" or "Link to a bill" instead of
-// hunting for the paperclip in the composer.
-function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
+// straight to "Upload a receipt", "Link to a bill", or "Dismiss" (mark
+// the transaction as intentionally receipt-free) instead of hunting
+// for the paperclip in the composer.
+function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDismissed }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
   const meta = currentItem?.context?.meta || {};
   const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  const dismiss = async () => {
+    if (dismissing) return;
+    setDismissing(true);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/dismiss-receipt`,
+      );
+      onDismissed?.(r.data);
+    } catch (e) {
+      setDismissing(false);
+    }
+  };
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 py-3" data-testid="missing-receipt-shortcuts">
+      <div className="grid grid-cols-3 gap-3 py-3" data-testid="missing-receipt-shortcuts">
         <button
           type="button"
           onClick={onReceipt}
@@ -1784,8 +2097,51 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
             Pay down an open bill in one tap.
           </div>
         </button>
+        <button
+          type="button"
+          onClick={dismiss}
+          disabled={dismissing}
+          className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300 transition disabled:opacity-50"
+          data-testid="missing-receipt-dismiss"
+        >
+          <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition">
+            <Trash2 size={18} className="text-slate-600" />
+          </div>
+          <div className="text-sm font-semibold text-slate-800">{dismissing ? "Dismissing…" : "Dismiss receipt"}</div>
+          <div className="text-[11px] text-slate-500 leading-tight text-center">
+            Skip this one — no receipt required.
+          </div>
+        </button>
       </div>
-      {pickerOpen && (
+      {pickerOpen && (meta.txn_id ? (
+        <LinkModal
+          token={token}
+          itemId={currentItem.item_id}
+          currentId={""}
+          txn={{
+            id: meta.txn_id,
+            amount: -Math.abs(Number(meta.txn_amount ?? amount ?? 0)),
+            contact_id: meta.contact_id || null,
+          }}
+          onClose={() => setPickerOpen(false)}
+          onApplied={(res) => {
+            setPickerOpen(false);
+            const apps = res?.applications || [];
+            const total = apps.reduce((s, a) => s + Number(a.amount || 0), 0);
+            const remaining = Number(res?.remaining || 0);
+            const contactName = apps[0]?.contact_name
+              || res?.contact_name || "vendor";
+            onLinked({
+              message:      `Linked to ${apps.length} bill${apps.length === 1 ? "" : "s"}`,
+              applied:      total,
+              new_balance:  remaining,
+              contact_name: contactName,
+              doc_type:     "bill",
+              applications: apps,
+            });
+          }}
+        />
+      ) : (
         <LinkDocPicker
           token={token}
           itemId={currentItem.item_id}
@@ -1794,7 +2150,7 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked }) {
           onClose={() => setPickerOpen(false)}
           onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
         />
-      )}
+      ))}
     </>
   );
 }
@@ -1839,6 +2195,784 @@ function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
     </div>
   );
 }
+
+
+// Four-tile action row for Deposit (item_type=12) items. Each tile
+// posts one of the four classifications to `/answer` with a
+// `flow` payload — `_handle_deposit` picks the semantic account
+// (Sales Revenue / Owner's Contribution / Loans Payable / Refunds &
+// Returns) and books the underlying transaction to it.
+function DepositShortcuts({ currentItem, token, onBooked }) {
+  const [busy, setBusy] = useState(null);   // holds the flow being posted
+  const [error, setError] = useState(null);
+  const [cpChooserOpen, setCpChooserOpen] = useState(false);   // "customer payment" branch chooser
+  const [invoicePickerOpen, setInvoicePickerOpen] = useState(false);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [refundChooserOpen, setRefundChooserOpen] = useState(false);
+  const [refundBillPickerOpen, setRefundBillPickerOpen] = useState(false);
+  const [refundCatPickerOpen, setRefundCatPickerOpen] = useState(false);
+  const [loanAcctPickerOpen, setLoanAcctPickerOpen] = useState(false);
+  const meta = currentItem?.context?.meta || {};
+  const amount = Math.abs(Number(meta.txn_amount ?? meta.amount ?? 0));
+  const txnId = meta.txn_id || null;
+
+  const post = async (flow, label, extra = {}) => {
+    if (busy) return;
+    setBusy(flow); setError(null);
+    try {
+      const r = await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/answer`,
+        { answer: label, payload: { flow, ...extra } },
+      );
+      onBooked?.({ flow, label, ...(r.data || {}) });
+    } catch (e) {
+      setError(e?.response?.data?.detail || e.message);
+      setBusy(null);
+    }
+  };
+
+  const handleCustomerFromPicker = async ({ contact_id, contact_name, isNew }) => {
+    setCustomerPickerOpen(false);
+    await post(
+      "customer_payment",
+      isNew ? `Customer payment (new contact: ${contact_name})`
+            : `Customer payment (${contact_name})`,
+      { contact_id: contact_id || null,
+        contact_name: contact_name || null,
+        create_contact: isNew || false },
+    );
+  };
+
+  const tiles = [
+    // Customer payment opens the invoice/customer chooser instead of
+    // booking immediately.
+    { flow: "customer_payment",   label: "Customer payment",   sub: "Revenue — money earned",         color: "emerald", icon: "$", onClick: () => setCpChooserOpen(true) },
+    { flow: "owner_contribution", label: "Owner contribution", sub: "Equity — you put money in",     color: "indigo",  icon: "◉", onClick: () => post("owner_contribution", "Owner contribution") },
+    { flow: "loan_received",      label: "Loan received",      sub: "Liability — money you'll repay", color: "amber",   icon: "%", onClick: () => setLoanAcctPickerOpen(true) },
+    { flow: "refund",             label: "Refund",             sub: "Money coming back from a vendor",color: "rose",    icon: "↩", onClick: () => setRefundChooserOpen(true) },
+  ];
+
+  const colorClass = {
+    emerald: "border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400",
+    indigo:  "border-indigo-200  bg-indigo-50/40  hover:bg-indigo-50  hover:border-indigo-400",
+    amber:   "border-amber-200   bg-amber-50/40   hover:bg-amber-50   hover:border-amber-400",
+    rose:    "border-rose-200    bg-rose-50/40    hover:bg-rose-50    hover:border-rose-400",
+  };
+  const chipClass = {
+    emerald: "bg-emerald-100 group-hover:bg-emerald-200 text-emerald-700",
+    indigo:  "bg-indigo-100  group-hover:bg-indigo-200  text-indigo-700",
+    amber:   "bg-amber-100   group-hover:bg-amber-200   text-amber-700",
+    rose:    "bg-rose-100    group-hover:bg-rose-200    text-rose-700",
+  };
+
+  return (
+    <div className="py-3" data-testid="deposit-shortcuts">
+      <div className="text-[11px] uppercase tracking-wide text-slate-400 pb-2">
+        What is this ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} deposit?
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {tiles.map((t) => (
+          <button
+            key={t.flow}
+            type="button"
+            onClick={t.onClick}
+            disabled={!!busy}
+            className={`group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed transition disabled:opacity-50 ${colorClass[t.color]}`}
+            data-testid={`deposit-${t.flow.replace(/_/g, "-")}`}
+          >
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold text-lg transition ${chipClass[t.color]}`}>
+              {t.icon}
+            </div>
+            <div className="text-sm font-semibold text-slate-800">
+              {busy === t.flow ? "Booking…" : t.label}
+            </div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              {t.sub}
+            </div>
+          </button>
+        ))}
+      </div>
+      {error && <div className="text-xs text-rose-600 pt-2">{error}</div>}
+      {cpChooserOpen && (
+        <CustomerPaymentChooser
+          amount={amount}
+          onClose={() => setCpChooserOpen(false)}
+          onLinkInvoice={() => { setCpChooserOpen(false); setInvoicePickerOpen(true); }}
+          onLinkCustomer={() => { setCpChooserOpen(false); setCustomerPickerOpen(true); }}
+        />
+      )}
+      {invoicePickerOpen && (
+        <LinkModal
+          token={token}
+          itemId={currentItem.item_id}
+          currentId={""}  /* not used in token mode — endpoint is derived from token */
+          txn={{ id: txnId, amount: Number(meta.txn_amount ?? amount ?? 0), contact_id: null }}
+          onClose={() => setInvoicePickerOpen(false)}
+          onApplied={(res) => {
+            setInvoicePickerOpen(false);
+            const total = (res.applications || []).reduce((s, a) => s + (a.amount || 0), 0);
+            const label = `Applied to ${(res.applications || []).length} invoice${(res.applications || []).length === 1 ? "" : "s"}`;
+            onBooked?.({
+              flow: "customer_payment_invoice",
+              label,
+              detail: total > 0
+                ? `Booked $${total.toFixed(2)} across ${(res.applications || []).length} invoice${(res.applications || []).length === 1 ? "" : "s"}.`
+                : "Applied to invoice.",
+              ...res,
+            });
+          }}
+        />
+      )}
+      {customerPickerOpen && (
+        <CustomerPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setCustomerPickerOpen(false)}
+          onPicked={handleCustomerFromPicker}
+        />
+      )}
+      {refundChooserOpen && (
+        <RefundChooser
+          amount={amount}
+          onClose={() => setRefundChooserOpen(false)}
+          onAgainstBill={() => { setRefundChooserOpen(false); setRefundBillPickerOpen(true); }}
+          onAgainstCategory={() => { setRefundChooserOpen(false); setRefundCatPickerOpen(true); }}
+        />
+      )}
+      {refundBillPickerOpen && (
+        <RefundBillPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setRefundBillPickerOpen(false)}
+          onPicked={async (bill) => {
+            setRefundBillPickerOpen(false);
+            await post("refund", `Refund against ${bill.number ? "bill #" + bill.number : "a bill"}`, {
+              category_account_id: bill.category_account_id || null,
+              bill_id: bill.id,
+              contact_id: bill.contact_id || null,
+              contact_name: bill.contact_name || null,
+            });
+          }}
+        />
+      )}
+      {refundCatPickerOpen && (
+        <RefundCategoryPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setRefundCatPickerOpen(false)}
+          onPicked={async (acct) => {
+            setRefundCatPickerOpen(false);
+            await post("refund", `Refund to ${acct.name}`, {
+              category_account_id: acct.id,
+            });
+          }}
+        />
+      )}
+      {loanAcctPickerOpen && (
+        <LoanAccountPickerModal
+          token={token}
+          amount={amount}
+          onClose={() => setLoanAcctPickerOpen(false)}
+          onPicked={async (acct) => {
+            setLoanAcctPickerOpen(false);
+            const label = acct?.name
+              ? `Loan received (${acct.name})`
+              : "Loan received";
+            await post("loan_received", label, {
+              category_account_id: acct.id,
+            });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// Two-option chooser shown after tapping the "Customer payment" tile
+// on a Deposit. Client picks whether to apply the deposit against an
+// open invoice (LinkDocPicker) or just tag it to a customer + book
+// straight to revenue.
+function CustomerPaymentChooser({ amount, onClose, onLinkInvoice, onLinkCustomer }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="customer-payment-chooser">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Customer payment</div>
+            <div className="text-sm font-semibold text-slate-800">
+              ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} — how do you want to link it?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <button
+            type="button"
+            onClick={onLinkInvoice}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+            data-testid="cp-chooser-link-invoice"
+          >
+            <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+              <FileText size={18} className="text-emerald-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Link to invoice</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Applies against an open invoice.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onLinkCustomer}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+            data-testid="cp-chooser-link-customer"
+          >
+            <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+              <Check size={18} className="text-indigo-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Link to customer</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Just tag the customer — no invoice.
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Customer picker modal used by the Deposit → Customer payment → Link
+// to customer flow. Search box hits `/client-review/{token}/contacts`
+// and offers an inline "+ Add new customer …" row when the query
+// doesn't match. On pick, calls `onPicked({contact_id, contact_name,
+// isNew})`.
+function CustomerPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setBusy(true); setErr(null);
+    axios.get(`${API}/${token}/contacts`, { params: q.trim() ? { q: q.trim() } : {} })
+      .then((r) => { if (!cancelled) setRows(r.data?.contacts || r.data || []); })
+      .catch((e) => { if (!cancelled) setErr(e?.response?.data?.detail || e.message); })
+      .finally(() => { if (!cancelled) setBusy(false); });
+    return () => { cancelled = true; };
+  }, [q, token]);
+
+  const trimmed = q.trim();
+  const exact = rows.find((c) => (c.name || "").trim().toLowerCase() === trimmed.toLowerCase());
+  const showAddNew = trimmed && !exact;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="customer-picker-modal">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Customer payment</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Who paid ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""}?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search customers…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+            data-testid="customer-picker-search"
+          />
+          <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {err && <div className="p-3 text-xs text-rose-600">{err}</div>}
+            {!busy && !err && rows.length === 0 && !trimmed && (
+              <div className="p-3 text-xs text-slate-400">Type a name to find a customer.</div>
+            )}
+            {rows.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => onPicked({ contact_id: c.id, contact_name: c.name, isNew: false })}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`customer-picker-row-${c.id}`}
+              >
+                <div className="text-sm text-slate-800">{c.name}</div>
+                {c.type && <div className="text-[11px] text-slate-400">{c.type}</div>}
+              </button>
+            ))}
+            {showAddNew && (
+              <button
+                type="button"
+                onClick={() => onPicked({ contact_id: null, contact_name: trimmed, isNew: true })}
+                className="w-full text-left px-3 py-2 hover:bg-indigo-50 text-indigo-700 font-medium border-t border-slate-100"
+                data-testid="customer-picker-add-new"
+              >
+                + Add new customer "{trimmed}"
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+// Chooser modal shown after tapping "Refund" — client picks whether to
+// credit the refund back to a specific open bill or to a category
+// (expense account).
+function RefundChooser({ amount, onClose, onAgainstBill, onAgainstCategory }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-chooser">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund</div>
+            <div className="text-sm font-semibold text-slate-800">
+              ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} — where should this credit go?
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-4">
+          <button
+            type="button"
+            onClick={onAgainstBill}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 hover:bg-emerald-50 hover:border-emerald-400 transition"
+            data-testid="refund-chooser-against-bill"
+          >
+            <div className="w-10 h-10 rounded-full bg-emerald-100 group-hover:bg-emerald-200 flex items-center justify-center transition">
+              <FileText size={18} className="text-emerald-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">Against a bill</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Credit back to a specific vendor bill.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={onAgainstCategory}
+            className="group flex flex-col items-center justify-center gap-1.5 p-4 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
+            data-testid="refund-chooser-against-category"
+          >
+            <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
+              <Check size={18} className="text-indigo-700" />
+            </div>
+            <div className="text-sm font-semibold text-slate-800">To a category</div>
+            <div className="text-[11px] text-slate-500 leading-tight text-center">
+              Reduce a specific expense account.
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Bill picker used by Refund → Against a bill. Lists open bills for
+// the batch's company; on pick, extracts the bill's expense account
+// so the deposit gets credited back to the original expense line.
+function RefundBillPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [bills, setBills] = useState([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    // Include recently-paid bills too — the "vendor refunded me for a
+    // bill I already paid" case is common (returned inventory, dupe
+    // invoice, warranty credit) and would otherwise leave the client
+    // with an empty picker if no bills are open.
+    axios.get(`${API}/${token}/bills/open?include_paid=1`)
+      .then((r) => setBills(r.data?.bills || []))
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const trimmed = q.trim().toLowerCase();
+  // Amount search: strip $ / , from the query and match against the
+  // bill's `balance_due` + `total` (both as raw and $-formatted
+  // strings) so "241", "241.23", "$241", and "$241.23" all hit
+  // BILL-19 · Brosnahan Insurance ($241.23).
+  const stripped = trimmed.replace(/[$,\s]/g, "");
+  const numeric = stripped && !Number.isNaN(Number(stripped)) ? stripped : null;
+  const filtered = trimmed
+    ? bills.filter((b) => {
+        const hay = [
+          b.number || "",
+          b.contact_name || "",
+        ].join(" ").toLowerCase();
+        if (hay.includes(trimmed)) return true;
+        if (!numeric) return false;
+        const bal = String(Number(b.balance_due || 0));
+        const tot = String(Number(b.total || 0));
+        return bal.includes(numeric) || tot.includes(numeric);
+      })
+    : bills;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-bill-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund against a bill</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Pick the bill this ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} refund relates to
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search bill #, vendor, or amount…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+          />
+          <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {!busy && filtered.length === 0 && (
+              <div className="p-3 text-xs text-slate-400">No open bills found.</div>
+            )}
+            {filtered.map((b) => (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => onPicked(b)}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`refund-bill-row-${b.id}`}
+              >
+                <div className="text-sm text-slate-800 flex items-center gap-2">
+                  <span>{b.contact_name || "Vendor"}</span>
+                  <span className="text-slate-400">·</span>
+                  <span className="text-slate-400">#{b.number || b.id.slice(0, 6)}</span>
+                  {b.is_paid && (
+                    <span className="ml-auto text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-semibold">
+                      Paid
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {b.date} · {b.is_paid
+                    ? `total $${Number(b.total || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                    : `balance $${Number(b.balance_due || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Category (expense-account) picker used by Refund → To a category.
+function RefundCategoryPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [accts, setAccts] = useState([]);
+  const [busy, setBusy] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        // Refunds most commonly credit back to expense accounts.
+        setAccts(list.filter((a) => (a.type || "").toLowerCase() === "expense"));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code} ${a.name}`.toLowerCase().includes(trimmed))
+    : accts;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="refund-cat-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">Refund to a category</div>
+            <div className="text-sm font-semibold text-slate-800">
+              Pick the expense account to credit ${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} back to
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600"><X size={18} /></button>
+        </div>
+        <div className="p-4">
+          <input
+            autoFocus
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search account name or code…"
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+          />
+          <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+            {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+            {!busy && filtered.length === 0 && (
+              <div className="p-3 text-xs text-slate-400">No expense accounts found.</div>
+            )}
+            {filtered.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => onPicked(a)}
+                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                data-testid={`refund-cat-row-${a.id}`}
+              >
+                <div className="text-sm text-slate-800">{a.name}</div>
+                <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// Liability sub-types — mirrors DETAIL_TYPES.liability in
+// /app/frontend/src/pages/ChartOfAccounts.jsx. Keep in sync when new
+// keys are added there.
+const _LIABILITY_SUBTYPES = [
+  { key: "credit_card",                  label: "Credit Card" },
+  { key: "loan_and_line_of_credit",      label: "Loan and Line of Credit" },
+  { key: "expected_payments_to_vendors", label: "Accounts Payable" },
+  { key: "due_for_payroll",              label: "Due For Payroll" },
+  { key: "due_to_owners",                label: "Due to Owners" },
+  { key: "customer_prepayments",         label: "Customer Prepayments & Credits" },
+  { key: "sales_tax_payable",            label: "Sales Tax Payable" },
+  { key: "other_short_term_liability",   label: "Other Short-Term Liability" },
+  { key: "other_long_term_liability",    label: "Other Long-Term Liability" },
+];
+
+
+// Liability-account picker used by Deposit → Loan received. Lists the
+// company's existing liability accounts (Loans Payable, Credit Cards
+// Payable, specific loan sub-accts) and offers an inline
+// "New Account" form so the client can mint a new liability CoA
+// record (e.g. "Vehicle Loan — Toyota") without leaving the wizard.
+// The inline form mirrors the firm-side CoA modal shape:
+// Code / Name / Type (locked to Liability) / Sub-type / Sub-account of.
+function LoanAccountPickerModal({ token, amount, onClose, onPicked }) {
+  const [q, setQ] = useState("");
+  const [accts, setAccts] = useState([]);
+  const [busy, setBusy] = useState(true);
+  const [creating, setCreating] = useState(false);
+  // "New Account" form fields — matches ChartOfAccounts.jsx CreateAccount.
+  const [newCode, setNewCode]         = useState("");
+  const [newName, setNewName]         = useState("");
+  const [newDetailType, setNewDetailType] = useState("");
+  const [newParentId, setNewParentId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        setAccts(list.filter((a) => (a.type || "").toLowerCase() === "liability"));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!name || !newDetailType || saving) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await axios.post(`${API}/${token}/accounts/liability`, {
+        code: newCode.trim() || null,
+        name,
+        detail_type: newDetailType,
+        parent_account_id: newParentId || null,
+      });
+      // Auto-select the just-created account so the deposit books
+      // immediately — one less tap for the client.
+      onPicked(r.data);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code || ""} ${a.name || ""}`.toLowerCase().includes(trimmed))
+    : accts;
+  // Sub-account parents = top-level (no parent_account_id) liability
+  // accounts. Same filter the firm-side modal uses.
+  const eligibleParents = accts
+    .filter((a) => !a.parent_account_id)
+    .sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="loan-account-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+              {creating ? "New Account" : "Loan received"}
+            </div>
+            <div className="text-sm font-semibold text-slate-800">
+              {creating
+                ? "Create a liability account"
+                : `Which liability account should $${amount ? amount.toLocaleString(undefined, { maximumFractionDigits: 2 }) : ""} land in?`}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" data-testid="loan-picker-close"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto">
+          {!creating && (
+            <>
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search liability account name or code…"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-amber-400 outline-none"
+                data-testid="loan-picker-search"
+              />
+              <div className="mt-3 max-h-64 overflow-y-auto rounded-lg border border-slate-100">
+                {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+                {!busy && filtered.length === 0 && (
+                  <div className="p-3 text-xs text-slate-400">No liability accounts yet. Create one below.</div>
+                )}
+                {filtered.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => onPicked(a)}
+                    className="w-full text-left px-3 py-2 hover:bg-amber-50 border-b border-slate-50 last:border-0"
+                    data-testid={`loan-acct-row-${a.id}`}
+                  >
+                    <div className="text-sm text-slate-800">{a.name}</div>
+                    <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => { setCreating(true); setErr(null); }}
+                className="mt-3 w-full px-3 py-2 rounded-lg border-2 border-dashed border-amber-300 bg-amber-50/40 hover:bg-amber-50 text-sm font-medium text-amber-800 transition"
+                data-testid="loan-picker-create-new"
+              >
+                + Create new liability account
+              </button>
+            </>
+          )}
+          {creating && (
+            <div className="space-y-3">
+              <input
+                placeholder="Code (e.g. 2250)"
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+                maxLength={10}
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono-num focus:border-amber-400 outline-none"
+                data-testid="loan-picker-new-code"
+              />
+              <input
+                autoFocus
+                placeholder="Account name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                maxLength={100}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:border-amber-400 outline-none"
+                data-testid="loan-picker-new-name"
+              />
+              {/* Type — locked to Liability. Kept as a disabled select
+                  so the layout matches the firm-side New Account modal
+                  the user is trained on. */}
+              <select
+                value="liability"
+                disabled
+                className="w-full border rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed"
+                data-testid="loan-picker-new-type"
+              >
+                <option value="liability">Liability</option>
+              </select>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Sub-type <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newDetailType}
+                  onChange={(e) => setNewDetailType(e.target.value)}
+                  required
+                  className={`w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-amber-400 outline-none ${newDetailType ? "text-slate-900" : "text-slate-400"}`}
+                  data-testid="loan-picker-new-detail-type"
+                >
+                  <option value="" disabled>Select a sub-type…</option>
+                  {_LIABILITY_SUBTYPES.map((dt) => (
+                    <option key={dt.key} value={dt.key} className="text-slate-900">
+                      {dt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Sub-account of (optional)
+                </label>
+                <select
+                  value={newParentId}
+                  onChange={(e) => setNewParentId(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-amber-400 outline-none"
+                  data-testid="loan-picker-new-parent"
+                >
+                  <option value="">— None (top-level account) —</option>
+                  {eligibleParents.map((par) => (
+                    <option key={par.id} value={par.id}>
+                      {par.code} · {par.name}
+                    </option>
+                  ))}
+                </select>
+                {eligibleParents.length === 0 && (
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    No top-level liability accounts yet — this will be a top-level account.
+                  </div>
+                )}
+              </div>
+              {err && <div className="text-xs text-rose-600">{err}</div>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={submitNew}
+                  disabled={saving || !newName.trim() || !newDetailType}
+                  className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="loan-picker-save-new"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCreating(false); setNewName(""); setNewCode(""); setNewDetailType(""); setNewParentId(""); setErr(null); }}
+                  className="flex-1 py-2 rounded-md border text-sm text-slate-700 hover:bg-slate-50"
+                  data-testid="loan-picker-cancel-new"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
 
 
 
@@ -3758,14 +4892,19 @@ function CategorizationBreakdown({ breakdown, onChange }) {
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
-function LiabilityBreakdown({ breakdown, onChange }) {
+function LiabilityBreakdown({ breakdown, token, onChange }) {
   // Editable bucket list for mortgage / credit-card / auto-loan
   // statements. Each bucket has {label, amount, account_name}. The
-  // client can tweak any amount inline; the total reflows. `onChange`
-  // pushes the edited breakdown up so "Use this split" applies it.
+  // client can tweak any amount inline AND swap the target account
+  // on any row via the "Change" link (Principal → liability sub-
+  // account picker; every other row → generic category picker).
+  // `onChange` pushes the edited breakdown up so "Use this split"
+  // applies it.
   const [buckets, setBuckets] = React.useState(() =>
     (breakdown.buckets || []).map((b, i) => ({ ...b, _idx: i })),
   );
+  // pickerFor: null | { idx, kind: "principal" | "category" }
+  const [pickerFor, setPickerFor] = React.useState(null);
   const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
@@ -3783,6 +4922,20 @@ function LiabilityBreakdown({ breakdown, onChange }) {
       return next;
     });
   };
+
+  // "Principal" bucket detection — loose match (handles "Principal",
+  // "Principal Payment", "Loan Principal", "Curtailment", etc.).
+  const isPrincipal = (b) => {
+    const k = (b?.label || "").toLowerCase();
+    return k.includes("principal") || k.includes("curtailment")
+      || k.includes("payoff adjustment");
+  };
+  const openPicker = (b) => {
+    setPickerFor({ idx: b._idx, kind: isPrincipal(b) ? "principal" : "category" });
+  };
+  const activeBucket = pickerFor
+    ? buckets.find((b) => b._idx === pickerFor.idx)
+    : null;
 
   const typeStyle = {
     mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50",    border: "border-rose-200"  },
@@ -3816,9 +4969,26 @@ function LiabilityBreakdown({ breakdown, onChange }) {
                  data-testid={`liability-bucket-${b._idx}`}>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{b.label}</div>
-                {b.account_name && (
-                  <div className="text-[11px] text-slate-500 truncate">
-                    → {b.account_name}
+                {/* Every row gets a "Change" affordance so the client
+                    can route Interest / Escrow / Fees / PMI / etc. to
+                    a specific account (not just Principal). */}
+                {token && (
+                  <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
+                    {b.account_name ? (
+                      <span className="truncate">→ {b.account_name}</span>
+                    ) : (
+                      <span className="truncate italic text-slate-400">
+                        → {isPrincipal(b) ? "Pick a liability account" : "Pick an account"}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => openPicker(b)}
+                      className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
+                      data-testid={`liability-bucket-change-${b._idx}`}
+                    >
+                      Change
+                    </button>
                   </div>
                 )}
               </div>
@@ -3836,6 +5006,285 @@ function LiabilityBreakdown({ breakdown, onChange }) {
         <div className="mt-2 pt-1.5 border-t border-slate-300 flex items-center justify-between text-sm font-semibold text-slate-900">
           <span>Total</span>
           <span className="font-mono-num tabular-nums">{money(grandTotal)}</span>
+        </div>
+      </div>
+
+      {/* Principal → liability sub-account picker (has inline
+          "New liability account" form with parent auto-resolution). */}
+      {pickerFor?.kind === "principal" && activeBucket && (
+        <LoanAccountPickerModal
+          token={token}
+          amount={Number(activeBucket.amount || 0)}
+          onClose={() => setPickerFor(null)}
+          onPicked={(acct) => {
+            setPickerFor(null);
+            editBucket(activeBucket._idx, {
+              // Stamp both keys so downstream code that reads either
+              // one (backend handler accepts both) sees the override.
+              account_id:            acct.id,
+              principal_account_id:  acct.id,
+              account_name:          acct.name,
+            });
+          }}
+        />
+      )}
+      {/* All other buckets → generic category-account picker. */}
+      {pickerFor?.kind === "category" && activeBucket && (
+        <CategoryAccountPickerModal
+          token={token}
+          bucketLabel={activeBucket.label}
+          amount={Number(activeBucket.amount || 0)}
+          onClose={() => setPickerFor(null)}
+          onPicked={(acct) => {
+            setPickerFor(null);
+            editBucket(activeBucket._idx, {
+              account_id:   acct.id,
+              account_name: acct.name,
+            });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// Generic category-account picker used by non-Principal rows of the
+// LiabilityBreakdown. Shows the company's expense + asset accounts
+// (the vast majority of legitimate targets for Interest / Escrow /
+// PMI / Property Tax / HOA / Fees), plus an inline "New Account"
+// form that accepts asset OR expense type. If a client needs to
+// route to a liability sub-account, they'd use the Principal row's
+// picker instead — this picker deliberately narrows the choices to
+// avoid confusion.
+function CategoryAccountPickerModal({ token, bucketLabel, amount, onClose, onPicked }) {
+  const [q, setQ] = React.useState("");
+  const [accts, setAccts] = React.useState([]);
+  const [busy, setBusy] = React.useState(true);
+  const [creating, setCreating] = React.useState(false);
+  const [newCode, setNewCode] = React.useState("");
+  const [newName, setNewName] = React.useState("");
+  const [newType, setNewType] = React.useState("expense");
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        // Show expense + asset by default — the two families that
+        // cover the non-Principal buckets. Also include income and
+        // cogs since some edge cases (e.g. loan-origination rebate
+        // as income) may want them.
+        const allowed = new Set(["expense", "asset", "cogs", "cost_of_goods_sold", "income", "revenue"]);
+        setAccts(list.filter((a) => allowed.has((a.type || "").toLowerCase())));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!name || saving) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await axios.post(`${API}/${token}/accounts`, {
+        type: newType,
+        code: newCode.trim() || null,
+        name,
+      });
+      onPicked(r.data);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code || ""} ${a.name || ""}`.toLowerCase().includes(trimmed))
+    : accts;
+
+  // Group by type header for scannability — the CoA can have 40+
+  // rows and users would otherwise scroll blind.
+  const grouped = React.useMemo(() => {
+    const buckets = { expense: [], asset: [], cogs: [], income: [] };
+    for (const a of filtered) {
+      const t = (a.type || "").toLowerCase();
+      if (t === "expense") buckets.expense.push(a);
+      else if (t === "asset") buckets.asset.push(a);
+      else if (t === "cogs" || t === "cost_of_goods_sold") buckets.cogs.push(a);
+      else if (t === "income" || t === "revenue") buckets.income.push(a);
+    }
+    for (const k of Object.keys(buckets)) {
+      buckets[k].sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
+    }
+    return buckets;
+  }, [filtered]);
+
+  const sectionHeader = (label) => (
+    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100">
+      {label}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="category-account-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+              {creating ? "New Account" : (bucketLabel || "Change account")}
+            </div>
+            <div className="text-sm font-semibold text-slate-800">
+              {creating
+                ? "Create an account"
+                : `Which account should ${amount ? `$${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "this line"} land in?`}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" data-testid="cat-picker-close"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto">
+          {!creating && (
+            <>
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search account name or code…"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-search"
+              />
+              <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+                {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+                {!busy && filtered.length === 0 && (
+                  <div className="p-3 text-xs text-slate-400">No accounts match. Create one below.</div>
+                )}
+                {!busy && grouped.expense.length > 0 && (<>
+                  {sectionHeader("Expense")}
+                  {grouped.expense.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}
+                    >
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.asset.length > 0 && (<>
+                  {sectionHeader("Asset")}
+                  {grouped.asset.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}
+                    >
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.cogs.length > 0 && (<>
+                  {sectionHeader("Cost of Goods Sold")}
+                  {grouped.cogs.map((a) => (
+                    <button key={a.id} type="button" onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}>
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.income.length > 0 && (<>
+                  {sectionHeader("Income")}
+                  {grouped.income.map((a) => (
+                    <button key={a.id} type="button" onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}>
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  // Prefill the new-account name with the bucket
+                  // label — client can tweak it. Saves a couple
+                  // seconds of typing for the common case.
+                  if (!newName && bucketLabel) setNewName(bucketLabel);
+                  setCreating(true); setErr(null);
+                }}
+                className="mt-3 w-full px-3 py-2 rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50/40 hover:bg-indigo-50 text-sm font-medium text-indigo-800 transition"
+                data-testid="cat-picker-create-new"
+              >
+                + Create new account
+              </button>
+            </>
+          )}
+          {creating && (
+            <div className="space-y-3">
+              <input
+                placeholder="Code (e.g. 6250)"
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+                maxLength={10}
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono-num focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-new-code"
+              />
+              <input
+                autoFocus
+                placeholder="Account name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                maxLength={100}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-new-name"
+              />
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Type <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none"
+                  data-testid="cat-picker-new-type"
+                >
+                  <option value="expense">Expense</option>
+                  <option value="asset">Asset</option>
+                  <option value="cogs">Cost of Goods Sold</option>
+                  <option value="income">Income</option>
+                </select>
+              </div>
+              {err && <div className="text-xs text-rose-600">{err}</div>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={submitNew}
+                  disabled={saving || !newName.trim()}
+                  className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="cat-picker-save-new"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCreating(false); setNewName(""); setNewCode(""); setErr(null); }}
+                  className="flex-1 py-2 rounded-md border text-sm text-slate-700 hover:bg-slate-50"
+                  data-testid="cat-picker-cancel-new"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -4032,6 +5481,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
                    ? "bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-bl-sm"
                    : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
         } ${isAttachment ? "pr-8 relative" : ""}`}
+        style={{ whiteSpace: "pre-wrap" }}
       >
         {message.content}
         {isAttachment && !message._readOnly && (
@@ -4054,6 +5504,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         {hasLiability && (
           <LiabilityBreakdown
             breakdown={message._liabilityBreakdown}
+            token={w9Token}
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}

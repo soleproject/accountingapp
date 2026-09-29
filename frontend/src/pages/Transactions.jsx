@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React from "react";
+import axios from "axios";
 import { createPortal } from "react-dom";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
@@ -4066,7 +4068,14 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const [description, setDescription] = useState(initialTxn?.description || "");
   const [merchant, setMerchant] = useState(initialTxn?.merchant || "");
   const [amount, setAmount] = useState(
-    initialTxn?.amount != null ? String(initialTxn.amount) : ""
+    // Prefer `txn_amount` when the caller passed one — the account-
+    // detail row's `amount` field is the SPLIT-LINE amount (e.g. -$19
+    // for the Fees line of a $2,145 mortgage payment), whereas the
+    // modal always edits the WHOLE parent transaction. Non-split
+    // callers omit `txn_amount`, so we fall back to `amount`.
+    initialTxn?.txn_amount != null
+      ? String(initialTxn.txn_amount)
+      : (initialTxn?.amount != null ? String(initialTxn.amount) : "")
   );
   const [categoryId, setCategoryId] = useState(initialTxn?.category_account_id || "");
   // Source Account the transaction hit. Pulled from all Asset + Liability
@@ -4800,8 +4809,36 @@ export function SplitModal({ txn, accts, currentId, onClose }) {
   );
 }
 
-export function LinkModal({ txn, invoices, bills, currentId, onClose }) {
+export function LinkModal({ txn, invoices, bills, currentId, onClose, token, itemId, onApplied }) {
   const fmtMoney = useMoneyFmt();
+  // Token-mode: swap the JWT-authed `api` client for a plain axios so
+  // the same UI works inside a client-facing magic-link session.
+  const clientAxios = React.useMemo(
+    () => (token ? axios.create() : null),
+    [token],
+  );
+  const apiBase = process.env.REACT_APP_BACKEND_URL + "/api";
+  const _get = React.useCallback(
+    (path) => token
+      ? clientAxios.get(apiBase + path.replace(
+          `/companies/${currentId}`,
+          `/client-review/${token}`,
+        ))
+      : api.get(path),
+    [token, clientAxios, apiBase, currentId],
+  );
+  const _post = React.useCallback(
+    (path, body) => token
+      ? clientAxios.post(
+          apiBase + path.replace(
+            `/companies/${currentId}`,
+            `/client-review/${token}`,
+          ) + (itemId ? (path.includes("?") ? "&" : "?") + `item_id=${encodeURIComponent(itemId)}` : ""),
+          body,
+        )
+      : api.post(path, body),
+    [token, clientAxios, apiBase, currentId, itemId],
+  );
   // Unified list mode (Mar 2026 UX overhaul): one modal shows ALL open
   // invoices with a Customer column + quick-filter chips + search.
   // Pros pick 1..N invoices in a single view — no more "pick a
@@ -4822,7 +4859,7 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose }) {
     const url = kind === "invoice"
       ? `/companies/${currentId}/invoices/open`
       : `/companies/${currentId}/bills/open`;
-    api.get(url)
+    _get(url)
       .then(r => {
         const rows = r.data.invoices || r.data.bills || [];
         setOpenDocs(rows);
@@ -4911,11 +4948,12 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose }) {
       // (deposit) and bill (withdrawal) applications go through
       // the same endpoint; the server auto-detects kind from the
       // application shape.
-      await api.post(
+      const r = await _post(
         `/companies/${currentId}/transactions/${txn.id}/receive-payment`,
         { applications },
       );
       toast.success(`Applied to ${applications.length} ${kind}${applications.length > 1 ? "s" : ""}`);
+      onApplied?.({ applications, ...(r?.data || {}) });
       onClose();
     } catch (e) {
       toast.error(e.response?.data?.detail || "Failed to apply");

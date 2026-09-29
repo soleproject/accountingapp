@@ -871,6 +871,26 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
   //     Step 1 down to zero).
   //   • Otherwise, pick the earliest step still open (count > 0) —
   //     matches the dashboard checklist numbering.
+  // Chat-review mode awareness — the dashboard todos widget lets the
+  // CPA flip into "chat" mode (persisted in localStorage under
+  // "dashboard-todos-mode"). When they do, the clickable Step-N card
+  // on the Transactions page should route into the chat-review
+  // surface instead of the checklist review pages, so the user stays
+  // in whichever review UX they picked.
+  const [chatModeOn, setChatModeOn] = useState(() => {
+    try { return localStorage.getItem("dashboard-todos-mode") === "chat"; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "dashboard-todos-mode") {
+        setChatModeOn(e.newValue === "chat");
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const activeStep = (() => {
     if (!checklistTodos) return null;
     const pickers = forceStep
@@ -1909,11 +1929,29 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               // On the main Transactions page, the card is a clickable link
               // to the next-open step's page with the rainbow shimmer to
               // signal "AI action available — pick this up."
+              // When the user has flipped todos into chat-review mode
+              // (localStorage `dashboard-todos-mode` = "chat"), route
+              // to the chat-review surface instead — Step 3B → the
+              // no-contact chat tab, Step 3C → the checks chat tab,
+              // everything else → the "No Category" chat tab (default
+              // entry point).
+              (() => {
+                const chatCta = (() => {
+                  const key = String(activeStep.display || activeStep.n);
+                  if (key === "3B") return "/accounting/review-chat?tab=transactions";
+                  if (key === "3C") return "/accounting/review-chat?tab=checks";
+                  return "/accounting/review-chat?tab=no_category";
+                })();
+                const targetHref = chatModeOn ? chatCta : activeStep.cta_link;
+                const tipLabel = chatModeOn
+                  ? `Go to chat review — ${activeStep.title}`
+                  : `Go to Step ${activeStep.display} — ${activeStep.title}`;
+                return (
               <button
                 type="button"
                 data-testid="cleanup-active-step-badge"
-                onClick={() => activeStep.cta_link && navigate(activeStep.cta_link)}
-                title={`Go to Step ${activeStep.display} — ${activeStep.title}`}
+                onClick={() => targetHref && navigate(targetHref)}
+                title={tipLabel}
                 className="ai-shimmer-bubble hidden md:flex items-center gap-4 w-[400px] max-w-[42vw] rounded-xl px-4 py-3 shadow-sm text-left cursor-pointer transition-shadow hover:shadow-md"
               >
                 <div className="flex-1 min-w-0">
@@ -1935,6 +1973,8 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   </div>
                 </div>
               </button>
+                );
+              })()
             )
           )}
           {(() => {

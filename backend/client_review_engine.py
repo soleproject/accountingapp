@@ -590,7 +590,7 @@ client's business made ONE payment against a liability (a mortgage,
 credit-card, or auto-loan bill) and needs the total broken into the
 right accounting buckets so the ledger retires the correct portion of
 the liability, expenses the interest, and (for mortgages) tracks
-escrow separately.
+escrow / insurance / tax / dues separately.
 
 Read the statement image carefully. First detect what KIND of
 statement it is (mortgage / credit_card / auto_loan / generic_loan).
@@ -602,42 +602,64 @@ Then return ONLY a JSON object of the shape:
   "narrative":     "1-2 sentence plain-English readout.",
   "payment_amount": 2145.67,
   "buckets": [
-    {"label": "Principal",  "amount": 812.45, "account_name": "Mortgage Payable"},
-    {"label": "Interest",   "amount": 1104.22, "account_name": "Mortgage Interest Expense"},
-    {"label": "Escrow",     "amount": 210.00,  "account_name": "Escrow (Prepaid)"},
-    {"label": "Fees",       "amount": 19.00,   "account_name": "Bank Fees"}
+    {"label": "Principal",       "amount": 812.45, "account_name": "Mortgage Payable"},
+    {"label": "Interest",        "amount": 1004.22, "account_name": "Mortgage Interest Expense"},
+    {"label": "Escrow",          "amount": 100.00,  "account_name": "Escrow (Prepaid)"},
+    {"label": "PMI Premium",     "amount": 110.00,  "account_name": "Insurance Expense"},
+    {"label": "Property Tax",    "amount": 80.00,   "account_name": "Property Tax Expense"},
+    {"label": "HOA Dues",        "amount": 20.00,   "account_name": "HOA & Association Dues"},
+    {"label": "Late Fee",        "amount": 19.00,   "account_name": "Bank Fees"}
   ],
   "totals": {"grand_total": 2145.67}
 }
 
-Rules by statement type:
-  * **mortgage**: split into Principal, Interest, Escrow, Fees. Escrow
-    covers property tax + homeowners insurance held in trust — always
-    a separate bucket. Suggest accounts:
-      - Principal → "Mortgage Payable" (long-term liability)
-      - Interest  → "Mortgage Interest Expense"
-      - Escrow    → "Escrow (Prepaid)" (asset)
-      - Fees      → "Bank Fees" (expense)
-  * **credit_card**: split into Principal (payment applied to balance),
-    Interest, Fees. If the statement is a monthly statement, the
-    "payment" typically retires principal only — interest & fees are
-    already accrued into the balance and shouldn't double-hit. But if
-    the client made a lump payment covering finance charges too,
-    surface those explicitly. Suggest accounts:
-      - Principal → "Credit Card Payable" (paydown)
-      - Interest  → "Interest Expense"
-      - Fees      → "Bank Fees"
-  * **auto_loan / generic_loan**: split into Principal, Interest,
-    Fees. Suggest accounts:
-      - Principal → "Auto Loan Payable" (or "Notes Payable")
-      - Interest  → "Interest Expense"
-      - Fees      → "Bank Fees"
+Bucket rules:
+  * The `buckets` array is NOT limited to a fixed set of labels. Emit
+    ONE row for EVERY distinct line item shown on the statement that
+    contributes to the total paid. Preserve the statement's own label
+    (e.g. "PMI Premium", "Hazard Insurance", "Property Tax
+    Remittance", "HOA Dues", "NSF Fee", "Late Payment Charge",
+    "Curtailment", "Payoff Adjustment"). Do NOT lump unrelated line
+    items into a catch-all "Escrow" or "Fees" bucket when the
+    statement itemizes them separately.
+  * `buckets[].amount` MUST sum to `payment_amount`. If a line
+    doesn't apply (e.g. no fees this month), OMIT it — do not emit
+    zero-value buckets.
 
-  * `buckets[].amount` MUST sum to `payment_amount`. If a bucket
-    doesn't apply (e.g. no fees), OMIT it — do not emit zero-value
-    buckets.
-  * Use account names from the client's chart of accounts when
-    provided; otherwise use the suggestions above.
+Guidance for `account_name` suggestions (use these when the client's
+chart of accounts doesn't provide a better match — the client can
+override):
+  * **Principal** (any statement) → "<Lender> Payable" (long-term
+    liability). If a specific loan sub-account name is inferable
+    from the statement, use it.
+  * **Interest / Finance Charges** → "Mortgage Interest Expense" for
+    mortgages, "Interest Expense" for all other loan types.
+  * **Escrow / Escrow Deposit / Taxes & Insurance (bundled)** →
+    "Escrow (Prepaid)" (asset). Only for mortgages, and only when the
+    servicer holds the funds in trust rather than disbursing them on
+    this payment.
+  * **Property Tax / Real Estate Tax / County Tax** (line-item, not
+    escrow-funded) → "Property Tax Expense".
+  * **Homeowners Insurance / Hazard Insurance / PMI / MIP / Mortgage
+    Insurance** (direct-pay, NOT rolled into escrow) → "Insurance
+    Expense".
+  * **HOA / Condo / Association / Master Association Dues** → "HOA &
+    Association Dues".
+  * **Late Fee / NSF Fee / Return Fee / Service Charge** → "Bank
+    Fees".
+  * **Curtailment / Principal Curtailment / Payoff Adjustment** →
+    same account as Principal (extra principal paydown).
+
+Statement-type-specific hints:
+  * **mortgage**: expect Principal + Interest at minimum. Escrow,
+    property tax, insurance, PMI, HOA are all POSSIBLE separate
+    lines depending on the servicer's format.
+  * **credit_card**: the "payment" typically retires principal only.
+    Surface Interest / Finance Charges and Fees only if the client
+    is making a lump payment that covers them.
+  * **auto_loan / generic_loan**: Principal + Interest at minimum;
+    Fees only if present.
+
   * If the statement type is ambiguous, default to `generic_loan`.
   * No commentary outside the JSON. No markdown fences.
 """
