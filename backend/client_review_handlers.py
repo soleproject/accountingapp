@@ -1551,23 +1551,120 @@ async def _handle_deposit(item: dict, batch: dict, *,
 # should not emit an Escrow bucket, but if it does we still book it to
 # the escrow asset (safest — the pro can move it later).
 _LIABILITY_LABEL_TO_SEMANTIC = {
-    "principal":         None,        # resolved dynamically from statement_type
-    "principal_payment": None,
-    "loan principal":    None,
-    "interest":          "interest_expense",
-    "mortgage interest": "interest_expense",
-    "finance charges":   "interest_expense",
-    "finance charge":    "interest_expense",
-    "escrow":            "escrow_prepaid",
-    "escrow deposit":    "escrow_prepaid",
-    "taxes & insurance": "escrow_prepaid",
-    "fees":              "bank_fees",
-    "fee":               "bank_fees",
-    "late fee":          "bank_fees",
-    "late fees":         "bank_fees",
-    "service charge":    "bank_fees",
-    "other":             "bank_fees",
+    "principal":            None,        # resolved dynamically from statement_type
+    "principal_payment":    None,
+    "loan principal":       None,
+    "curtailment":          None,        # extra principal paydown → same acct
+    "principal curtailment": None,
+    "payoff adjustment":    None,        # servicer's final principal true-up
+    "interest":             "interest_expense",
+    "mortgage interest":    "interest_expense",
+    "finance charges":      "interest_expense",
+    "finance charge":       "interest_expense",
+    "escrow":               "escrow_prepaid",
+    "escrow deposit":       "escrow_prepaid",
+    "escrow shortage":      "escrow_prepaid",
+    "taxes & insurance":    "escrow_prepaid",
+    "property tax":         "property_tax_expense",
+    "property taxes":       "property_tax_expense",
+    "real estate tax":      "property_tax_expense",
+    "real estate taxes":    "property_tax_expense",
+    "county tax":           "property_tax_expense",
+    "county taxes":         "property_tax_expense",
+    "school tax":           "property_tax_expense",
+    "homeowners insurance": "insurance_expense",
+    "homeowner's insurance": "insurance_expense",
+    "hazard insurance":     "insurance_expense",
+    "flood insurance":      "insurance_expense",
+    "wind insurance":       "insurance_expense",
+    "pmi":                  "insurance_expense",
+    "pmi premium":          "insurance_expense",
+    "mortgage insurance":   "insurance_expense",
+    "mortgage insurance premium": "insurance_expense",
+    "mip":                  "insurance_expense",
+    "insurance":            "insurance_expense",
+    "insurance premium":    "insurance_expense",
+    "hoa":                  "hoa_dues",
+    "hoa dues":             "hoa_dues",
+    "hoa fees":             "hoa_dues",
+    "condo dues":           "hoa_dues",
+    "condo fees":           "hoa_dues",
+    "association dues":     "hoa_dues",
+    "association fees":     "hoa_dues",
+    "master association dues": "hoa_dues",
+    "fees":                 "bank_fees",
+    "fee":                  "bank_fees",
+    "late fee":             "bank_fees",
+    "late fees":            "bank_fees",
+    "late payment charge":  "bank_fees",
+    "nsf fee":              "bank_fees",
+    "nsf":                  "bank_fees",
+    "return fee":           "bank_fees",
+    "service charge":       "bank_fees",
+    "service fee":          "bank_fees",
+    "other":                "bank_fees",
 }
+
+
+async def _semantic_classify_liability_bucket(
+    label: str, statement_type: str,
+) -> str | None:
+    """Ask Claude Haiku to classify a novel bucket label (one that
+    doesn't match any exact key or keyword substring in
+    `_LIABILITY_LABEL_TO_SEMANTIC`) into a canonical semantic account.
+    Returns the semantic key on high confidence, else None (caller
+    falls through to `unresolved`). This is the safety net so weird
+    servicer labels like "Late Payment Charge - Grace Period" or
+    "Deferred Interest" or "Modification Fee" don't silently drop.
+
+    We deliberately KEEP this behind the exact-match/keyword table
+    so the fast path stays synchronous and costs zero LLM calls in
+    the common case."""
+    label = (label or "").strip()
+    if not label:
+        return None
+    valid_keys = [
+        "interest_expense", "escrow_prepaid", "insurance_expense",
+        "property_tax_expense", "hoa_dues", "bank_fees",
+        # "loan_payment" == principal — caller handles via
+        # `_principal_semantic_for(statement_type)` when we return
+        # "principal".
+        "principal",
+    ]
+    try:
+        from ai_service import _new_chat, _extract_json, MODEL_HAIKU
+        from llm_client import UserMessage
+        system = (
+            "You are a bookkeeping classifier. A liability-payment "
+            "statement has a line-item bucket labeled `{LABEL}` on a "
+            "{STMT_TYPE} statement. Pick which canonical semantic "
+            "account should receive that dollar amount. Reply STRICT "
+            "JSON only: {\"key\": \"<one of: interest_expense | "
+            "escrow_prepaid | insurance_expense | property_tax_expense "
+            "| hoa_dues | bank_fees | principal>\", \"confidence\": "
+            "<0.0-1.0>}. Return null key when unsure. No prose, no "
+            "code fences."
+        )
+        prompt = system.replace("{LABEL}", label).replace(
+            "{STMT_TYPE}", statement_type or "generic_loan"
+        )
+        chat = _new_chat(prompt, f"liab-bucket-classify",
+                          model_name=MODEL_HAIKU,
+                          feature="liability-bucket-classify")
+        text = await chat.send_message(UserMessage(text=label))
+    except Exception:  # noqa: BLE001
+        return None
+    parsed = _extract_json(text or "") or {}
+    key = (parsed.get("key") or "").strip()
+    try:
+        conf = float(parsed.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    if key not in valid_keys:
+        return None
+    if conf < 0.65:
+        return None
+    return key
 
 
 def _principal_semantic_for(statement_type: str) -> str:
@@ -1672,24 +1769,59 @@ async def _handle_liability_payment(item: dict, batch: dict, *,
         key = label.lower()
         semantic = _LIABILITY_LABEL_TO_SEMANTIC.get(key)
         # Loose match: "principal" appears in "Principal Payment", etc.
+        # Ordering matters: check more-specific keywords BEFORE the
+        # generic "tax"/"fee"/"charge" so "property tax" → property
+        # tax expense (not escrow), "hoa fees" → HOA dues (not bank
+        # fees), etc.
         if semantic is None:
-            if "principal" in key:
+            if ("principal" in key or "curtailment" in key
+                    or "payoff adjustment" in key):
                 semantic = None  # sentinel: use principal_semantic_default
                 is_principal = True
             elif "interest" in key or "finance" in key:
                 semantic = "interest_expense"
                 is_principal = False
-            elif "escrow" in key or "insurance" in key or "tax" in key:
+            elif ("hoa" in key or "association" in key or "condo" in key):
+                semantic = "hoa_dues"
+                is_principal = False
+            elif ("property tax" in key or "real estate tax" in key
+                    or "county tax" in key or "school tax" in key):
+                semantic = "property_tax_expense"
+                is_principal = False
+            elif ("pmi" in key or "mip" in key
+                    or "mortgage insurance" in key
+                    or "homeowner" in key or "hazard" in key
+                    or "flood insurance" in key or "wind insurance" in key
+                    or key == "insurance" or "insurance premium" in key):
+                semantic = "insurance_expense"
+                is_principal = False
+            elif "escrow" in key:
                 semantic = "escrow_prepaid"
                 is_principal = False
-            elif "fee" in key or "charge" in key or "penalt" in key:
+            elif "fee" in key or "charge" in key or "penalt" in key or "nsf" in key:
                 semantic = "bank_fees"
                 is_principal = False
             else:
-                unresolved.append(f"{label or '(unlabeled)'} ${amt:.2f}")
-                continue
+                # Ask Haiku to classify novel labels ("Deferred
+                # Interest", "Modification Fee", "Rate Buy-down",
+                # etc.) rather than silently dropping to unresolved.
+                try:
+                    ai_key = await _semantic_classify_liability_bucket(
+                        label, statement_type,
+                    )
+                except Exception:  # noqa: BLE001
+                    ai_key = None
+                if ai_key == "principal":
+                    semantic = None
+                    is_principal = True
+                elif ai_key:
+                    semantic = ai_key
+                    is_principal = False
+                else:
+                    unresolved.append(f"{label or '(unlabeled)'} ${amt:.2f}")
+                    continue
         else:
-            is_principal = (key in ("principal", "principal_payment", "loan principal"))
+            is_principal = False
 
         # Principal is statement-type-aware; allow explicit override
         # so a client who paid down a specific Vehicle Loan sub-account

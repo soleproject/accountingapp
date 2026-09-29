@@ -1,5 +1,19 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 8) — Liability Payment: unlimited itemized buckets + Haiku fallback classifier ✅
+
+- **Problem**: The pink liability breakdown was effectively limited to 4 rows (Principal / Interest / Escrow / Fees). Statements with distinct line items for PMI, Property Tax, HOA Dues, Homeowners Insurance, etc. would either get lumped into Escrow (correct amount, wrong account) or dropped to `unresolved` (silent data loss). Novel labels like "Deferred Interest" or "Modification Fee" fell through entirely.
+- **Fix — Vision prompt** (`client_review_engine.py`): rewrote `_LIABILITY_VISION_SYSTEM_PROMPT` to explicitly permit ONE bucket per distinct line item on the statement (preserving the statement's own label), added a 7-line example (Principal / Interest / Escrow / PMI Premium / Property Tax / HOA Dues / Late Fee), and gave account-name guidance for PMI/MIP, Homeowners/Hazard/Flood/Wind Insurance, Property Tax, HOA/Condo/Association Dues, Curtailment, Payoff Adjustment.
+- **Fix — Three new canonical semantic accounts** (`canonical_semantic_accounts.py`):
+  - `insurance_expense` — Insurance Expense (6250, Sched C-15)
+  - `property_tax_expense` — Property Tax Expense (6260, Sched C-23)
+  - `hoa_dues` — HOA & Association Dues (6270, Sched C-20b)
+- **Fix — `_LIABILITY_LABEL_TO_SEMANTIC`** (`client_review_handlers.py`): extended from 16 → 47 exact-match keys covering all common mortgage/CC/loan line items, plus curtailment/payoff-adjustment → principal.
+- **Fix — Substring fallback**: reordered to check specific keywords FIRST (property tax, HOA, PMI, homeowners, hazard, flood) before the generic "tax"/"fee"/"insurance"/"charge" catchalls so "Property Tax" no longer misroutes to Escrow and "HOA Dues" no longer misroutes to Bank Fees.
+- **Fix — Haiku semantic-classify fallback** (`_semantic_classify_liability_bucket`): for labels that STILL don't match any keyword, Claude Haiku classifies to one of `{interest_expense, escrow_prepaid, insurance_expense, property_tax_expense, hoa_dues, bank_fees, principal}` at confidence ≥0.65. Handles novel labels like "Deferred Interest", "Modification Fee", "Rate Buy-down" without silent drops.
+- **Verified end-to-end**: an 8-bucket split (including "PMI Premium", "Property Tax", "HOA Dues", "Late Fee", and the novel "Deferred Interest") posted all 8 splits summing exactly to $2,145.67. Deferred Interest was routed by Haiku to Interest Expense. Zero unresolved.
+
+
 ## 2026-02-21 (later 7) — Account Detail: split-line amount fix + edit-modal split preservation + CoA defaults ✅
 
 ### Issue 1: Account Detail showed misleading Amount column for split rows
