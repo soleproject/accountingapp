@@ -1759,11 +1759,26 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
   // `context.amount` is absent — fall back to `context.total` and
   // honor `context.direction` when it's set.
   const ctx = currentItem?.context || {};
+  const meta = ctx.meta || {};
   const amount = Number(ctx.amount ?? ctx.total ?? 0);
   const isMoneyOut = ctx.direction
     ? ctx.direction === "out"
     : amount < 0;
   const linkKind = isMoneyOut ? "bill" : "invoice";
+  // Use the rich multi-select LinkModal when we have a single
+  // underlying transaction id — it writes proper `db.payments`
+  // docs via /receive-payment (so Payment History on the bill /
+  // invoice actually reflects the applied amount, and the client
+  // can split ONE payment across multiple bills/invoices). Grouped
+  // items fall back to the simpler LinkDocPicker.
+  // txn_id lives on `context.txn_id` for uncategorized items and
+  // on `context.meta.txn_id` for missing-receipt / liability items —
+  // check both locations.
+  const singleTxnId = ctx.txn_id || meta.txn_id || null;
+  const singleTxnAmount = Number(
+    ctx.amount ?? meta.txn_amount ?? amount ?? 0
+  );
+  const singleTxnContactId = ctx.contact_id || meta.contact_id || null;
   return (
     <>
       <div className="grid grid-cols-4 gap-3 py-3" data-testid="uncat-shortcuts">
@@ -1853,7 +1868,40 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           Or type your answer below — "not sure" sends it to your bookkeeper.
         </div>
       )}
-      {pickerOpen && (
+      {pickerOpen && (singleTxnId ? (
+        <LinkModal
+          token={token}
+          itemId={currentItem.item_id}
+          currentId={""}  /* not used in token mode — endpoint is derived from token */
+          txn={{ id: singleTxnId, amount: singleTxnAmount, contact_id: singleTxnContactId }}
+          onClose={() => setPickerOpen(false)}
+          onApplied={(res) => {
+            setPickerOpen(false);
+            const apps = res?.applications || [];
+            const total = apps.reduce((s, a) => s + Number(a.amount || 0), 0);
+            const isBill = !!apps.find((a) => a.bill_id);
+            // Normalize LinkModal's `{applications: [...]}` shape to
+            // the legacy `onLinked` contract the ChatBubble / Continue
+            // gate expect: `{message, applied, new_balance,
+            // contact_name, doc_type}`. `new_balance` is set to 0 when
+            // fully paid (LinkModal's guard already refuses to submit
+            // unless remaining ≈ 0); otherwise pass through if the
+            // endpoint returned it.
+            const remaining = Number(res?.remaining || 0);
+            const contactName = apps[0]?.contact_name
+              || res?.contact_name
+              || (isBill ? "vendor" : "customer");
+            onLinked({
+              message:      `Linked to ${apps.length} ${isBill ? "bill" : "invoice"}${apps.length === 1 ? "" : "s"}`,
+              applied:      total,
+              new_balance:  remaining,
+              contact_name: contactName,
+              doc_type:     isBill ? "bill" : "invoice",
+              applications: apps,
+            });
+          }}
+        />
+      ) : (
         <LinkDocPicker
           token={token}
           itemId={currentItem.item_id}
@@ -1862,7 +1910,7 @@ function UncategorizedShortcuts({ currentItem, token, onReceipt, onLinked, onTal
           onClose={() => setPickerOpen(false)}
           onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
         />
-      )}
+      ))}
       {catPickerOpen && (
         <CategoryQuickPicker
           token={token}
@@ -1954,7 +2002,35 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDi
           </div>
         </button>
       </div>
-      {pickerOpen && (
+      {pickerOpen && (meta.txn_id ? (
+        <LinkModal
+          token={token}
+          itemId={currentItem.item_id}
+          currentId={""}
+          txn={{
+            id: meta.txn_id,
+            amount: -Math.abs(Number(meta.txn_amount ?? amount ?? 0)),
+            contact_id: meta.contact_id || null,
+          }}
+          onClose={() => setPickerOpen(false)}
+          onApplied={(res) => {
+            setPickerOpen(false);
+            const apps = res?.applications || [];
+            const total = apps.reduce((s, a) => s + Number(a.amount || 0), 0);
+            const remaining = Number(res?.remaining || 0);
+            const contactName = apps[0]?.contact_name
+              || res?.contact_name || "vendor";
+            onLinked({
+              message:      `Linked to ${apps.length} bill${apps.length === 1 ? "" : "s"}`,
+              applied:      total,
+              new_balance:  remaining,
+              contact_name: contactName,
+              doc_type:     "bill",
+              applications: apps,
+            });
+          }}
+        />
+      ) : (
         <LinkDocPicker
           token={token}
           itemId={currentItem.item_id}
@@ -1963,7 +2039,7 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDi
           onClose={() => setPickerOpen(false)}
           onLinked={(res) => { setPickerOpen(false); onLinked(res); }}
         />
-      )}
+      ))}
     </>
   );
 }

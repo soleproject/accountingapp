@@ -3026,18 +3026,25 @@ async def client_receive_payment(
         now = _now_iso()
         item = next((i for i in (batch.get("items") or [])
                      if i.get("item_id") == item_id), None)
+        # Sniff bill vs invoice from the payload so the audit trail
+        # says "bill_payment_applied" for AP flows and
+        # "invoice_payment_applied" for AR — Uncategorized→Bill and
+        # MissingReceipt→Bill both use this endpoint now.
+        apps = payload.get("applications") or []
+        is_bill = bool(apps and (apps[0].get("bill_id")))
+        doc_word = "bill" if is_bill else "invoice"
         if item and not item.get("answered_at") and not item.get("deferred"):
             await db.client_review_batches.update_one(
                 {"id": batch["id"], "items.item_id": item_id},
                 {"$set": {
                     "items.$.answered_at":        now,
-                    "items.$.answer":             "Link to invoice",
-                    "items.$.action_taken":       "invoice_payment_applied",
-                    "items.$.action_detail":      f"Applied ${float(txn.get('amount') or 0):,.2f} across invoice(s).",
+                    "items.$.answer":             f"Link to {doc_word}",
+                    "items.$.action_taken":       f"{doc_word}_payment_applied",
+                    "items.$.action_detail":      f"Applied ${abs(float(txn.get('amount') or 0)):,.2f} across {doc_word}(s).",
                     "items.$.answered_by_client": True,
-                    "items.$.answered_payload":   {"flow": "customer_payment",
-                                                    "sub_flow": "link_invoice",
-                                                    "applications": payload.get("applications") or []},
+                    "items.$.answered_payload":   {"flow": ("vendor_payment" if is_bill else "customer_payment"),
+                                                    "sub_flow": f"link_{doc_word}",
+                                                    "applications": apps},
                     "updated_at":                 now,
                 }, "$inc": {"answer_count": 1}},
             )
@@ -3046,8 +3053,8 @@ async def client_receive_payment(
                     {"id": item["source_id"], "company_id": cid},
                     {"$set": {"status":       "resolved",
                               "resolved_at":  now,
-                              "resolved_by":  "client:deposit_linked_to_invoice",
-                              "client_answer":       "Link to invoice",
+                              "resolved_by":  f"client:txn_linked_to_{doc_word}",
+                              "client_answer":       f"Link to {doc_word}",
                               "client_answered_at":  now,
                               "meta.matched_txn_id": tid}},
                 )

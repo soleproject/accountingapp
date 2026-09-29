@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 10) — Uncategorized/Missing-Receipt → Bill: real payments + multi-select ✅
+
+**Two-in-one fix**: the Quick Check-in "Link to a bill" flow was using a simplified single-select picker (`LinkDocPicker`) that hit `/link-doc`. That endpoint mutated `bills.balance_due` directly but never inserted into `db.payments`. Since `routes/bills.py` recomputes `paid` from `db.payments` (and self-heals `balance_due` on every read), the bill would report "Total Paid $0 · No payments applied yet" on the very next load — while the check-in kept claiming success.
+
+**Fix**: Swap the picker for the rich `LinkModal` (already imported and used by Deposit → Customer payment). Its multi-doc `receive-payment` endpoint delegates to `routes.transactions.receive_payment_multi`, which:
+- Creates a real `db.payments` doc with `linked_bill_id` / `applications[]` / `source_transaction_id`.
+- Handles multi-select (pick 1..N bills in a single view with per-row apply amounts).
+- Auto-reconciles the totals so the applied amount == the withdrawal.
+
+**Changes**:
+- `ClientReviewPage.jsx`:
+  - `UncategorizedShortcuts`: pulls `singleTxnId` from `ctx.txn_id ?? ctx.meta.txn_id`. When present, opens `LinkModal` instead of `LinkDocPicker`. Grouped items (no single txn_id) still get the legacy picker.
+  - `MissingReceiptShortcuts`: same swap; `LinkModal` is opened with a negative amount so the modal shows the Bill tab by default.
+  - `onApplied` shim: translates `LinkModal`'s `{applications: [...], remaining, ...}` output into the legacy `onLinked({message, applied, new_balance, contact_name, doc_type})` contract so upstream chat-bubble + Continue-gate logic doesn't need to change.
+- `routes/client_review.py · client_receive_payment`: detects `bill_id` vs `invoice_id` in the applications array and now stamps `action_taken="bill_payment_applied"` / audit `resolved_by="client:txn_linked_to_bill"` for AP flows (previously hard-coded to invoice).
+- **Verified via curl end-to-end**: apply -$483.29 Home Depot txn to bill HD-88410 → `db.payments` doc created with proper `linked_bill_id` + `applications[]`; bill `balance_due` → 0, `status` → "paid"; Payment History on the bill-edit page will now render the applied payment.
+
+
 ## 2026-02-21 (later 9) — Liability Payment: "Change" on every bucket + generic account picker ✅
 
 - **Feature**: Every row in the LiabilityBreakdown pink area now has a **Change** link — not just Principal. Client can retarget Interest, Escrow, Fees, PMI, HOA, Property Tax (or any custom bucket) to a specific expense/asset account, or mint a brand-new account inline.
