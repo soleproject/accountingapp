@@ -1,5 +1,17 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 3) — Quick Check-in: no auto-advance, explicit Continue gate ✅
+
+- **Problem**: Every success handler in `ClientReviewPage.jsx` auto-advanced to the next item via `setTimeout(() => advance(), N)` (10 sites + 2 direct `advance()` calls in `applyAnswer`/`deferItem`). Users couldn't read the confirmation or stay put — the wizard jumped ahead on its own.
+- **Fix**: Single new state `justCompleted` + a `markCompleted({label, detail})` helper. Every success path now calls `markCompleted(...)` instead of `advance()`. When set:
+  - Composer is replaced with a persistent emerald **"✓ Completed — Continue →"** banner (data-testid `review-completed-gate`), autofocused Continue button (data-testid `review-continue-btn`).
+  - The item is locally flagged `answered_at` so shortcut tiles hide and the header ticks to "ANSWERED", but `activeIdx` stays put.
+  - Clicking **Continue** invokes the real `advance()` — moves to the next unfinished item, drops departure/arrival transition bubbles.
+  - Header chevrons (`jumpTo`) also clear the gate, so the user can back up or skip forward manually.
+- Sites rewired (all 12): applyAnswer, deferItem, DepositShortcuts.onBooked, SuggestedCategoryBanner.onApplied, UncategorizedShortcuts.onLinked, UncategorizedShortcuts.onCompleted, ChecksAssignTable.onAllDone, CheckinAnswerForm.onSubmitted (meals/travel), MissingReceiptShortcuts.onLinked, MissingReceiptShortcuts.onDismissed, ChatBubble.onW9Sent, CategoryQuickPicker.onCompleted.
+- Verified end-to-end: booked $12,400 deposit as Loan received → banner appeared and remained after 5 seconds (previous flow would have auto-advanced at 1.4s) → clicked Continue → wizard moved to the next item ("Liability payment 1 of 1") with proper transition messaging.
+
+
 ## 2026-02-21 (later 2) — Loan-received picker: inline "New Account" mirrors firm-side CoA modal ✅
 
 - **Frontend** (`ClientReviewPage.jsx` · `LoanAccountPickerModal`): the inline "+ Create new liability account" form was rebuilt to match the firm-side New Account modal (`ChartOfAccounts.jsx` · `CreateAccount`) exactly:

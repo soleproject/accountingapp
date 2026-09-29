@@ -65,6 +65,12 @@ export default function ClientReviewPage() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  // Persistent "✓ Completed — Continue" gate. Set by every success
+  // path (deposit booking, receipt upload, category pick, defer, chat
+  // answer, etc.) INSTEAD of auto-advancing. The user must tap
+  // Continue (or use the header chevrons) to move on. Payload shape:
+  // { label, detail } — rendered in the gate banner.
+  const [justCompleted, setJustCompleted] = useState(null);
   // ── Web Speech dictation (Milestone: mic on client review page) ────
   // Uses the browser's SpeechRecognition API — zero backend cost, no
   // key, no extra deps. Supported in Chrome / Edge / Safari. Unsupported
@@ -313,10 +319,14 @@ export default function ClientReviewPage() {
         `${API}/${token}/items/${currentItem.item_id}/answer`,
         { answer: answerText || payload.answer_text || "Answered", payload }
       );
-      advance();
+      markCompleted({
+        label:  "Answer sent",
+        detail: answerText || payload.answer_text || "Answered.",
+      });
     } catch (e) {
-      // 409 = already finalized; just advance
-      advance();
+      // 409 = already finalized; still gate on Continue so the flow
+      // is consistent whether or not this call actually mutated state.
+      markCompleted({ label: "Answer sent" });
     } finally {
       setBusy(false);
     }
@@ -330,9 +340,12 @@ export default function ClientReviewPage() {
         `${API}/${token}/items/${currentItem.item_id}/defer`,
         { note: note || "" }
       );
-      advance();
+      markCompleted({
+        label:  "Sent to bookkeeper",
+        detail: "Your bookkeeper will handle this one.",
+      });
     } catch (e) {
-      advance();
+      markCompleted({ label: "Sent to bookkeeper" });
     } finally {
       setBusy(false);
     }
@@ -409,7 +422,32 @@ export default function ClientReviewPage() {
   const pickDeparture = () => pickFrom(DEPARTURE_LINES, lastDepartureIdxRef);
   const pickArrival   = () => pickFrom(ARRIVAL_LINES,   lastArrivalIdxRef);
 
+  // Mark the current item as "just completed" — sets the persistent
+  // Continue gate INSTEAD of auto-advancing. The item is flagged
+  // `answered_at` locally so the shortcuts hide (they gate on this
+  // flag) and the header progress chip ticks over, but the wizard
+  // stays on the current item until the user taps Continue.
+  const markCompleted = (payload = {}) => {
+    setSession((s) => {
+      if (!s) return s;
+      const items = [...(s.items || [])];
+      if (currentItem) {
+        items[activeIdx] = {
+          ...items[activeIdx],
+          answered_at: items[activeIdx]?.answered_at || new Date().toISOString(),
+        };
+      }
+      return { ...s, items };
+    });
+    setJustCompleted({
+      label:  payload.label  || "Done",
+      detail: payload.detail || null,
+    });
+  };
+
   const advance = () => {
+    // Clear the Continue gate — the user tapped through.
+    setJustCompleted(null);
     const nextIdx = (session?.items || []).findIndex(
       (i, k) => k > activeIdx && !i.answered_at && !i.deferred
     );
@@ -602,6 +640,7 @@ export default function ClientReviewPage() {
   // what they told us. Restores that item's chat history on jump.
   const jumpTo = (idx) => {
     if (idx < 0 || idx >= totalCount) return;
+    setJustCompleted(null);
     setActiveIdx(idx);
     setMessages(hydrateMessages((session?.items || [])[idx]));
     setInput("");
@@ -1125,7 +1164,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: res.detail || `Booked as ${res.label}.` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  res.label || "Deposit booked",
+                  detail: res.detail || `Booked as ${res.label}.`,
+                });
               }}
             />
           )}
@@ -1141,7 +1183,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Booked to ${res.account_name || "category"}`,
+                  detail: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}.`,
+                });
               }}
             />
           )}
@@ -1160,7 +1205,12 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || (res.doc_type === "bill" ? "the vendor" : "the customer")}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Linked to ${res.contact_name || (res.doc_type === "bill" ? "bill" : "invoice")}`,
+                  detail: res.new_balance > 0.005
+                    ? `Remaining balance: $${res.new_balance.toFixed(2)}.`
+                    : "Balance is now zero.",
+                });
               }}
               onCompleted={(res) => {
                 setMessages((prev) => [
@@ -1169,7 +1219,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Booked to ${res.account_name || "category"}`,
+                  detail: res.contact_name ? `${res.account_name} · ${res.contact_name}` : null,
+                });
               }}
               onEdited={(res) => {
                 // Refresh the currentItem's context in-place so the ItemContextCard
@@ -1200,7 +1253,7 @@ ${companyName}`;
             <ChecksAssignTable
               token={token}
               item={currentItem}
-              onAllDone={() => setTimeout(() => advance(), 800)}
+              onAllDone={() => markCompleted({ label: "All checks assigned" })}
             />
           )}
           {messages.length === 0 && currentItem && currentItem.item_type === 15 && (
@@ -1237,7 +1290,12 @@ ${companyName}`;
                     content: (res && res.detail)
                       || "Got it — filed under IRS §274 substantiation. Nice." },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  currentItem.item_type === 10
+                    ? "Meal substantiation filed"
+                    : "Trip substantiation filed",
+                  detail: (res && res.detail) || "Filed under IRS §274.",
+                });
               }}
             />
           )}
@@ -1283,7 +1341,12 @@ ${companyName}`;
                   { role: "assistant",
                     content: `Got it — booked ${res.applied ? `$${res.applied.toFixed(2)}` : "the payment"} against ${res.contact_name || "the vendor"}. ${res.new_balance > 0.005 ? `Remaining balance: $${res.new_balance.toFixed(2)}.` : "Balance is now zero — nice."}` },
                 ]);
-                setTimeout(() => advance(), 1400);
+                markCompleted({
+                  label:  `Linked to ${res.contact_name || "vendor"}`,
+                  detail: res.new_balance > 0.005
+                    ? `Remaining balance: $${res.new_balance.toFixed(2)}.`
+                    : "Balance is now zero.",
+                });
               }}
               onDismissed={() => {
                 setMessages((prev) => [
@@ -1292,7 +1355,10 @@ ${companyName}`;
                   { role: "assistant",
                     content: "Done — I've marked this transaction as receipt-not-needed and dropped it from the queue." },
                 ]);
-                setTimeout(() => advance(), 1200);
+                markCompleted({
+                  label:  "Receipt dismissed",
+                  detail: "Marked as receipt-not-needed.",
+                });
               }}
             />
           )}
@@ -1329,7 +1395,10 @@ ${companyName}`;
                     content: `Locked in — email sent to ${to || "them"}. As soon as they reply with the completed W-9, you'll see it back in your books.`,
                   }];
                 });
-                setTimeout(() => advance(), 1500);
+                setTimeout(() => markCompleted({
+                  label:  `W-9 request sent to ${to || "them"}`,
+                  detail: "You'll see the completed W-9 back in your books once they reply.",
+                }), 1500);
               }}
               onRemoveAttachment={(aid, itemId) => removeAttachment(aid, itemId, i)}
               onBreakdownChange={(next) => {
@@ -1487,6 +1556,33 @@ ${companyName}`;
       {/* Composer */}
       <footer className="bg-white border-t px-4 py-3 sticky bottom-0">
         <div className="max-w-2xl mx-auto">
+          {justCompleted ? (
+            <div className="flex items-center gap-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3" data-testid="review-completed-gate">
+              <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <Check size={18} className="text-emerald-700" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-semibold text-slate-800 truncate">
+                  {justCompleted.label || "Done"}
+                </div>
+                {justCompleted.detail && (
+                  <div className="text-[11px] text-slate-500 leading-tight truncate">
+                    {justCompleted.detail}
+                  </div>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={advance}
+                autoFocus
+                className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-[0_6px_14px_-6px_rgba(5,150,105,0.6)] shrink-0"
+                data-testid="review-continue-btn"
+              >
+                {activeIdx >= totalCount - 1 ? "Finish →" : "Continue →"}
+              </button>
+            </div>
+          ) : (
+          <>
           <div className="flex items-end gap-2">
             {UPLOAD_ITEM_TYPES.has(currentItem?.item_type) && (
               <>
@@ -1579,6 +1675,8 @@ ${companyName}`;
               </span>
             )}
           </div>
+          </>
+          )}
         </div>
       </footer>
 
@@ -1620,7 +1718,10 @@ ${companyName}`;
               { role: "assistant",
                 content: `Booked to ${res.account_name}${res.contact_name ? ` (${res.contact_name})` : ""}. Nice — one down.` },
             ]);
-            setTimeout(() => advance(), 1400);
+            markCompleted({
+              label:  `Booked to ${res.account_name || "category"}`,
+              detail: res.contact_name ? `${res.account_name} · ${res.contact_name}` : null,
+            });
           }}
         />
       )}
