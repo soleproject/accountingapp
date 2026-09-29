@@ -1,5 +1,20 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 6) — Liability Payment: semantic lender → CoA auto-match ✅
+
+- **Feature**: after the AI Vision analyzer extracts a `lender_name` from an uploaded mortgage / credit-card / auto-loan statement, we now automatically pre-select the matching liability sub-account on the client's chart of accounts — the client no longer has to click "Change" every time.
+- **Backend** (`routes/client_review.py`):
+  - New helper `_semantic_lender_to_liability_account(company_id, lender_name)`. Pool: all liability accounts that are sub-accounts (`parent_account_id` set) — skips retired accounts and the canonical "Loans Payable" / "Credit Cards Payable" parent buckets.
+  - Fast path: case-insensitive exact-name match (no LLM burn when trivial).
+  - Semantic path: Claude Haiku via `ai_service._new_chat` (mirrors `routes.accounts._semantic_contact_match`). Handles institution rebrands ("Chase Auto" ↔ "JPMorgan Chase Auto Loan"), DBA variants ("Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage — 123 Main"), abbreviations ("BofA" ↔ "Bank of America"), and legal-form suffixes. Confidence gate ≥0.75; returns None on doubt (client picks manually).
+  - Wired into `POST /{token}/items/{item_id}/upload` right after `analyze_liability_statement_for_split` returns. On match: stamps `principal_account_id` + updated `account_name` onto the Principal bucket AND surfaces a top-level `matched_principal_account` field for optional "Auto-matched to X" hint on the frontend.
+- **Frontend**: no changes needed — `LiabilityBreakdown` already reads `b.account_name` for display and rides `b.principal_account_id` through the "Use this split" payload hoist added in the prior turn. The pre-selection just appears organically.
+- **Verified via direct helper calls**:
+  - "Rocket Mortgage" → exact-match fast path → 2520 (no LLM call).
+  - "Mercedes-Benz Financial Services USA LLC" → Haiku semantic match → 2540 "Mercedes-Benz Financial Services" (legal-form suffix ignored).
+  - "Wells Fargo Home Mortgage" / "Chase Sapphire" / "BofA Auto" → correctly returned None when no CoA candidate exists.
+
+
 ## 2026-02-21 (later 5) — Liability Payment: Principal sub-account picker ✅
 
 - **Problem**: The Liability Payment (item-type 9) split UI showed which account each bucket would post to (Principal → Loans Payable, Interest → Interest Expense, etc.) but didn't let the client pick a SPECIFIC liability sub-account for the paydown. Every mortgage/loan payment fell into the canonical "Loans Payable" bucket, no matter which specific loan (Rocket Mortgage, Wells Fargo Auto, Vehicle Loan — Toyota) it was actually for.

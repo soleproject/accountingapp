@@ -19,6 +19,7 @@ authorization is possible.
 from __future__ import annotations
 import base64
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -471,7 +472,6 @@ _W9_LINK = "https://www.irs.gov/pub/irs-pdf/fw9.pdf"
 
 
 def _valid_email(s: str) -> bool:
-    import re
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", (s or "").strip()))
 
 
@@ -2043,6 +2043,118 @@ ITEM_TYPE_LABEL = {
 }
 
 
+async def _semantic_lender_to_liability_account(
+    company_id: str, lender_name: str,
+) -> Optional[dict]:
+    """Ask Claude Haiku whether `lender_name` (extracted from a
+    statement — e.g. "Wells Fargo Home Mortgage") refers to the same
+    real-world institution as any of the company's existing liability
+    sub-accounts. Returns the account dict `{id, name, code}` when the
+    LLM is confident (>=0.75), else None.
+
+    Same pattern as `routes.accounts._semantic_contact_match` — catches
+    institution rebrands ("Chase Auto" ↔ "JPMorgan Chase Auto Loan"),
+    DBA variants ("Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage
+    — 123 Main"), and casual spellings ("BofA" ↔ "Bank of America
+    Auto Loan"). We only consider SUB-accounts (has parent_account_id)
+    — the canonical "Loans Payable" / "Credit Cards Payable" parents
+    are catch-alls, not specific loan records worth pre-selecting.
+    """
+    lender_name = (lender_name or "").strip()
+    if not lender_name:
+        return None
+
+    # Candidate pool: liability sub-accounts on this company's CoA.
+    # Skip retired accounts and the canonical parent buckets.
+    candidates: list[dict] = []
+    async for a in db.accounts.find(
+        {"company_id": company_id, "type": "liability"},
+        {"id": 1, "name": 1, "code": 1, "parent_account_id": 1,
+         "subtype": 1, "detail_type": 1, "retired_at": 1},
+    ):
+        if a.get("retired_at"):
+            continue
+        if not a.get("parent_account_id"):
+            # Top-level (parent) — skip. We want the specific loan
+            # record, not the catch-all "Loans Payable" bucket.
+            continue
+        candidates.append({
+            "id": a["id"],
+            "name": a.get("name") or "",
+            "code": a.get("code") or "",
+            "subtype": a.get("subtype") or "",
+            "detail_type": a.get("detail_type") or "",
+        })
+
+    if not candidates:
+        return None
+
+    # Fast path: exact case-insensitive name match — no need to burn a
+    # Haiku call when the lender name IS the account name.
+    lender_norm = re.sub(r"\s+", " ", lender_name).lower()
+    for c in candidates:
+        if re.sub(r"\s+", " ", c["name"]).lower() == lender_norm:
+            return c
+
+    # Bounded prompt — keep costs sane on large CoAs.
+    cands = candidates[:40]
+    lines = "\n".join(
+        f"- id={c['id']} · name={c['name']}"
+        + (f" · code={c['code']}" if c.get("code") else "")
+        + (f" · subtype={c['subtype']}" if c.get("subtype") else "")
+        for c in cands
+    )
+    system = (
+        "You are helping a bookkeeping app auto-route a mortgage / "
+        "credit-card / auto-loan payment to the correct liability "
+        "sub-account on the company's chart of accounts. "
+        "Judge SEMANTICALLY, not by string similarity alone. Treat "
+        "institution rebrands (\"Chase Auto\" ↔ \"JPMorgan Chase Auto "
+        "Loan\"), DBA variants (\"Wells Fargo Home Mortgage\" ↔ "
+        "\"Wells Fargo Mortgage — 123 Main\"), abbreviations (\"BofA\" "
+        "↔ \"Bank of America\"), and legal-form suffixes (LLC, N.A., "
+        "Inc, Corp) as SAME. Distinct institutions (\"Chase\" vs "
+        "\"Chase Freedom Credit Card\" — probably a specific card "
+        "sub-account) can still match if it's clearly the same lender. "
+        "When multiple candidates plausibly match, prefer the one "
+        "whose name most specifically matches the lender's product "
+        "line (mortgage → mortgage sub-acct, auto → auto sub-acct). "
+        "When in doubt, return null — do NOT force a match. "
+        "Reply with STRICT JSON only, no prose, no code fences."
+    )
+    user = (
+        f"LENDER (from statement): \"{lender_name}\"\n\n"
+        f"EXISTING LIABILITY SUB-ACCOUNTS:\n{lines}\n\n"
+        "Respond as:\n"
+        "{ \"match_id\": \"<candidate id or null>\", "
+        "\"confidence\": <0.0-1.0>, "
+        "\"reason\": \"<one short line>\" }"
+    )
+    try:
+        from ai_service import _new_chat, _extract_json, MODEL_HAIKU
+        from llm_client import UserMessage
+        chat = _new_chat(system, f"lender-match-{company_id}",
+                          model_name=MODEL_HAIKU,
+                          feature="lender-semantic-match",
+                          company_id=company_id)
+        text = await chat.send_message(UserMessage(text=user))
+    except Exception:  # noqa: BLE001
+        return None
+    parsed = _extract_json(text or "") or {}
+    mid  = parsed.get("match_id")
+    conf = parsed.get("confidence")
+    try:
+        conf = float(conf) if conf is not None else 0.0
+    except (TypeError, ValueError):
+        conf = 0.0
+    if not mid or mid in ("null", "None"):
+        return None
+    if conf < 0.75:
+        return None
+    valid = {c["id"]: c for c in cands}
+    return valid.get(mid)
+
+
 @router.post("/{token}/items/{item_id}/upload")
 async def post_upload(
     token: str, item_id: str,
@@ -2252,6 +2364,39 @@ async def post_upload(
         except Exception:  # noqa: BLE001
             liab_analysis = None
         if liab_analysis:
+            # Auto-match the extracted lender name to an existing
+            # liability sub-account on the company's CoA — if we're
+            # confident, stamp `principal_account_id` on the Principal
+            # bucket so the client doesn't have to click "Change" in
+            # the LiabilityBreakdown UI. Semantic match (Haiku) handles
+            # "Wells Fargo Home Mortgage" ↔ "Wells Fargo Mortgage —
+            # 123 Main", "Chase Auto" ↔ "JPMorgan Chase Auto Loan",
+            # etc. Silently no-ops when no confident match exists —
+            # the user picks manually via the "Change" affordance.
+            lender = (liab_analysis.get("lender_name") or "").strip()
+            if lender:
+                try:
+                    matched = await _semantic_lender_to_liability_account(
+                        batch["company_id"], lender,
+                    )
+                except Exception:  # noqa: BLE001
+                    matched = None
+                if matched and matched.get("id"):
+                    liab_analysis["matched_principal_account"] = {
+                        "id":   matched["id"],
+                        "name": matched.get("name") or "",
+                        "code": matched.get("code") or "",
+                    }
+                    # Also stamp onto the Principal bucket so the
+                    # frontend LiabilityBreakdown picks it up on first
+                    # render (matches the shape the "Change" affordance
+                    # already produces via editBucket).
+                    for b in (liab_analysis.get("buckets") or []):
+                        label = (b.get("label") or "").lower()
+                        if "principal" in label:
+                            b["principal_account_id"] = matched["id"]
+                            b["account_name"] = matched.get("name") or b.get("account_name") or ""
+                            break
             resp["liability_analysis"] = liab_analysis
             await db.client_review_batches.update_one(
                 {"id": batch["id"], "items.item_id": item_id},
