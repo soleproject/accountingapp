@@ -21,6 +21,7 @@ DEFAULT_COA = [
     ("1500", "Prepaid Expenses", "asset", "current_asset", "vendor_prepayments"),
     ("1100", "Undeposited Funds", "asset", "current_asset", "money_in_transit"),
     ("1600", "Equipment", "asset", "fixed_asset", "property_plant_equipment"),
+    ("1650", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment"),
     ("1700", "Accumulated Depreciation", "asset", "fixed_asset", "depreciation_and_amortization"),
     # Liabilities
     ("2000", "Accounts Payable", "liability", "current_liability", "expected_payments_to_vendors"),
@@ -51,6 +52,7 @@ DEFAULT_COA = [
     ("6800", "Supplies & Materials", "expense", "operating_expense", "operating_expense"),
     ("6900", "Repairs & Maintenance", "expense", "operating_expense", "operating_expense"),
     ("7000", "Bank Fees", "expense", "payment_processing_fee", "payment_processing_fee"),
+    ("7050", "Interest Expense", "expense", "operating_expense", "operating_expense"),
     ("7100", "Software & SaaS", "expense", "operating_expense", "operating_expense"),
     ("7200", "Payroll", "expense", "payroll_expense", "payroll_expense"),
     ("9999", "Uncategorized Expense", "expense", "operating_expense", "operating_expense"),

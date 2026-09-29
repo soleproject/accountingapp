@@ -4068,7 +4068,14 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const [description, setDescription] = useState(initialTxn?.description || "");
   const [merchant, setMerchant] = useState(initialTxn?.merchant || "");
   const [amount, setAmount] = useState(
-    initialTxn?.amount != null ? String(initialTxn.amount) : ""
+    // Prefer `txn_amount` when the caller passed one — the account-
+    // detail row's `amount` field is the SPLIT-LINE amount (e.g. -$19
+    // for the Fees line of a $2,145 mortgage payment), whereas the
+    // modal always edits the WHOLE parent transaction. Non-split
+    // callers omit `txn_amount`, so we fall back to `amount`.
+    initialTxn?.txn_amount != null
+      ? String(initialTxn.txn_amount)
+      : (initialTxn?.amount != null ? String(initialTxn.amount) : "")
   );
   const [categoryId, setCategoryId] = useState(initialTxn?.category_account_id || "");
   // Source Account the transaction hit. Pulled from all Asset + Liability

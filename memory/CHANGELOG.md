@@ -1,5 +1,22 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 7) — Account Detail: split-line amount fix + edit-modal split preservation + CoA defaults ✅
+
+### Issue 1: Account Detail showed misleading Amount column for split rows
+- **Problem**: A mortgage payment split into 4 buckets ($812.45 P / $1,104.22 I / $210 E / $19 F) showed the FULL parent amount (-$2,145.67) in every account's Amount column — even though the running balance was correct. The Edit Transaction modal opened with "Split into multiple categories" UNCHECKED because the account-detail row didn't carry the `splits` field.
+- **Root cause** (`reports.py:3192-3220` · `compute_account_detail`): `_row_delta` correctly used the split's own amount for the running-balance delta, but the row-building loop unconditionally set `"amount": t.get("amount")` (parent total). The row projection also dropped `splits`, `category_account_id`, `bank_account_id`, etc. — so the Edit modal saw a stripped shape.
+- **Fix**:
+  - `_row_delta` refactored to return `(delta, display_amount, matched_split)`. Split-line rows get `disp_amt = split.amount` (e.g. -$19), non-split rows keep parent total.
+  - Row builder now surfaces `splits`, `category_account_id`, `bank_account_id`, `account_id`, `contact_id`, `linked_invoice_id`, `linked_bill_id`, `attachments`, plus a new `txn_amount` (raw parent total) so the Edit modal can bind its Amount input to the correct value.
+  - When a row matches via a split, the split's `description` is appended to the parent's description (e.g. "WELLS FARGO HOME MTG PMT 4291 — Fees") and `_split_bucket` / `_is_split_line` markers are set.
+- **Frontend** (`Transactions.jsx` · `ManualTxnModal`): `amount` state now prefers `initialTxn.txn_amount` when present (the parent total for edit purposes) and falls back to `initialTxn.amount` (backward compat for non-report callers). `splits` continues to be read off `initialTxn.splits`, which is now populated on account-detail rows too — so the "Split into multiple categories" checkbox pre-checks correctly.
+- **Verified**: Bank Fees Account Detail shows the mortgage-payment row as -$19.00 with balance $536 (was -$2,145.67 / $536); Test Mortgage shows -$812.45 / $812.45; the row-sums-to-balance banner now matches; clicking a split row opens the Edit modal with the split checkbox checked and Amount = -$2,145.67.
+
+### Issue 2: Add "Interest Expense" (7050) and "Office Equipment" (1650) to standard initial CoA
+- **`backend/seed.py` · `DEFAULT_COA`**: added `("1650", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment")` and `("7050", "Interest Expense", "expense", "operating_expense", "operating_expense")` — every new US company gets them at creation.
+- **Backfilled Test 519 LLC** (`eae0bd47-0545-4f7c-9175-d838f8d1637b`): Office Equipment inserted at code 1650; Interest Expense (which existed without a code — that's why prior liability-split responses showed "no-code") patched to code 7050 with canonical subtype/detail_type.
+
+
 ## 2026-02-21 (later 6) — Liability Payment: semantic lender → CoA auto-match ✅
 
 - **Feature**: after the AI Vision analyzer extracts a `lender_name` from an uploaded mortgage / credit-card / auto-loan statement, we now automatically pre-select the matching liability sub-account on the client's chart of accounts — the client no longer has to click "Change" every time.
