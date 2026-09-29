@@ -1437,6 +1437,15 @@ ${companyName}`;
                 // Principal / Interest / Escrow / Fees buckets.
                 if (t === "Use this split" && m._liabilityProposal) {
                   const a = m._liabilityProposal;
+                  // Hoist principal_account_id (stamped on the
+                  // Principal bucket by the LoanAccountPickerModal
+                  // inside LiabilityBreakdown) to a top-level field
+                  // so the backend can route the paydown to the
+                  // specific liability sub-account the client picked.
+                  const principal = (a.buckets || []).find(
+                    (b) => ((b.label || "").toLowerCase().includes("principal"))
+                  );
+                  const principalAcctId = principal?.principal_account_id || null;
                   applyAnswer(
                     {
                       flow: "liability_split",
@@ -1445,6 +1454,7 @@ ${companyName}`;
                       buckets:        a.buckets || [],
                       totals:         a.totals || null,
                       payment_amount: a.payment_amount,
+                      principal_account_id: principalAcctId,
                     },
                     `Approved split: ${(a.buckets || [])
                       .map((b) => `${b.label} $${Number(b.amount || 0).toFixed(2)}`)
@@ -4695,14 +4705,19 @@ function CategorizationBreakdown({ breakdown, onChange }) {
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
-function LiabilityBreakdown({ breakdown, onChange }) {
+function LiabilityBreakdown({ breakdown, token, onChange }) {
   // Editable bucket list for mortgage / credit-card / auto-loan
   // statements. Each bucket has {label, amount, account_name}. The
-  // client can tweak any amount inline; the total reflows. `onChange`
-  // pushes the edited breakdown up so "Use this split" applies it.
+  // client can tweak any amount inline; the total reflows. The
+  // Principal row also lets the client pick a SPECIFIC liability
+  // sub-account (e.g. "Vehicle Loan — Toyota") so the paydown lands
+  // on the exact loan record, not the canonical "Loans Payable"
+  // bucket. `onChange` pushes the edited breakdown up so "Use this
+  // split" applies it.
   const [buckets, setBuckets] = React.useState(() =>
     (breakdown.buckets || []).map((b, i) => ({ ...b, _idx: i })),
   );
+  const [pickerOpen, setPickerOpen] = React.useState(false);
   const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
@@ -4720,6 +4735,12 @@ function LiabilityBreakdown({ breakdown, onChange }) {
       return next;
     });
   };
+
+  // "Principal" bucket detection — loose match (handles "Principal",
+  // "Principal Payment", "Loan Principal", etc.).
+  const isPrincipal = (b) => ((b?.label || "").toLowerCase().includes("principal"));
+  const principalBucket = buckets.find(isPrincipal);
+  const principalAmount = Number(principalBucket?.amount || 0);
 
   const typeStyle = {
     mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50",    border: "border-rose-200"  },
@@ -4754,9 +4775,32 @@ function LiabilityBreakdown({ breakdown, onChange }) {
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{b.label}</div>
                 {b.account_name && (
-                  <div className="text-[11px] text-slate-500 truncate">
-                    → {b.account_name}
+                  <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
+                    <span className="truncate">→ {b.account_name}</span>
+                    {isPrincipal(b) && token && (
+                      <button
+                        type="button"
+                        onClick={() => setPickerOpen(true)}
+                        className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
+                        data-testid={`liability-principal-change-${b._idx}`}
+                      >
+                        Change
+                      </button>
+                    )}
                   </div>
+                )}
+                {/* Fallback: if AI didn't propose an account_name for
+                    Principal, still show a "Pick account" affordance
+                    so the client can route it to a specific loan. */}
+                {!b.account_name && isPrincipal(b) && token && (
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(true)}
+                    className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2"
+                    data-testid={`liability-principal-pick-${b._idx}`}
+                  >
+                    → Pick a liability account
+                  </button>
                 )}
               </div>
               <input
@@ -4775,6 +4819,20 @@ function LiabilityBreakdown({ breakdown, onChange }) {
           <span className="font-mono-num tabular-nums">{money(grandTotal)}</span>
         </div>
       </div>
+      {pickerOpen && principalBucket && (
+        <LoanAccountPickerModal
+          token={token}
+          amount={principalAmount}
+          onClose={() => setPickerOpen(false)}
+          onPicked={(acct) => {
+            setPickerOpen(false);
+            editBucket(principalBucket._idx, {
+              principal_account_id: acct.id,
+              account_name:         acct.name,
+            });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -4991,6 +5049,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         {hasLiability && (
           <LiabilityBreakdown
             breakdown={message._liabilityBreakdown}
+            token={w9Token}
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}

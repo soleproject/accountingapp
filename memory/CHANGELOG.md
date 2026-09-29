@@ -1,5 +1,18 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 5) — Liability Payment: Principal sub-account picker ✅
+
+- **Problem**: The Liability Payment (item-type 9) split UI showed which account each bucket would post to (Principal → Loans Payable, Interest → Interest Expense, etc.) but didn't let the client pick a SPECIFIC liability sub-account for the paydown. Every mortgage/loan payment fell into the canonical "Loans Payable" bucket, no matter which specific loan (Rocket Mortgage, Wells Fargo Auto, Vehicle Loan — Toyota) it was actually for.
+- **Fix — Frontend** (`ClientReviewPage.jsx` · `LiabilityBreakdown`):
+  - Component now accepts a `token` prop (threaded through `ChatBubble`).
+  - Principal row (loose keyword match on label — handles "Principal", "Principal Payment", "Loan Principal") gets a small inline **Change** link next to the "→ Loans Payable" hint. If the AI didn't propose an account name, a "→ Pick a liability account" fallback link renders instead.
+  - Clicking either opens the existing `LoanAccountPickerModal` (already built for Deposit → Loan received) with the Principal amount displayed.
+  - On pick, `editBucket(principalIdx, { principal_account_id: acct.id, account_name: acct.name })` — the picked account's id rides along on the Principal bucket AND the visible hint text updates in place.
+- **Fix — "Use this split" handler** (`ClientReviewPage.jsx:1436-1470`): finds the Principal bucket in the confirmed proposal and hoists its `principal_account_id` to a top-level payload field so the backend contract stays flat.
+- **Backend** (`client_review_handlers.py`): `_handle_liability_payment` already honored `payload.principal_account_id` (built in the prior turn) — the top-level override wins over the canonical semantic default when the sub-account exists on the company's CoA and has `type: liability`.
+- **Verified end-to-end via curl**: posted split with `principal_account_id="<Rocket Mortgage id>"` → response detail: *"Principal $812.45 → Rocket Mortgage (2520)"* (not "Loans Payable"). Interest / Escrow / Fees still route to their canonical semantic accounts.
+
+
 ## 2026-02-21 (later 4) — Liability Payment GL handler wired ✅
 
 - **Problem**: Type 9 (Liability Payment) items were routed to `_handle_generic_finding` — a stash-only no-op. Client-approved splits (Principal / Interest / Escrow / Fees) never turned into ledger rows.
