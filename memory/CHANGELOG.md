@@ -1,5 +1,20 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 11) — Answered items: full rehydration on scroll-back ✅
+
+- **Problem**: When the client navigated back to an already-answered check-in item via the header chevrons, the confirmation bubble was a generic `"✓ Answered on YYYY-MM-DD — Your answer was submitted to your bookkeeper."` — even though the item had rich structured data (`action_taken`, `action_detail`, `answered_payload.applications[]`, attachments) about exactly what happened.
+- **Fix — `hydrateMessages(item)`** (`ClientReviewPage.jsx:625-696`): re-derives a specific human-readable summary from the structured fields:
+  - **Bill/invoice apply** → enumerates each application: `🔗 Linked to N bill(s):\n• $483.29 → BILL-HD-88410 · balance now $0.00`
+  - **Receipt dismissed** → `✕ Marked as receipt-not-needed and dropped from the queue.`
+  - **Deposit classified / liability split / categorized** → uses `action_detail` (already carries the full readout like `"Booked $12,400 as Loan received → Rocket Mortgage"` or `"Split $2,145.67 into: Principal $812.45 → Loan Payable, ..."`).
+  - **W-9 email sent** → `📧 W-9 request emailed to <addr>.`
+  - **Deferred (sent to bookkeeper)** → `📮 Sent to your bookkeeper — they'll take it from here.`
+  - **Receipt uploaded** (fallback when no richer action taken) → `📎 Receipt uploaded — <filename>`
+- **Fix — backend `client_receive_payment`** (`routes/client_review.py:3030`): stamps the ENRICHED applications array (with `bill_number` / `invoice_number` and `new_balance_due` from the `receive_payment_multi` response) onto `item.answered_payload.applications`, not the raw input. This is what powers the "BILL-HD-88410 · balance now $0.00" line.
+- **UI**: `ChatBubble` content now uses `whiteSpace: pre-wrap` so the multi-line summary renders each application on its own row.
+- **Verified via screenshot**: answered Home Depot uncategorized item now shows `✓ Answered on 2026-09-29 · 🔗 Linked to 1 bill: · • $483.29 → BILL-HD-88410 · balance now $0.00` in place of the generic message.
+
+
 ## 2026-02-21 (later 10) — Uncategorized/Missing-Receipt → Bill: real payments + multi-select ✅
 
 **Two-in-one fix**: the Quick Check-in "Link to a bill" flow was using a simplified single-select picker (`LinkDocPicker`) that hit `/link-doc`. That endpoint mutated `bills.balance_due` directly but never inserted into `db.payments`. Since `routes/bills.py` recomputes `paid` from `db.payments` (and self-heals `balance_due` on every read), the bill would report "Total Paid $0 · No payments applied yet" on the very next load — while the check-in kept claiming success.

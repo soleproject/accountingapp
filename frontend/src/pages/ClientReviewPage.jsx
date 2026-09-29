@@ -620,15 +620,77 @@ export default function ClientReviewPage() {
       });
     }
     // Cap it off with a confirmation bubble so it's crystal clear the
-    // answer is locked. Includes the plain-English "Approved split: …"
-    // line the client sent, so they see exactly what got posted.
+    // answer is locked. Rehydrate the actual action taken from the
+    // structured fields the handlers stamp onto the item — so a
+    // client scrolling back sees "Applied $483.29 to BILL-566 (The
+    // Home Depot)" instead of a generic "your answer was submitted".
     if (answered) {
-      const note = item.client_answer ||
-                   item.answer_summary ||
-                   "Your answer was submitted to your bookkeeper.";
+      const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2, maximumFractionDigits: 2,
+      })}`;
+
+      // Receipt uploaded → surface as its own bubble BEFORE the
+      // Answered bubble (matches the ordering when the client
+      // originally uploaded).
+      const receiptAtts = atts.filter((a) => {
+        const ct = (a.content_type || a.mime_type || "").toLowerCase();
+        return ct.startsWith("image/") || ct.includes("pdf");
+      });
+
+      // Try each answer shape in specificity order — richer wins.
+      const action = (item.action_taken || "").toLowerCase();
+      const detail = item.action_detail || "";
+      const payload = item.answered_payload || {};
+      const apps = payload.applications || [];
+      let summary = null;
+
+      if (item.deferred) {
+        summary = "📮 Sent to your bookkeeper — they'll take it from here.";
+      } else if (action === "receipt_dismissed") {
+        summary = "✕ Marked as receipt-not-needed and dropped from the queue.";
+      } else if (action.includes("payment_applied") && apps.length) {
+        // Bill or invoice apply — enumerate each application with
+        // number + amount so the client sees exactly what got posted.
+        const isBill = !!apps[0].bill_id;
+        const noun = isBill ? "bill" : "invoice";
+        const lines = apps.map((a) => {
+          const num = a.bill_number || a.invoice_number ||
+                       String(a.bill_id || a.invoice_id || "").slice(0, 8);
+          const bal = a.new_balance_due != null
+            ? ` · balance now ${money(a.new_balance_due)}`
+            : "";
+          return `• ${money(a.amount)} → ${noun.toUpperCase()}-${num}${bal}`;
+        });
+        summary = `🔗 Linked to ${apps.length} ${noun}${apps.length === 1 ? "" : "s"}:\n${lines.join("\n")}`;
+      } else if (action === "receipt_linked" || action === "linked_bill" || action === "linked_invoice") {
+        // Legacy `/link-doc` single-doc shape.
+        const isBill = action.includes("bill") || payload.doc_type === "bill";
+        summary = `🔗 Linked to ${isBill ? "bill" : "invoice"}${detail ? ` — ${detail}` : ""}`;
+      } else if (action === "deposit_classified" || action === "liability_split") {
+        summary = detail || "Booked to your ledger.";
+      } else if (action === "categorize" || action === "categorized") {
+        summary = detail || `Booked to ${payload.account_name || "the picked category"}.`;
+      } else if (action === "w9_email_sent") {
+        summary = `📧 W-9 request emailed${payload.sent_to ? ` to ${payload.sent_to}` : ""}.`;
+      }
+
+      // If we have a receipt attachment AND no other richer summary,
+      // lean on the attachment as the primary confirmation.
+      if (!summary && receiptAtts.length) {
+        const names = receiptAtts.map((a) => a.filename || "receipt").join(", ");
+        summary = `📎 Receipt uploaded — ${names}`;
+      }
+
+      // Final fallback — the generic string, preserving whatever
+      // detail the handler put on the item.
+      const fallback = detail ||
+                       item.client_answer ||
+                       item.answer_summary ||
+                       "Your answer was submitted to your bookkeeper.";
+
       hydrated.push({
         role: "assistant",
-        content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)} — ${note}`,
+        content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)}\n${summary || fallback}`,
         _readOnlyAnswered: true,
       });
     }
@@ -5370,6 +5432,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
                    ? "bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-bl-sm"
                    : "bg-white border border-slate-200 text-slate-800 rounded-bl-sm"
         } ${isAttachment ? "pr-8 relative" : ""}`}
+        style={{ whiteSpace: "pre-wrap" }}
       >
         {message.content}
         {isAttachment && !message._readOnly && (

@@ -3030,7 +3030,14 @@ async def client_receive_payment(
         # says "bill_payment_applied" for AP flows and
         # "invoice_payment_applied" for AR — Uncategorized→Bill and
         # MissingReceipt→Bill both use this endpoint now.
-        apps = payload.get("applications") or []
+        # Prefer the enriched apps from the response (they carry
+        # bill_number / invoice_number + new_balance_due, which the
+        # frontend rehydration uses to render a nice audit chip on
+        # scroll-back). Fall back to the raw payload apps if the
+        # response didn't return them.
+        enriched_apps = (result or {}).get("payment", {}).get("applications") \
+                        or payload.get("applications") or []
+        apps = enriched_apps
         is_bill = bool(apps and (apps[0].get("bill_id")))
         doc_word = "bill" if is_bill else "invoice"
         if item and not item.get("answered_at") and not item.get("deferred"):
