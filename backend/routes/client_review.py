@@ -954,6 +954,155 @@ async def create_liability_account_for_review(token: str, inp: _CreateLiabilityI
     }
 
 
+# Code block per account type, used to auto-assign a free code when
+# the caller doesn't supply one. Ranges mirror the seeded DEFAULT_COA
+# so hand-built lines cluster with their neighbors.
+_CODE_BLOCK_BY_TYPE: dict[str, tuple[int, int]] = {
+    "asset":     (1300, 1999),
+    "liability": (2200, 2999),
+    "equity":    (3300, 3999),
+    "income":    (4300, 4999),
+    "revenue":   (4300, 4999),
+    "expense":   (6100, 8999),
+    "cogs":              (5100, 5999),
+    "cost_of_goods_sold": (5100, 5999),
+}
+
+
+class _CreateAccountIn(BaseModel):
+    # Type must be one of the standard buckets — this endpoint
+    # deliberately does NOT allow "bank" / "credit_card" / etc.
+    # sub-types (they need a bank account setup flow).
+    type: str
+    name: str
+    code: Optional[str] = None
+    detail_type: Optional[str] = None
+    subtype: Optional[str] = None
+    parent_account_id: Optional[str] = None
+
+
+@router.post("/{token}/accounts")
+async def create_account_for_review(token: str, inp: _CreateAccountIn):
+    """Token-scoped inline creation of a CoA account of ANY standard
+    type (asset / liability / equity / income / expense / cogs). Used
+    by the Liability Payment "Change" affordance on each bucket so
+    the client can mint a specific expense/asset account (e.g.
+    "Vehicle Insurance", "Prepaid Property Tax") without leaving the
+    check-in wizard. Auto-assigns a free code in the type's block
+    when blank; auto-parents under a canonical bucket if the name /
+    subtype qualifies (currently only wired for liability — other
+    types get inserted top-level unless an explicit parent is
+    passed)."""
+    from account_normalize import normalize_account_fields
+
+    batch = await _resolve_batch(token)
+    company_id = batch["company_id"]
+
+    atype = (inp.type or "").strip().lower()
+    if atype not in _CODE_BLOCK_BY_TYPE:
+        raise HTTPException(400, f"Unsupported account type: {atype!r}. "
+                                  "Use one of: asset, liability, equity, "
+                                  "income, expense, cogs.")
+    # Route liability creates through the specialized endpoint's
+    # logic so all the parent-bucket / detail_type policies stay
+    # consistent (loan sub-accounts nest under Loans Payable, etc.).
+    if atype == "liability":
+        return await create_liability_account_for_review(
+            token,
+            _CreateLiabilityIn(
+                name=inp.name, code=inp.code,
+                detail_type=inp.detail_type, subtype=inp.subtype,
+                parent_account_id=inp.parent_account_id,
+            ),
+        )
+
+    name = (inp.name or "").strip()
+    if not name:
+        raise HTTPException(400, "Account name is required.")
+    if len(name) > 100:
+        raise HTTPException(400, "Account name is too long (100 char max).")
+
+    subtype, detail_type = normalize_account_fields(
+        acct_type=atype, name=name,
+        subtype=(inp.subtype or "").strip() or None,
+        detail_type=(inp.detail_type or "").strip() or None,
+    )
+
+    # Dedup by exact name within the same type — repeated "Save" on
+    # a flaky connection shouldn't multiply account rows.
+    name_norm = re.sub(r"\s+", " ", name).lower()
+    async for existing in db.accounts.find(
+        {"company_id": company_id, "type": atype},
+        {"id": 1, "name": 1, "code": 1, "type": 1, "subtype": 1,
+         "detail_type": 1, "parent_account_id": 1},
+    ):
+        if re.sub(r"\s+", " ", (existing.get("name") or "").strip()).lower() == name_norm:
+            return {
+                "id": existing["id"], "name": existing.get("name") or "",
+                "code": existing.get("code") or "",
+                "type": atype,
+                "subtype": existing.get("subtype") or "",
+                "detail_type": existing.get("detail_type") or "",
+                "parent_account_id": existing.get("parent_account_id"),
+                "reused": True,
+            }
+
+    # Validate parent (if given) is same-type + top-level.
+    parent_id = (inp.parent_account_id or "").strip() or None
+    if parent_id:
+        par = await db.accounts.find_one(
+            {"id": parent_id, "company_id": company_id, "type": atype},
+            {"id": 1, "parent_account_id": 1})
+        if not par:
+            raise HTTPException(400, "Parent account not found or wrong type.")
+        if par.get("parent_account_id"):
+            raise HTTPException(400, "Parent must be a top-level account.")
+
+    # Code: user-supplied wins (uniqueness enforced); else auto-assign
+    # from the type's block.
+    lo, hi = _CODE_BLOCK_BY_TYPE[atype]
+    supplied_code = (inp.code or "").strip() or None
+    used: set[str] = set()
+    async for a in db.accounts.find(
+        {"company_id": company_id, "code": {"$exists": True}},
+        {"code": 1},
+    ):
+        used.add(str(a.get("code") or ""))
+    if supplied_code:
+        if supplied_code in used:
+            raise HTTPException(400, f"Code {supplied_code} is already used.")
+        code = supplied_code
+    else:
+        code = None
+        for n in range(lo, hi + 1, 10):   # prefer round decades
+            if str(n) not in used:
+                code = str(n); break
+        if not code:
+            for n in range(lo, hi + 1):
+                if str(n) not in used:
+                    code = str(n); break
+
+    aid = str(uuid.uuid4()); now = _now_iso()
+    doc = {
+        "id": aid, "company_id": company_id, "code": code, "name": name,
+        "type": atype, "subtype": subtype or "",
+        "detail_type": detail_type or "",
+        "active": True, "balance": 0.0,
+        "parent_account_id": parent_id,
+        "created_at": now, "updated_at": now,
+        "source": "client_review_generic_picker",
+    }
+    await db.accounts.insert_one(doc)
+    return {
+        "id": aid, "name": name, "code": code,
+        "type": atype,
+        "subtype": subtype or "",
+        "detail_type": detail_type or "",
+        "parent_account_id": parent_id,
+        "reused": False,
+    }
+
+
 @router.get("/{token}/accounts")
 async def list_accounts_for_review(token: str):
     """Chart-of-accounts for the batch's company — used by the check-

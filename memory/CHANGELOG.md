@@ -1,5 +1,19 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 9) — Liability Payment: "Change" on every bucket + generic account picker ✅
+
+- **Feature**: Every row in the LiabilityBreakdown pink area now has a **Change** link — not just Principal. Client can retarget Interest, Escrow, Fees, PMI, HOA, Property Tax (or any custom bucket) to a specific expense/asset account, or mint a brand-new account inline.
+- **Backend**:
+  - New generic `POST /api/client-review/{token}/accounts` (`_CreateAccountIn`). Accepts `type` ∈ `{asset, liability, equity, income, revenue, expense, cogs}` + name + optional code/detail_type/parent_account_id. Auto-assigns a free code from the type's block (asset 1300-1999, cogs 5100-5999, expense 6100-8999, income/revenue 4300-4999, equity 3300-3999). Liability creates trampoline to the specialized endpoint so auto-parenting policy stays consistent. Dedup by name (returns `reused: true`). Rejects `bank`/`credit_card` sub-types (those need a bank-setup flow).
+  - `_handle_liability_payment` extended: each bucket may carry a top-level `account_id` (or `category_account_id` / `principal_account_id`) as an override. The override takes highest priority and short-circuits the semantic mapping / substring / Haiku fallback. Persisted with `user_overridden: true` on the split for audit.
+- **Frontend** (`ClientReviewPage.jsx`):
+  - New `CategoryAccountPickerModal` — searchable list grouped by section (Expense / Asset / COGS / Income), inline "+ Create new account" form with type selector (Expense / Asset / COGS / Income), name auto-prefill from the bucket label ("PMI Premium" → "PMI Premium" pre-typed).
+  - `LiabilityBreakdown` now shows a `Change` link on every row (both when an account_name is already suggested AND when it's blank). Principal opens `LoanAccountPickerModal` (liability-only, with sub-account parent nesting); every other row opens the new `CategoryAccountPickerModal`. Selection stamps `account_id` + `account_name` onto the bucket via `editBucket` — the override rides along in the "Use this split" payload.
+- **Verified via curl**:
+  - Generic `POST /accounts` created an Expense (Loan Interest - Commercial @ 6510), an Asset (Prepaid Property Tax @ 1320, auto-code from asset block), and routed Liability through the specialized endpoint (Test Auto Loan @ 2220 parented under Loans Payable). Invalid type ("bank") → 400.
+  - Split with `interest.account_id=<Loan Interest - Commercial>` and `escrow.account_id=<Prepaid Property Tax>` posted with those exact accounts (not the canonical defaults). Splits marked `user_overridden: true`.
+
+
 ## 2026-02-21 (later 8) — Liability Payment: unlimited itemized buckets + Haiku fallback classifier ✅
 
 - **Problem**: The pink liability breakdown was effectively limited to 4 rows (Principal / Interest / Escrow / Fees). Statements with distinct line items for PMI, Property Tax, HOA Dues, Homeowners Insurance, etc. would either get lumped into Escrow (correct amount, wrong account) or dropped to `unresolved` (silent data loss). Novel labels like "Deferred Interest" or "Modification Fee" fell through entirely.

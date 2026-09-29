@@ -4708,16 +4708,16 @@ function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 function LiabilityBreakdown({ breakdown, token, onChange }) {
   // Editable bucket list for mortgage / credit-card / auto-loan
   // statements. Each bucket has {label, amount, account_name}. The
-  // client can tweak any amount inline; the total reflows. The
-  // Principal row also lets the client pick a SPECIFIC liability
-  // sub-account (e.g. "Vehicle Loan — Toyota") so the paydown lands
-  // on the exact loan record, not the canonical "Loans Payable"
-  // bucket. `onChange` pushes the edited breakdown up so "Use this
-  // split" applies it.
+  // client can tweak any amount inline AND swap the target account
+  // on any row via the "Change" link (Principal → liability sub-
+  // account picker; every other row → generic category picker).
+  // `onChange` pushes the edited breakdown up so "Use this split"
+  // applies it.
   const [buckets, setBuckets] = React.useState(() =>
     (breakdown.buckets || []).map((b, i) => ({ ...b, _idx: i })),
   );
-  const [pickerOpen, setPickerOpen] = React.useState(false);
+  // pickerFor: null | { idx, kind: "principal" | "category" }
+  const [pickerFor, setPickerFor] = React.useState(null);
   const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", {
     minimumFractionDigits: 2, maximumFractionDigits: 2,
   })}`;
@@ -4737,10 +4737,18 @@ function LiabilityBreakdown({ breakdown, token, onChange }) {
   };
 
   // "Principal" bucket detection — loose match (handles "Principal",
-  // "Principal Payment", "Loan Principal", etc.).
-  const isPrincipal = (b) => ((b?.label || "").toLowerCase().includes("principal"));
-  const principalBucket = buckets.find(isPrincipal);
-  const principalAmount = Number(principalBucket?.amount || 0);
+  // "Principal Payment", "Loan Principal", "Curtailment", etc.).
+  const isPrincipal = (b) => {
+    const k = (b?.label || "").toLowerCase();
+    return k.includes("principal") || k.includes("curtailment")
+      || k.includes("payoff adjustment");
+  };
+  const openPicker = (b) => {
+    setPickerFor({ idx: b._idx, kind: isPrincipal(b) ? "principal" : "category" });
+  };
+  const activeBucket = pickerFor
+    ? buckets.find((b) => b._idx === pickerFor.idx)
+    : null;
 
   const typeStyle = {
     mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50",    border: "border-rose-200"  },
@@ -4774,33 +4782,27 @@ function LiabilityBreakdown({ breakdown, token, onChange }) {
                  data-testid={`liability-bucket-${b._idx}`}>
               <div className="flex-1 min-w-0">
                 <div className="font-medium truncate">{b.label}</div>
-                {b.account_name && (
+                {/* Every row gets a "Change" affordance so the client
+                    can route Interest / Escrow / Fees / PMI / etc. to
+                    a specific account (not just Principal). */}
+                {token && (
                   <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
-                    <span className="truncate">→ {b.account_name}</span>
-                    {isPrincipal(b) && token && (
-                      <button
-                        type="button"
-                        onClick={() => setPickerOpen(true)}
-                        className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
-                        data-testid={`liability-principal-change-${b._idx}`}
-                      >
-                        Change
-                      </button>
+                    {b.account_name ? (
+                      <span className="truncate">→ {b.account_name}</span>
+                    ) : (
+                      <span className="truncate italic text-slate-400">
+                        → {isPrincipal(b) ? "Pick a liability account" : "Pick an account"}
+                      </span>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => openPicker(b)}
+                      className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
+                      data-testid={`liability-bucket-change-${b._idx}`}
+                    >
+                      Change
+                    </button>
                   </div>
-                )}
-                {/* Fallback: if AI didn't propose an account_name for
-                    Principal, still show a "Pick account" affordance
-                    so the client can route it to a specific loan. */}
-                {!b.account_name && isPrincipal(b) && token && (
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(true)}
-                    className="text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2"
-                    data-testid={`liability-principal-pick-${b._idx}`}
-                  >
-                    → Pick a liability account
-                  </button>
                 )}
               </div>
               <input
@@ -4819,20 +4821,285 @@ function LiabilityBreakdown({ breakdown, token, onChange }) {
           <span className="font-mono-num tabular-nums">{money(grandTotal)}</span>
         </div>
       </div>
-      {pickerOpen && principalBucket && (
+
+      {/* Principal → liability sub-account picker (has inline
+          "New liability account" form with parent auto-resolution). */}
+      {pickerFor?.kind === "principal" && activeBucket && (
         <LoanAccountPickerModal
           token={token}
-          amount={principalAmount}
-          onClose={() => setPickerOpen(false)}
+          amount={Number(activeBucket.amount || 0)}
+          onClose={() => setPickerFor(null)}
           onPicked={(acct) => {
-            setPickerOpen(false);
-            editBucket(principalBucket._idx, {
-              principal_account_id: acct.id,
-              account_name:         acct.name,
+            setPickerFor(null);
+            editBucket(activeBucket._idx, {
+              // Stamp both keys so downstream code that reads either
+              // one (backend handler accepts both) sees the override.
+              account_id:            acct.id,
+              principal_account_id:  acct.id,
+              account_name:          acct.name,
             });
           }}
         />
       )}
+      {/* All other buckets → generic category-account picker. */}
+      {pickerFor?.kind === "category" && activeBucket && (
+        <CategoryAccountPickerModal
+          token={token}
+          bucketLabel={activeBucket.label}
+          amount={Number(activeBucket.amount || 0)}
+          onClose={() => setPickerFor(null)}
+          onPicked={(acct) => {
+            setPickerFor(null);
+            editBucket(activeBucket._idx, {
+              account_id:   acct.id,
+              account_name: acct.name,
+            });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// Generic category-account picker used by non-Principal rows of the
+// LiabilityBreakdown. Shows the company's expense + asset accounts
+// (the vast majority of legitimate targets for Interest / Escrow /
+// PMI / Property Tax / HOA / Fees), plus an inline "New Account"
+// form that accepts asset OR expense type. If a client needs to
+// route to a liability sub-account, they'd use the Principal row's
+// picker instead — this picker deliberately narrows the choices to
+// avoid confusion.
+function CategoryAccountPickerModal({ token, bucketLabel, amount, onClose, onPicked }) {
+  const [q, setQ] = React.useState("");
+  const [accts, setAccts] = React.useState([]);
+  const [busy, setBusy] = React.useState(true);
+  const [creating, setCreating] = React.useState(false);
+  const [newCode, setNewCode] = React.useState("");
+  const [newName, setNewName] = React.useState("");
+  const [newType, setNewType] = React.useState("expense");
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    axios.get(`${API}/${token}/accounts`)
+      .then((r) => {
+        const list = r.data?.accounts || r.data || [];
+        // Show expense + asset by default — the two families that
+        // cover the non-Principal buckets. Also include income and
+        // cogs since some edge cases (e.g. loan-origination rebate
+        // as income) may want them.
+        const allowed = new Set(["expense", "asset", "cogs", "cost_of_goods_sold", "income", "revenue"]);
+        setAccts(list.filter((a) => allowed.has((a.type || "").toLowerCase())));
+      })
+      .finally(() => setBusy(false));
+  }, [token]);
+
+  const submitNew = async () => {
+    const name = newName.trim();
+    if (!name || saving) return;
+    setSaving(true); setErr(null);
+    try {
+      const r = await axios.post(`${API}/${token}/accounts`, {
+        type: newType,
+        code: newCode.trim() || null,
+        name,
+      });
+      onPicked(r.data);
+    } catch (e) {
+      setErr(e?.response?.data?.detail || e.message);
+      setSaving(false);
+    }
+  };
+
+  const trimmed = q.trim().toLowerCase();
+  const filtered = trimmed
+    ? accts.filter((a) => `${a.code || ""} ${a.name || ""}`.toLowerCase().includes(trimmed))
+    : accts;
+
+  // Group by type header for scannability — the CoA can have 40+
+  // rows and users would otherwise scroll blind.
+  const grouped = React.useMemo(() => {
+    const buckets = { expense: [], asset: [], cogs: [], income: [] };
+    for (const a of filtered) {
+      const t = (a.type || "").toLowerCase();
+      if (t === "expense") buckets.expense.push(a);
+      else if (t === "asset") buckets.asset.push(a);
+      else if (t === "cogs" || t === "cost_of_goods_sold") buckets.cogs.push(a);
+      else if (t === "income" || t === "revenue") buckets.income.push(a);
+    }
+    for (const k of Object.keys(buckets)) {
+      buckets[k].sort((x, y) => String(x.code || "").localeCompare(String(y.code || "")));
+    }
+    return buckets;
+  }, [filtered]);
+
+  const sectionHeader = (label) => (
+    <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-50 border-b border-slate-100">
+      {label}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm" onClick={onClose} data-testid="category-account-picker">
+      <div className="w-full max-w-md m-2 rounded-2xl bg-white shadow-2xl overflow-hidden max-h-[92vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between shrink-0">
+          <div>
+            <div className="text-[10px] uppercase tracking-wide text-slate-400">
+              {creating ? "New Account" : (bucketLabel || "Change account")}
+            </div>
+            <div className="text-sm font-semibold text-slate-800">
+              {creating
+                ? "Create an account"
+                : `Which account should ${amount ? `$${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "this line"} land in?`}
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" data-testid="cat-picker-close"><X size={18} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto">
+          {!creating && (
+            <>
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search account name or code…"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-search"
+              />
+              <div className="mt-3 max-h-72 overflow-y-auto rounded-lg border border-slate-100">
+                {busy && <div className="p-3 text-xs text-slate-400">Loading…</div>}
+                {!busy && filtered.length === 0 && (
+                  <div className="p-3 text-xs text-slate-400">No accounts match. Create one below.</div>
+                )}
+                {!busy && grouped.expense.length > 0 && (<>
+                  {sectionHeader("Expense")}
+                  {grouped.expense.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}
+                    >
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.asset.length > 0 && (<>
+                  {sectionHeader("Asset")}
+                  {grouped.asset.map((a) => (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}
+                    >
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.cogs.length > 0 && (<>
+                  {sectionHeader("Cost of Goods Sold")}
+                  {grouped.cogs.map((a) => (
+                    <button key={a.id} type="button" onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}>
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+                {!busy && grouped.income.length > 0 && (<>
+                  {sectionHeader("Income")}
+                  {grouped.income.map((a) => (
+                    <button key={a.id} type="button" onClick={() => onPicked(a)}
+                      className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0"
+                      data-testid={`cat-acct-row-${a.id}`}>
+                      <div className="text-sm text-slate-800">{a.name}</div>
+                      <div className="text-[11px] text-slate-400">{a.code || ""}</div>
+                    </button>
+                  ))}
+                </>)}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  // Prefill the new-account name with the bucket
+                  // label — client can tweak it. Saves a couple
+                  // seconds of typing for the common case.
+                  if (!newName && bucketLabel) setNewName(bucketLabel);
+                  setCreating(true); setErr(null);
+                }}
+                className="mt-3 w-full px-3 py-2 rounded-lg border-2 border-dashed border-indigo-300 bg-indigo-50/40 hover:bg-indigo-50 text-sm font-medium text-indigo-800 transition"
+                data-testid="cat-picker-create-new"
+              >
+                + Create new account
+              </button>
+            </>
+          )}
+          {creating && (
+            <div className="space-y-3">
+              <input
+                placeholder="Code (e.g. 6250)"
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+                maxLength={10}
+                className="w-full border rounded-lg px-3 py-2 text-sm font-mono-num focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-new-code"
+              />
+              <input
+                autoFocus
+                placeholder="Account name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                maxLength={100}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:border-indigo-400 outline-none"
+                data-testid="cat-picker-new-name"
+              />
+              <div>
+                <label className="block text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                  Type <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={newType}
+                  onChange={(e) => setNewType(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm bg-white focus:border-indigo-400 outline-none"
+                  data-testid="cat-picker-new-type"
+                >
+                  <option value="expense">Expense</option>
+                  <option value="asset">Asset</option>
+                  <option value="cogs">Cost of Goods Sold</option>
+                  <option value="income">Income</option>
+                </select>
+              </div>
+              {err && <div className="text-xs text-rose-600">{err}</div>}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={submitNew}
+                  disabled={saving || !newName.trim()}
+                  className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="cat-picker-save-new"
+                >
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCreating(false); setNewName(""); setNewCode(""); setErr(null); }}
+                  className="flex-1 py-2 rounded-md border text-sm text-slate-700 hover:bg-slate-50"
+                  data-testid="cat-picker-cancel-new"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

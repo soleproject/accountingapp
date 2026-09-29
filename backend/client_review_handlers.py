@@ -1767,6 +1767,38 @@ async def _handle_liability_payment(item: dict, batch: dict, *,
             continue
         label = (b.get("label") or "").strip()
         key = label.lower()
+
+        # Per-bucket account override (from the "Change" affordance
+        # on the LiabilityBreakdown UI). Highest priority — if the
+        # client picked a specific CoA row for THIS bucket, use it.
+        # We accept a few field names since different UI paths stamp
+        # different keys onto the bucket.
+        bucket_override = (
+            (b.get("account_id") or "").strip()
+            or (b.get("category_account_id") or "").strip()
+            or (b.get("principal_account_id") or "").strip()
+            or None
+        )
+        if bucket_override:
+            override_acct = await db.accounts.find_one(
+                {"id": bucket_override, "company_id": company_id},
+                {"id": 1, "name": 1, "code": 1, "type": 1},
+            )
+            if override_acct and override_acct.get("id"):
+                splits.append({
+                    "amount":                amt * txn_sign,
+                    "category_account_id":   override_acct["id"],
+                    "category_account_name": override_acct.get("name") or "",
+                    "category_account_code": override_acct.get("code") or "",
+                    "description":           label or override_acct.get("name") or "",
+                    "bucket":                key,
+                    "user_overridden":       True,
+                })
+                continue
+            # If the override id doesn't exist / retired, fall through
+            # to the semantic-default resolver below so the split
+            # still posts.
+
         semantic = _LIABILITY_LABEL_TO_SEMANTIC.get(key)
         # Loose match: "principal" appears in "Principal Payment", etc.
         # Ordering matters: check more-specific keywords BEFORE the
