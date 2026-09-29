@@ -1,5 +1,23 @@
 # SmartBooks — Changelog
 
+## 2026-02-21 (later 12) — Answered items: "↺ Undo — reopen this one" ✅
+
+- **Feature**: Every rehydrated answered bubble now has a **↺ Undo — reopen this one** chip. Tapping it prompts for confirmation, reverses the underlying side effects, and re-opens the item in the wizard so the client can redo the answer.
+- **Backend** — new `POST /api/client-review/{token}/items/{item_id}/reopen`:
+  - Action-taken-aware reversal:
+    - `bill_payment_applied` / `invoice_payment_applied` → calls `routes.transactions._reverse_and_delete_payment` (restores bill/invoice `balance_due` + `status`, reverses inventory JE for inventory-tracked bills, deletes `db.payments` row) AND now also clears the transaction's `linked_payment_id` / `linked_bill_id` / `linked_invoice_id` and restores the `_pre_link_category_*` snapshot (matches the explicit-unlink path of `link_transaction`).
+    - `deposit_classified` → unsets category on the underlying txn, unposts, flags `needs_review`. If it was a Refund that re-opened a paid bill, unwinds the last `balance_reopened_by_refund` history entry and restores the bill's balance/status.
+    - `liability_split` → wipes `splits[]` and liability metadata off the txn, unposts.
+    - `receipt_dismissed` → clears `receipt_dismissed*` fields on the txn.
+  - Common: reopens the source `agent_findings` row (`status → open`, unsets `resolved_*` / `dismissed_*` / `client_deferred*`) and resets the batch item (`state → gathering`, unsets `answered_at` / `answer` / `action_taken` / `action_detail` / `answered_payload` / `answered_by_client` / `deferred`).
+  - Response: `{ok, action_reversed, reversed_bits: ["reversed payment abc12345", "cleared txn link + restored pre-link category"], item_id}` — for audit & debugging.
+- **Frontend** (`ClientReviewPage.jsx`):
+  - `hydrateMessages` now attaches `quickReplies: ["↺ Undo — reopen this one"]` to the answered bubble.
+  - New `reopenItem()` function: confirm dialog → `POST /reopen` → refetch batch → rehydrate messages with the reopened item → clear `justCompleted` and `input`.
+  - Main `onQuickReply` handler intercepts strings starting with `"↺ Undo"` and calls `reopenItem()` — placed BEFORE other quick-reply branches so it can't be shadowed.
+- **Verified end-to-end via curl**: apply $483.29 to bill HD-88410 → transaction becomes `posted:true`, `category:"Accounts Payable (A/P)"`, `linked_payment_id` set; bill balance $0/paid; payment doc exists. Then `POST /reopen` → payment deleted, bill balance $483.29/open, transaction back to `posted:false`, category cleared, `needs_review:true`, `linked_payment_id` gone — **exactly matching the pre-apply state**. Batch item back in `state:"gathering"`, `answered_at:null`.
+
+
 ## 2026-02-21 (later 11) — Answered items: full rehydration on scroll-back ✅
 
 - **Problem**: When the client navigated back to an already-answered check-in item via the header chevrons, the confirmation bubble was a generic `"✓ Answered on YYYY-MM-DD — Your answer was submitted to your bookkeeper."` — even though the item had rich structured data (`action_taken`, `action_detail`, `answered_payload.applications[]`, attachments) about exactly what happened.

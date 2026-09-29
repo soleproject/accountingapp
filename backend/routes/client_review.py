@@ -2913,6 +2913,295 @@ async def dismiss_missing_receipt(token: str, item_id: str):
 
 
 # --------------------------------------------------------------------------
+# Undo / re-open an answered item — restores the underlying transaction /
+# bill / invoice / payment state so the client can redo the answer.
+# --------------------------------------------------------------------------
+@router.post("/{token}/items/{item_id}/reopen")
+async def reopen_review_item(token: str, item_id: str):
+    """Client-initiated undo of a previously-answered Quick Check-in
+    item. Reverses whatever side effects the answer produced
+    (payment doc, transaction category, split rows, receipt-dismiss
+    flag, bill/invoice balance) and clears the item's answered state
+    so it re-appears in the wizard queue.
+
+    Reversal is action-taken-aware:
+      * ``bill_payment_applied`` / ``invoice_payment_applied`` →
+        delegates to ``routes.transactions._reverse_and_delete_payment``
+        (restores balance_due/status on every applied doc, reverses
+        inventory JE for inventory-tracked bills, deletes the
+        ``db.payments`` row, and restores the transaction's pre-link
+        category snapshot).
+      * ``deposit_classified`` → clears category on the underlying
+        transaction, unposts it, and (if it was a Refund that
+        re-opened a bill) unwinds the last balance_reopened_by_refund
+        history entry.
+      * ``liability_split`` → wipes ``splits[]`` and liability metadata
+        off the underlying transaction, unposts it.
+      * ``receipt_dismissed`` → clears ``receipt_dismissed*`` fields
+        on the underlying transaction.
+      * All actions also reopen the source ``agent_findings`` row
+        (``status`` back to ``open``, clears ``resolved_*`` /
+        ``dismissed_*``) and reset the batch item.
+    """
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or [])
+                 if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if not (item.get("answered_at") or item.get("deferred")):
+        raise HTTPException(409, "Item is not answered yet — nothing to undo")
+
+    company_id = batch["company_id"]
+    action = (item.get("action_taken") or "").lower()
+    payload = item.get("answered_payload") or {}
+    ctx = item.get("context") or {}
+    meta = ctx.get("meta") or {}
+    now = _now_iso()
+
+    reversed_bits: list[str] = []
+
+    # --- 1. Reverse the transaction-level side effects. ---
+    if action in ("bill_payment_applied", "invoice_payment_applied"):
+        # Look up the underlying transaction and delegate to the
+        # canonical reverse-and-delete helper that receive_payment
+        # itself uses when a link is re-linked. This restores the
+        # bills/invoices' balance_due & status, reverses any
+        # inventory JE, deletes the db.payments doc, and restores
+        # the transaction's pre-link category snapshot.
+        txn_id = None
+        # tid is stashed on the finding's meta at link-time
+        if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if not txn_id:
+            txn_id = ctx.get("txn_id") or meta.get("txn_id")
+        if txn_id:
+            txn = await db.transactions.find_one(
+                {"id": txn_id, "company_id": company_id},
+                {"id": 1, "linked_payment_id": 1,
+                 "_pre_link_category_id":   1,
+                 "_pre_link_category_code": 1,
+                 "_pre_link_category_name": 1,
+                 "_pre_link_posted":        1},
+            )
+            pid = (txn or {}).get("linked_payment_id")
+            if pid:
+                try:
+                    from routes.transactions import _reverse_and_delete_payment
+                    await _reverse_and_delete_payment(company_id, pid)
+                    reversed_bits.append(f"reversed payment {pid[:8]}")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("reopen: payment reverse failed: %s", exc)
+            # Clear the txn's link-target fields and restore the
+            # pre-link category snapshot (mirrors the explicit-unlink
+            # branch of `link_transaction`). Without this the txn
+            # keeps pointing at the deleted payment and shows a
+            # stale "Accounts Payable" category.
+            if txn:
+                unset_fields: dict[str, str] = {
+                    "linked_payment_id":         "",
+                    "linked_bill_id":            "",
+                    "linked_invoice_id":         "",
+                }
+                set_fields: dict[str, object] = {
+                    "human_reviewed": False,
+                    "needs_review":   True,
+                    "updated_at":     now,
+                }
+                pre = txn.get("_pre_link_category_id")
+                if pre:
+                    set_fields["category_account_id"]   = pre
+                    set_fields["category_account_code"] = txn.get("_pre_link_category_code") or ""
+                    set_fields["category_account_name"] = txn.get("_pre_link_category_name") or ""
+                    set_fields["posted"]                = bool(txn.get("_pre_link_posted"))
+                    unset_fields["_pre_link_category_id"]   = ""
+                    unset_fields["_pre_link_category_code"] = ""
+                    unset_fields["_pre_link_category_name"] = ""
+                    unset_fields["_pre_link_posted"]        = ""
+                else:
+                    # No snapshot (shouldn't happen for a
+                    # freshly-linked txn, but be safe) — just clear
+                    # the category so the txn re-enters the review
+                    # queue as uncategorized.
+                    unset_fields["category_account_id"]   = ""
+                    unset_fields["category_account_code"] = ""
+                    unset_fields["category_account_name"] = ""
+                    set_fields["posted"] = False
+                await db.transactions.update_one(
+                    {"id": txn_id, "company_id": company_id},
+                    {"$set": set_fields, "$unset": unset_fields},
+                )
+                reversed_bits.append("cleared txn link + restored pre-link category")
+
+    elif action == "deposit_classified":
+        # Find the transaction and undo the classification. If this
+        # deposit was a Refund that re-opened a paid bill, unwind
+        # the bill re-open too by consuming the most recent
+        # `balance_reopened_by_refund` history entry.
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            txn = await db.transactions.find_one(
+                {"id": txn_id, "company_id": company_id},
+                {"id": 1, "linked_bill_id": 1},
+            )
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "posted":               False,
+                    "human_reviewed":       False,
+                    "needs_review":         True,
+                    "updated_at":           now,
+                },
+                 "$unset": {
+                    "category_account_id":    "",
+                    "category_account_name":  "",
+                    "category_account_code":  "",
+                    "ai_source":              "",
+                    "ai_comment":             "",
+                    "deposit_classification": "",
+                    "linked_bill_id":         "",
+                }},
+            )
+            reversed_bits.append("cleared deposit classification")
+            # If a bill was re-opened by this refund, roll back its
+            # balance_due using the pushed history entry.
+            bill_id = (txn or {}).get("linked_bill_id") \
+                       or (payload.get("bill_id"))
+            if bill_id and (payload.get("flow") or "").lower() == "refund":
+                bill = await db.bills.find_one(
+                    {"id": bill_id, "company_id": company_id},
+                    {"balance_due": 1, "total": 1, "history": 1, "status": 1},
+                )
+                if bill:
+                    hist = list((bill.get("history") or []))
+                    # Pop the most-recent `balance_reopened_by_refund`
+                    # entry — its delta tells us how much to reduce
+                    # the current balance_due by.
+                    for idx in range(len(hist) - 1, -1, -1):
+                        if (hist[idx].get("action") == "balance_reopened_by_refund"
+                                and float(hist[idx].get("delta") or 0) > 0):
+                            delta = float(hist[idx].get("delta") or 0)
+                            new_bal = round(max(0.0, float(bill.get("balance_due") or 0) - delta), 2)
+                            new_status = "paid" if new_bal <= 0.005 else (
+                                "partial" if new_bal < float(bill.get("total") or 0) else "unpaid"
+                            )
+                            hist.pop(idx)
+                            hist.append({
+                                "at":     now,
+                                "action": "refund_reversed_by_client_undo",
+                                "delta":  -delta,
+                                "note":   "Client undid the refund via Quick Check-in.",
+                            })
+                            await db.bills.update_one(
+                                {"id": bill_id, "company_id": company_id},
+                                {"$set": {"balance_due": new_bal,
+                                          "status":       new_status,
+                                          "history":      hist,
+                                          "updated_at":   now}},
+                            )
+                            reversed_bits.append(f"restored bill balance ${new_bal:.2f}")
+                            break
+
+    elif action == "liability_split":
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$set": {
+                    "posted":         False,
+                    "human_reviewed": False,
+                    "needs_review":   True,
+                    "updated_at":     now,
+                },
+                 "$unset": {
+                    "splits":                    "",
+                    "split_source":              "",
+                    "split_narrative":           "",
+                    "liability_statement_type":  "",
+                    "liability_lender_name":     "",
+                    "category_account_id":       "",
+                    "category_account_name":     "",
+                    "category_account_code":     "",
+                }},
+            )
+            reversed_bits.append("cleared liability split")
+
+    elif action == "receipt_dismissed":
+        txn_id = meta.get("txn_id")
+        if not txn_id and item.get("source_collection") == "agent_findings":
+            f = await db.agent_findings.find_one(
+                {"id": item["source_id"]}, {"meta.matched_txn_id": 1})
+            txn_id = ((f or {}).get("meta") or {}).get("matched_txn_id")
+        if txn_id:
+            await db.transactions.update_one(
+                {"id": txn_id, "company_id": company_id},
+                {"$unset": {"receipt_dismissed":     "",
+                             "receipt_dismissed_at":  "",
+                             "receipt_dismissed_by":  ""},
+                 "$set":   {"updated_at": now}},
+            )
+            reversed_bits.append("un-dismissed receipt")
+
+    # --- 2. Reopen the source agent_findings row. ---
+    if item.get("source_collection") == "agent_findings" and item.get("source_id"):
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": company_id},
+            {"$set":   {"status":     "open",
+                        "updated_at": now},
+             "$unset": {"resolved_at":         "",
+                        "resolved_by":         "",
+                        "resolve_note":        "",
+                        "dismissed_at":        "",
+                        "dismissed_by":        "",
+                        "client_deferred":     "",
+                        "client_deferred_at":  "",
+                        "deferred_note":       "",
+                        "client_answer":       "",
+                        "client_answered_at":  ""}},
+        )
+        reversed_bits.append("reopened finding")
+
+    # --- 3. Reset the batch item — the wizard picks it back up. ---
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set":   {"items.$.state":       "gathering",
+                    "items.$.status":      "open",
+                    "updated_at":          now},
+         "$unset": {"items.$.answered_at":        "",
+                    "items.$.answer":             "",
+                    "items.$.action_taken":       "",
+                    "items.$.action_detail":      "",
+                    "items.$.answered_payload":   "",
+                    "items.$.answered_by_client": "",
+                    "items.$.deferred":           "",
+                    "items.$.result":             ""}},
+    )
+
+    # Invalidate any dashboard cache so reports reflect the undo.
+    try:
+        from routes.transactions import _invalidate_dash
+        await _invalidate_dash(company_id)
+    except Exception:  # noqa: BLE001
+        pass
+
+    return {
+        "ok":               True,
+        "action_reversed":  action or "answered",
+        "reversed_bits":    reversed_bits,
+        "item_id":          item_id,
+    }
+
+
+# --------------------------------------------------------------------------
 # Deposit · Link-to-invoice (multi-invoice apply) — client-facing mirror
 # of `/companies/{cid}/transactions/{tid}/receive-payment`
 # --------------------------------------------------------------------------

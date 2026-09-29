@@ -351,6 +351,42 @@ export default function ClientReviewPage() {
     }
   };
 
+  // Undo / re-open an already-answered item. Reverses the underlying
+  // side effects (bill payment / txn categorization / liability split
+  // / receipt dismiss) on the backend, then reloads the batch so the
+  // wizard picks the item back up in `gathering` state.
+  const reopenItem = async () => {
+    if (!currentItem || busy) return;
+    // Guardrail — the button also shouldn't render when there's
+    // nothing to undo, but belt-and-braces.
+    if (!(currentItem.answered_at || currentItem.deferred)) return;
+    if (!window.confirm(
+      "Undo this answer? I'll reverse the booking and reopen this "
+      + "question so you can redo it."
+    )) return;
+    setBusy(true);
+    try {
+      await axios.post(
+        `${API}/${token}/items/${currentItem.item_id}/reopen`
+      );
+      // Refetch the whole batch so the item's answered fields clear
+      // and the chat rehydrates in "gathering" state.
+      const r = await axios.get(`${API}/${token}`);
+      setSession(r.data);
+      const reopened = (r.data?.items || []).find(
+        (i) => i.item_id === currentItem.item_id
+      );
+      setMessages(hydrateMessages(reopened));
+      setJustCompleted(null);
+      setInput("");
+    } catch (e) {
+      alert(e?.response?.data?.detail
+             || "Couldn't undo that one — please refresh and try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Q2 (Vendor confirmation) — the DescriptorBindingsList component
   // fires a window CustomEvent so it doesn't need to know how to
   // finalize an item. We listen at the page level and translate into
@@ -692,6 +728,11 @@ export default function ClientReviewPage() {
         role: "assistant",
         content: `✓ Answered on ${(item.answered_at || "").slice(0, 10)}\n${summary || fallback}`,
         _readOnlyAnswered: true,
+        // Inline "Undo" chip — client tapped an answer they didn't
+        // want. The main onQuickReply handler intercepts this token
+        // and calls POST /items/{id}/reopen which reverses the side
+        // effects and reopens the item.
+        quickReplies: ["↺ Undo — reopen this one"],
       });
     }
     return hydrated;
@@ -1476,6 +1517,14 @@ ${companyName}`;
                 }));
               }}
               onQuickReply={(t) => {
+                // "↺ Undo — reopen this one" chip on an answered
+                // bubble. Reverses the side effects and reopens the
+                // item. Placed first so a message that also carries
+                // a "Use this split" reply can't shadow it.
+                if (typeof t === "string" && t.startsWith("↺ Undo")) {
+                  reopenItem();
+                  return;
+                }
                 // Special: "Use this split" applies the AI's proposed
                 // receipt split immediately instead of round-tripping
                 // through Haiku.
