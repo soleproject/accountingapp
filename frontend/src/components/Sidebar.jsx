@@ -280,10 +280,18 @@ const GROUPS = [
   },
   {
     key: "accounting",
-    label: "Accounting",
+    label: "All",
     icon: ListTree,
     items: [
-      { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
+      // Sales & Payments and Purchases live nested inside the "All"
+      // group so the CPA sees every accounting workflow in one place.
+      // They still open into the same sub-items as the top-level
+      // groups — the objects are literally re-referenced below at
+      // render time, no duplication of item definitions. `subGroup`
+      // is the flag the `Group` component uses to render an inline
+      // collapsible instead of a leaf NavLink.
+      { subGroup: true, key: "accounting-sales",     label: "Sales & Payments", icon: FileText,     items: null /* filled at render time from GROUPS[0].items */ },
+      { subGroup: true, key: "accounting-purchases", label: "Purchases",        icon: ShoppingCart, items: null /* filled at render time from GROUPS[1].items */ },
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
       { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true },
       { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
@@ -445,6 +453,10 @@ const ITEM_PATH_COUNTS = (() => {
   const counts = {};
   for (const g of GROUPS) {
     for (const it of g.items) {
+      // Skip nested subgroup placeholders — they have no `to` of
+      // their own; their leaf items get counted via the top-level
+      // GROUPS entry they reference.
+      if (it.subGroup) continue;
       const p = it.matchPath || it.to.split("?")[0];
       if (p === "__never__") continue;
       counts[p] = (counts[p] || 0) + 1;
@@ -523,7 +535,13 @@ const isItemActive = (loc, item, sticky = {}, groupKey = null) => {
 };
 
 const isGroupActive = (loc, group, sticky = {}) =>
-  group.items.some((it) => isItemActive(loc, it, sticky, group.key));
+  group.items.some((it) =>
+    // Nested subgroup entries have no `to` of their own — their
+    // active state comes from their referenced leaf items, which
+    // are already counted under whichever top-level GROUPS entry
+    // they mirror. Skip them here so we don't crash on `undefined`.
+    !it.subGroup && isItemActive(loc, it, sticky, group.key)
+  );
 
 function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTodo2 }) {
   const rawModules = _visibleModules(user).filter(m => m.key !== "home");
@@ -1154,9 +1172,61 @@ export default function Sidebar({ collapsed, onToggle }) {
               // workbench) from every non-superadmin persona so pros,
               // partners, and clients don't see internal tooling.
               .filter((it) => !it.superadminOnly || user?.role === "superadmin")
-              .map((it) => (
-                <Item key={it.label} item={it} group={group} indent />
-              ))}
+              .map((it) => {
+                // Nested subgroup — an item with its own `items[]` and
+                // `subGroup: true` renders as an inline collapsible one
+                // indent-level deeper than a leaf `<Item>`. Reuses the
+                // same `open` state map keyed on `it.key`. If the
+                // subgroup's `items` is null (placeholder), fall back
+                // to the top-level GROUPS entry sharing the same key
+                // suffix (e.g. "accounting-sales" → GROUPS.sales).
+                if (it.subGroup) {
+                  const suffix = (it.key || "").split("-").slice(1).join("-");
+                  const source = it.items ||
+                    GROUPS.find((g) => g.key === suffix)?.items || [];
+                  const subOpen = !!open[it.key];
+                  const SubIcon = it.icon;
+                  return (
+                    <div key={it.label} className="ml-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(it.key)}
+                        className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                        data-testid={`${TID.navGroup}-${it.key}`}
+                        aria-expanded={subOpen}
+                      >
+                        <SubIcon size={16} style={{ color: NAV_COLOR }} strokeWidth={2} />
+                        {!showCollapsed && (
+                          <>
+                            <span className="truncate">{it.label}</span>
+                            <span className="ml-auto text-slate-400">
+                              {subOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                      {subOpen && !showCollapsed && (
+                        <div className="mt-0.5 space-y-0.5">
+                          {source
+                            .filter((sub) => isAdvancedMode || !sub.advancedOnly)
+                            .filter((sub) => classesEnabled || !sub.classesEnabledOnly)
+                            .filter((sub) => projectsEnabled || !sub.projectsEnabledOnly)
+                            .filter((sub) => budgetsEnabled || !sub.budgetsEnabledOnly)
+                            .filter((sub) => advancedPayrollEnabled || !sub.advancedPayrollEnabledOnly)
+                            .filter((sub) => isLabV3 || !sub.labV3Only)
+                            .filter((sub) => !sub.superadminOnly || user?.role === "superadmin")
+                            .map((sub) => (
+                              <div key={sub.label} className="pl-3">
+                                <Item item={sub} group={group} indent />
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                }
+                return <Item key={it.label} item={it} group={group} indent />;
+              })}
           </div>
         )}
       </div>
