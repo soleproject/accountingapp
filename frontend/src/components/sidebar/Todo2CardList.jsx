@@ -516,7 +516,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         </>
       )}
 
-      <div className={`flex-1 overflow-y-auto no-scrollbar pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
+      <div className={`pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
         {/* To Do section header — sits between the All accordion and
             the actionable task cards. Hidden in rail (collapsed) mode
             where there's no room for a text label. Clickable to
