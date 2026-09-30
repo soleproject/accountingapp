@@ -2043,38 +2043,42 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     (a) => !a.retired_at && !["9999", "6999", "4999"].includes(String(a.code))
   ), [accounts]);
   const [edits, setEdits] = useState({});
+  // Row IDs that have been saved successfully in this session — used to
+  // hide the card immediately instead of forcing the CPA to refresh.
+  // Cleared on unmount / new tab load via the parent's queue reload.
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const getEdit = (row) => edits[row.id] || {
     payeeQuery: "",
     contact_id: null,
     lines: [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
     saveAsRule: false,
   };
-  const setEdit = (id, patch) => setEdits((e) => ({
+  // NOTE: fallback base must mirror getEdit(row) so the amount stays
+  // pre-filled to the check's total on the first-ever edit (e.g., when
+  // the CPA types a payee name before touching the amount). Prior code
+  // seeded amount: 0 here, which reset the "$175.50" to 0 on payee
+  // typing (Feb 2026 bug).
+  const setEdit = (row, patch) => setEdits((e) => ({
     ...e,
-    [id]: { ...(e[id] || {
-      payeeQuery: "",
-      contact_id: null,
-      lines: [{ category_account_id: "", amount: 0 }],
-      saveAsRule: false,
-    }), ...patch },
+    [row.id]: { ...(e[row.id] || getEdit(row)), ...patch },
   }));
   const addLine = (row) => {
     const cur = getEdit(row);
-    setEdit(row.id, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
+    setEdit(row, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
   };
   const removeLine = (row, idx) => {
     const cur = getEdit(row);
     if (cur.lines.length <= 1) return;
-    setEdit(row.id, { lines: cur.lines.filter((_, i) => i !== idx) });
+    setEdit(row, { lines: cur.lines.filter((_, i) => i !== idx) });
   };
   const updateLine = (row, idx, patch) => {
     const cur = getEdit(row);
-    setEdit(row.id, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
+    setEdit(row, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
   };
   const applySameAsAbove = (row, prevRow) => {
     if (!prevRow) return;
     const prev = getEdit(prevRow);
-    setEdit(row.id, {
+    setEdit(row, {
       payeeQuery: prev.payeeQuery,
       contact_id: prev.contact_id,
       lines: prev.lines.length
@@ -2113,6 +2117,9 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
       });
       toast.success(`Check #${row.number || ""} booked${cur.saveAsRule ? " + saved rule" : ""}.`);
       setEdits((e) => { const n = { ...e }; delete n[row.id]; return n; });
+      // Hide this card immediately (Feb 2026 bug fix) — previously the
+      // CPA had to hit refresh to make the booked check disappear.
+      setHiddenIds((s) => { const n = new Set(s); n.add(row.id); return n; });
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Save failed");
@@ -2122,6 +2129,7 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     try {
       await api.post(`/companies/${companyId}/check-review/${row.id}/not-a-check`);
       toast.success(`Marked check #${row.number || ""} as not a check.`);
+      setHiddenIds((s) => { const n = new Set(s); n.add(row.id); return n; });
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to mark as not a check.");
@@ -2129,11 +2137,11 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   };
   return (
     <div className="space-y-4" data-testid="chat-review-checks-batch">
-      {rows.map((row, i) => (
+      {rows.filter((row) => !hiddenIds.has(row.id)).map((row, i, visibleRows) => (
         <CheckPaperRow
           key={row.id}
           row={row}
-          prevRow={i > 0 ? rows[i - 1] : null}
+          prevRow={i > 0 ? visibleRows[i - 1] : null}
           edit={getEdit(row)}
           accounts={filteredAccounts}
           contacts={contacts}
@@ -2141,8 +2149,8 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
           onUpdateLine={(idx, patch) => updateLine(row, idx, patch)}
           onAddLine={() => addLine(row)}
           onRemoveLine={(idx) => removeLine(row, idx)}
-          onSetEdit={(patch) => setEdit(row.id, patch)}
-          onSameAsAbove={() => applySameAsAbove(row, i > 0 ? rows[i - 1] : null)}
+          onSetEdit={(patch) => setEdit(row, patch)}
+          onSameAsAbove={() => applySameAsAbove(row, i > 0 ? visibleRows[i - 1] : null)}
           onSave={() => save(row)}
           onNotACheck={() => notACheck(row)}
         />
