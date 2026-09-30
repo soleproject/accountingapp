@@ -24,9 +24,11 @@ import {
   // the Both-tab accordion (mirrors the Full-mode Sidebar icons).
   CreditCard, Package, Repeat, MailCheck, UserCircle, Store, ShoppingCart,
   // Icons for CPA-workflow items promoted into the All accordion
-  // (Contacts, Projections, Compliance, Email log). Kept in one
-  // dedicated group so it's obvious where to add more later.
+  // (Contacts, Projections, Compliance, Email log, Connect & Import
+  // subgroup, and the trailing Accounting settings leaf). Kept in
+  // one dedicated group so it's obvious where to add more later.
   Users, TrendingUp, ShieldCheck, Inbox,
+  Landmark, Link2, Download, Settings2,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -164,6 +166,13 @@ const PURCHASES_LINKS = [
   { to: "/items?usage=purchases",         label: "Items",               icon: Package },
   { to: "/contacts?type=vendor",          label: "Vendors",             icon: Store },
 ];
+// Connect & Import subgroup — same routes as the top-level Banking
+// group in Sidebar.jsx (minus Test QBO which is superadmin-only).
+const CONNECT_LINKS = [
+  { to: "/connections",             label: "Connect Accounts",   icon: Link2 },
+  { to: "/connections?view=imports", label: "Import Statements", icon: Download },
+  { to: "/connections/qbo",         label: "Connect QBO",        icon: Link2 },
+];
 const ACCOUNTING_LINKS = [
   // Nested subgroup placeholders — rendered as inline collapsibles by
   // AccountingAccordion. Same visual pattern as the "Full" sidebar
@@ -173,9 +182,10 @@ const ACCOUNTING_LINKS = [
   // ── CPA-workflow order (Sept 2026 reorg) ─────────────────────────
   // Assets/Loans/Inventory cluster (physical + financing basics),
   // then Sales Tax + Tags, then the Contacts / Projections /
-  // Chart-of-Accounts trio (people + planning + framework), then
-  // reconciliation-flavored items, closing/AI tooling, and finally
-  // the two audit logs at the bottom.
+  // Connect & Import / Chart-of-Accounts trio (people + planning +
+  // data-in + framework), then reconciliation-flavored items,
+  // closing/AI tooling, and finally the two audit logs at the
+  // bottom followed by Accounting settings.
   { to: "/accounting/assets",             label: "Assets",             icon: Building2 },
   { to: "/accounting/loans",              label: "Loans",              icon: Wallet },
   { to: "/inventory-management",          label: "Inventory",          icon: Boxes },
@@ -183,6 +193,7 @@ const ACCOUNTING_LINKS = [
   { to: "/accounting/tags",               label: "Tags",               icon: Tags },
   { to: "/contacts",                      label: "Contacts",           icon: Users },
   { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp },
+  { subGroup: true, key: "connect",       label: "Connect & Import",   icon: Landmark, items: CONNECT_LINKS },
   { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts",  icon: ListTree },
   { to: "/accounting/checks",             label: "Print Checks",       icon: Printer },
   { to: "/accounting/reconciliation",     label: "Reconciliation",     icon: CheckCheck },
@@ -196,6 +207,7 @@ const ACCOUNTING_LINKS = [
   { to: "/accounting/close-books",        label: "Close the Books",    icon: Lock },
   { to: "/communications-audit",          label: "Email log",          icon: Inbox },
   { to: "/audit-log",                     label: "Audit log",          icon: History },
+  { to: "/accounting/settings",           label: "Accounting settings",icon: Settings2 },
 ];
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
