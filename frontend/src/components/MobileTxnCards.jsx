@@ -23,9 +23,8 @@ import AccountPicker from "@/components/AccountPicker";
 import { ContactBadge } from "@/components/ContactBadge";
 
 
-function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
+function TxnCard({ t, accts, updateCategory, currentId, onReload, onEdit }) {
   const [dx, setDx] = useState(0);                  // touch delta X
-  const [expanded, setExpanded] = useState(false);
   const startX = useRef(null);
 
   const onTouchStart = (e) => { startX.current = e.touches[0].clientX; };
@@ -56,8 +55,9 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
         toast.info("Nothing to approve on this row");
       }
     } else if (d < -60) {
-      // Swipe left → open picker.
-      setExpanded(true);
+      // Swipe left → open the full Edit-transaction modal so the
+      // mobile card matches the desktop / narrow row-click behavior.
+      onEdit?.(t);
     }
     startX.current = null;
   };
@@ -84,9 +84,9 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => onEdit?.(t)}
         style={swipeStyle}
-        className={`relative bg-white p-3 transition-transform touch-pan-y ${
+        className={`relative bg-white p-3 transition-transform touch-pan-y cursor-pointer ${
           swipingRight ? "shadow-emerald-200" : swipingLeft ? "shadow-slate-300" : ""
         }`}
       >
@@ -125,28 +125,13 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload }) {
             <ChevronRight size={14} className="ml-auto text-slate-300 mt-1" />
           </div>
         </div>
-        {expanded && (
-          <div className="mt-3 pt-3 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
-            <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-1">Category</div>
-            <AccountPicker
-              value={t.category_account_id || ""}
-              accounts={accts}
-              onChange={(id) => updateCategory(t.id, id)}
-              companyId={currentId}
-              testId={`mobile-txn-cat-${t.id}`}
-            />
-            <div className="mt-2 flex items-center gap-2 text-[10px] text-slate-400">
-              Tip: swipe → to approve · swipe ← to change
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
 
-export default function MobileTxnCards({ txns, accts, updateCategory, currentId, onReload }) {
+export default function MobileTxnCards({ txns, accts, updateCategory, currentId, onReload, onEdit }) {
   if (!txns.length) {
     return (
       <div className="rounded-xl border bg-white p-8 text-center text-sm text-slate-500 italic"
@@ -165,6 +150,7 @@ export default function MobileTxnCards({ txns, accts, updateCategory, currentId,
           updateCategory={updateCategory}
           currentId={currentId}
           onReload={onReload}
+          onEdit={onEdit}
         />
       ))}
     </div>

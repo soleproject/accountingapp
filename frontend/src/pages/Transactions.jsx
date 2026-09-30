@@ -2987,6 +2987,7 @@ export default function Transactions() {
             updateCategory={updateCategory}
             currentId={currentId}
             onReload={() => loadRef.current?.()}
+            onEdit={(t) => setEditing(t)}
           />
         ) : (
         <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>
@@ -3087,7 +3088,19 @@ export default function Transactions() {
                 <tr data-testid={TID.txnRow} data-txn-id={t.id}
                     onMouseEnter={() => setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date })}
                     onMouseLeave={() => setFocus(null)}
-                    className="border-b hover:bg-slate-50 transition-colors">
+                    onClick={(e) => {
+                      // Row-click opens the full Edit-transaction modal so the
+                      // desktop table matches the mobile / narrow card views.
+                      // Skip if the click landed on any interactive control
+                      // inside the row (checkbox, category picker, split
+                      // pill, more-menu, sparkle, linked-doc chip, etc.) so
+                      // those keep working as before.
+                      if (e.target.closest(
+                        "button, input, select, textarea, a, label, [role='menu'], [role='menuitem'], [role='combobox'], [role='listbox']"
+                      )) return;
+                      setEditing(t);
+                    }}
+                    className="border-b hover:bg-slate-50 transition-colors cursor-pointer">
                   <td className="px-3 py-2">
                     <input type="checkbox" data-testid={TID.txnRowCheckbox}
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
