@@ -1360,7 +1360,27 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
         if not li.bill_id and not li.category_account_id:
             raise HTTPException(400, "Each line needs a bill_id OR a category")
 
+    # ---- Snapshot for reopen ----------------------------------------
+    #      Store the pre-check-assign shape of the txn so a later
+    #      "Undo / Re-open" call can put things back exactly the way
+    #      they were (mirrors how `bill_payment_applied` saves
+    #      `_pre_link_*` fields before overwriting).
+    pre_snapshot = {
+        "_pre_check_assign_contact_id":         txn.get("contact_id"),
+        "_pre_check_assign_contact_name":       txn.get("contact_name"),
+        "_pre_check_assign_category_account_id": txn.get("category_account_id"),
+        "_pre_check_assign_splits":             txn.get("splits"),
+        "_pre_check_assign_posted":             txn.get("posted", False),
+        "_pre_check_assign_human_reviewed":     txn.get("human_reviewed", False),
+        "_pre_check_assign_needs_review":       txn.get("needs_review", True),
+    }
+
     # ---- Bill balance-due decrement (best-effort application) ----
+    #      Now also creates a db.payments doc per bill-linked line so
+    #      the AP subsidiary ledger sees the check the same way it
+    #      sees an ACH bill-pay. Payment IDs are collected so we can
+    #      stamp them on the txn (for reversal in `reopen_review_item`).
+    payment_ids: list[str] = []
     for li in body.line_items:
         if not li.bill_id:
             continue
@@ -1375,6 +1395,30 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
                       "updated_at":  _now_iso()},
              "$push": {"applied_check_txn_ids": body.txn_id}},
         )
+        # Payment doc — one per (check → bill) line. Matches the shape
+        # produced by `_handle_bill_payment` elsewhere so the AP aging
+        # report / vendor ledger picks it up automatically.
+        pid = str(uuid.uuid4())
+        payment_ids.append(pid)
+        await db.payments.insert_one({
+            "id":                    pid,
+            "company_id":            cid,
+            "date":                  txn.get("date"),
+            "amount":                round(float(li.amount), 2),
+            "contact_id":            contact_id,
+            "contact_name":          contact_name,
+            "method":                "check",
+            "direction":             "out",
+            "bank_account_id":       txn.get("bank_account_id"),
+            "memo":                  li.description or "",
+            "linked_bill_id":        li.bill_id,
+            "applications":          [{"bill_id": li.bill_id,
+                                       "amount":  round(float(li.amount), 2)}],
+            "source_transaction_id": body.txn_id,
+            "source":                "client_review_check_assign",
+            "created_at":            _now_iso(),
+            "updated_at":            _now_iso(),
+        })
 
     # ---- Stamp the transaction ---------------------------------
     splits = [{
@@ -1388,18 +1432,31 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
     } for li in body.line_items]
     single_cat = (splits[0]["category_account_id"]
                   if len(splits) == 1 else None)
+    txn_set: dict = {
+        "contact_id":            contact_id,
+        "contact_name":          contact_name,
+        "splits":                splits,
+        "category_account_id":   single_cat,
+        # posted=True is the flag reports (P&L, GL) key off to include
+        # the row in double-entry totals. Without it the check would
+        # be visually assigned but invisible on the financials, which
+        # was the original Type-13 GL gap.
+        "posted":                True,
+        "human_reviewed":        True,
+        "needs_review":          False,
+        "assigned_via":          "client_review_check_assign",
+        "updated_at":            _now_iso(),
+        **pre_snapshot,
+    }
+    if payment_ids:
+        # Store as an array (a single check can settle multiple bills)
+        # — reopen uses this list to find + reverse every payment doc
+        # the assign created, symmetric with the single-payment
+        # `linked_payment_id` used by ACH/wire bill-pay elsewhere.
+        txn_set["linked_payment_ids"] = payment_ids
     await db.transactions.update_one(
         {"id": body.txn_id, "company_id": cid},
-        {"$set": {
-            "contact_id":            contact_id,
-            "contact_name":          contact_name,
-            "splits":                splits,
-            "category_account_id":   single_cat,
-            "human_reviewed":        True,
-            "needs_review":          False,
-            "assigned_via":          "client_review_check_assign",
-            "updated_at":            _now_iso(),
-        }},
+        {"$set": txn_set},
     )
 
     # ---- Track row-level completion on the batch item -----------
@@ -1412,6 +1469,10 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
 
     update: dict = {
         f"items.$.resolved_txn_ids": resolved_ids,
+        # Stamp `action_taken` so `reopen_review_item` can dispatch
+        # the correct reversal branch (`check_assigned`) — without
+        # this the reopen endpoint has no way to know what to undo.
+        f"items.$.action_taken":     "check_assigned",
     }
     if all_done:
         update["items.$.answered_at"] = _now_iso()
@@ -1420,6 +1481,15 @@ async def apply_check_assign(batch: dict, item: dict, body: CheckAssignBody) -> 
         {"id": batch["id"], "items.item_id": item_id},
         {"$set": update},
     )
+
+    # Invalidate dashboard cache so AI Cleanup Copilot progress + P&L
+    # tiles reflect the newly-booked checks on next fetch. Silent on
+    # failure — matches other Quick Check-in handlers.
+    try:
+        from routes.transactions import _invalidate_dash
+        await _invalidate_dash(cid)
+    except Exception:
+        pass
 
     return {
         "status":              "assigned",
@@ -3150,6 +3220,89 @@ async def reopen_review_item(token: str, item_id: str):
                  "$set":   {"updated_at": now}},
             )
             reversed_bits.append("un-dismissed receipt")
+
+    elif action == "check_assigned":
+        # Symmetric reversal for `apply_check_assign` (Type 13,
+        # Checks-without-Payee). For each txn the item resolved:
+        #   1) delete every db.payments doc the assign created and
+        #      restore bill balance_due (via the shared helper);
+        #   2) pop the check id from bills.applied_check_txn_ids so
+        #      the bill's audit trail matches its restored balance;
+        #   3) restore the txn's pre-assign snapshot fields, so the
+        #      row goes back into the Check Register review queue
+        #      exactly as it was before the client answered.
+        from routes.transactions import _reverse_and_delete_payment
+        resolved = list(item.get("resolved_txn_ids") or [])
+        for tid in resolved:
+            t = await db.transactions.find_one(
+                {"id": tid, "company_id": company_id},
+                {"linked_payment_ids": 1, "splits": 1,
+                 "_pre_check_assign_contact_id": 1,
+                 "_pre_check_assign_contact_name": 1,
+                 "_pre_check_assign_category_account_id": 1,
+                 "_pre_check_assign_splits": 1,
+                 "_pre_check_assign_posted": 1,
+                 "_pre_check_assign_human_reviewed": 1,
+                 "_pre_check_assign_needs_review": 1},
+            )
+            if not t:
+                continue
+            # (1) Reverse each payment doc — this also restores the
+            #     bill's balance_due & status inside the helper.
+            for pid in (t.get("linked_payment_ids") or []):
+                try:
+                    await _reverse_and_delete_payment(company_id, pid)
+                    reversed_bits.append(f"reversed check payment {pid[:8]}")
+                except Exception as _e:  # noqa: BLE001
+                    # Swallowing here matches other reopen branches —
+                    # a failed payment reversal shouldn't block the
+                    # txn's own state reset.
+                    pass
+            # (2) Pop check id from bills.applied_check_txn_ids for
+            #     every bill this txn touched (splits carry bill_ids).
+            for s in (t.get("splits") or []):
+                bid = s.get("bill_id")
+                if not bid:
+                    continue
+                await db.bills.update_one(
+                    {"id": bid, "company_id": company_id},
+                    {"$pull": {"applied_check_txn_ids": tid},
+                     "$set":  {"updated_at": now}},
+                )
+            # (3) Restore pre-assign snapshot on the txn.
+            restore_set = {
+                "contact_id":          t.get("_pre_check_assign_contact_id"),
+                "contact_name":        t.get("_pre_check_assign_contact_name"),
+                "category_account_id": t.get("_pre_check_assign_category_account_id"),
+                "splits":              t.get("_pre_check_assign_splits"),
+                "posted":              t.get("_pre_check_assign_posted", False),
+                "human_reviewed":      t.get("_pre_check_assign_human_reviewed", False),
+                "needs_review":        t.get("_pre_check_assign_needs_review", True),
+                "updated_at":          now,
+            }
+            await db.transactions.update_one(
+                {"id": tid, "company_id": company_id},
+                {"$set":   restore_set,
+                 "$unset": {"assigned_via":                             "",
+                            "linked_payment_ids":                       "",
+                            "_pre_check_assign_contact_id":             "",
+                            "_pre_check_assign_contact_name":           "",
+                            "_pre_check_assign_category_account_id":    "",
+                            "_pre_check_assign_splits":                 "",
+                            "_pre_check_assign_posted":                 "",
+                            "_pre_check_assign_human_reviewed":         "",
+                            "_pre_check_assign_needs_review":           ""}},
+            )
+        # Also clear the item-level tracking so subsequent re-answers
+        # start clean (resolved_txn_ids is used by apply_check_assign
+        # to detect "all done"; leaving stale ids would falsely mark
+        # the item as complete on the very first re-answer).
+        await db.client_review_batches.update_one(
+            {"id": batch["id"], "items.item_id": item["item_id"]},
+            {"$unset": {"items.$.resolved_txn_ids": ""}},
+        )
+        if resolved:
+            reversed_bits.append(f"cleared {len(resolved)} resolved check(s)")
 
     # --- 2. Reopen the source agent_findings row. ---
     if item.get("source_collection") == "agent_findings" and item.get("source_id"):

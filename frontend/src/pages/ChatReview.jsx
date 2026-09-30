@@ -2714,6 +2714,15 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
   // modal so a query the user types in one place applies in the other.
   // Empty string means "no filter".
   const [searchQuery, setSearchQuery] = useState("");
+  // Advanced filter state (date range + amount range). Rendered as a
+  // dropdown ONLY inside the "Show all" modal, but stored at the parent
+  // so `filteredVisible` respects it too — that way "select all", row
+  // counts, and the inline card all stay in lockstep. Empty string /
+  // null means "no bound on that side".
+  const [dateFrom,  setDateFrom]  = useState("");   // "YYYY-MM-DD"
+  const [dateTo,    setDateTo]    = useState("");   // "YYYY-MM-DD"
+  const [amountMin, setAmountMin] = useState("");   // string of number, no coercion until compare
+  const [amountMax, setAmountMax] = useState("");
   useEffect(() => {
     onSplitModeChange?.(splitMode && selected.size > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2723,18 +2732,39 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
     () => (samples || []).filter(s => !hiddenIds.has(s.id)),
     [samples, hiddenIds],
   );
-  // Same as `visible` but with the search query applied. Matches
-  // date, amount, and description as a single lower-cased blob so a
-  // CPA can search for "wells", "1500", "2026-08", or the last four
-  // digits of a wire without thinking about which field is which.
+  // Same as `visible` but with the text query AND the advanced date /
+  // amount range applied. Text query matches date, amount, and
+  // description as a single lower-cased blob so a CPA can search for
+  // "wells", "1500", "2026-08", or the last four digits of a wire
+  // without thinking about which field is which. Advanced filters
+  // are applied on top as strict bounds.
   const filteredVisible = useMemo(() => {
-    const q = (searchQuery || "").trim().toLowerCase();
-    if (!q) return visible;
+    const q      = (searchQuery || "").trim().toLowerCase();
+    const dFrom  = (dateFrom  || "").trim();
+    const dTo    = (dateTo    || "").trim();
+    const aMinRaw = (amountMin || "").trim();
+    const aMaxRaw = (amountMax || "").trim();
+    const aMin = aMinRaw === "" ? null : Number(aMinRaw);
+    const aMax = aMaxRaw === "" ? null : Number(aMaxRaw);
+    if (!q && !dFrom && !dTo && aMin == null && aMax == null) return visible;
     return visible.filter(s => {
-      const blob = `${s.date || ""} ${s.amount ?? ""} ${s.desc || ""}`.toLowerCase();
-      return blob.includes(q);
+      if (q) {
+        const blob = `${s.date || ""} ${s.amount ?? ""} ${s.desc || ""}`.toLowerCase();
+        if (!blob.includes(q)) return false;
+      }
+      if (dFrom && (!s.date || s.date < dFrom)) return false;
+      if (dTo   && (!s.date || s.date > dTo))   return false;
+      if (aMin != null || aMax != null) {
+        // Compare on absolute amount so a client can type "1000" and
+        // catch both a $1,000 deposit and a $1,000 payment without
+        // remembering the sign convention.
+        const amt = Math.abs(Number(s.amount) || 0);
+        if (aMin != null && !Number.isNaN(aMin) && amt < aMin) return false;
+        if (aMax != null && !Number.isNaN(aMax) && amt > aMax) return false;
+      }
+      return true;
     });
-  }, [visible, searchQuery]);
+  }, [visible, searchQuery, dateFrom, dateTo, amountMin, amountMax]);
   const toggleOne = (id) => setSelected(prev => {
     const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n;
   });
@@ -3077,6 +3107,17 @@ function SamplesList({ samples, companyId, accounts, contacts, onLinked,
           totalSamples={samples}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
+          // Advanced filter state — dropdown is rendered inside the
+          // modal but the state lives on the parent so filteredVisible
+          // and select-all stay coherent.
+          dateFrom={dateFrom}       onDateFromChange={setDateFrom}
+          dateTo={dateTo}           onDateToChange={setDateTo}
+          amountMin={amountMin}     onAmountMinChange={setAmountMin}
+          amountMax={amountMax}     onAmountMaxChange={setAmountMax}
+          onClearAdvanced={() => {
+            setDateFrom(""); setDateTo("");
+            setAmountMin(""); setAmountMax("");
+          }}
           companyId={companyId}
           fmt={fmt}
           onEdit={doEdit}
@@ -3921,6 +3962,14 @@ function findAccountIdFromProposal(p, accounts) {
 // `onEnterSplit` bridge.
 function ShowAllModal({
   samples, totalSamples, searchQuery, onSearchQueryChange,
+  // Advanced filter props — state lives on the parent (see comment
+  // in the caller) so `filteredVisible` and select-all stay in sync
+  // with the inline card. Any of these being non-empty adds a chip
+  // count next to the "Advanced" toggle so the CPA can see filters
+  // are active even with the dropdown collapsed.
+  dateFrom, onDateFromChange, dateTo, onDateToChange,
+  amountMin, onAmountMinChange, amountMax, onAmountMaxChange,
+  onClearAdvanced,
   companyId, fmt,
   onEdit, onRecategorize, onSplit, onLink, onAskClient, onDelete,
   // Split-mode props (mirror state on the parent card so the modal
@@ -3938,9 +3987,18 @@ function ShowAllModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Advanced filter panel open/closed. Local UI state only — resets
+  // between mounts, which is what we want (the underlying filters
+  // themselves persist on the parent).
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const advancedCount = [dateFrom, dateTo, amountMin, amountMax]
+    .filter(v => (v ?? "").toString().trim() !== "").length;
+
   const selCount = selected ? selected.size : 0;
   const total = totalSamples?.length ?? samples.length;
-  const isFiltered = !!(searchQuery && searchQuery.trim());
+  const isFiltered = !!(
+    (searchQuery && searchQuery.trim()) || advancedCount > 0
+  );
 
   return (
     <div
@@ -3985,22 +4043,135 @@ function ShowAllModal({
           </div>
           {/* Modal-scoped filter input — writes back into the same
               `searchQuery` state the inline card reads, so the two
-              surfaces always show the same filtered set. */}
-          <div className="mt-3 relative">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-            />
-            <input
-              type="search"
-              value={searchQuery || ""}
-              onChange={(e) => onSearchQueryChange?.(e.target.value)}
-              placeholder="Filter by date, amount, or description…"
-              className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
-              autoFocus
-              data-testid="chat-review-show-all-filter"
-            />
+              surfaces always show the same filtered set. The
+              Advanced toggle sits inline on the right and reveals
+              a date-range + amount-range panel underneath. */}
+          <div className="mt-3 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+              />
+              <input
+                type="search"
+                value={searchQuery || ""}
+                onChange={(e) => onSearchQueryChange?.(e.target.value)}
+                placeholder="Filter by date, amount, or description…"
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-200 bg-white text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+                autoFocus
+                data-testid="chat-review-show-all-filter"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen(v => !v)}
+              aria-expanded={advancedOpen}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                advancedCount > 0
+                  ? "border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100"
+                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+              }`}
+              data-testid="chat-review-show-all-advanced-toggle"
+            >
+              <span>Advanced</span>
+              {advancedCount > 0 && (
+                <span
+                  className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-sky-600 text-white text-[10px] font-bold"
+                  data-testid="chat-review-show-all-advanced-count"
+                >
+                  {advancedCount}
+                </span>
+              )}
+              <svg
+                width="10" height="10" viewBox="0 0 10 10"
+                className={`transition-transform ${advancedOpen ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              >
+                <path d="M1 3 L5 7 L9 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
           </div>
+          {advancedOpen && (
+            <div
+              className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3"
+              data-testid="chat-review-show-all-advanced-panel"
+            >
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1.5">
+                    Date range
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={dateFrom || ""}
+                      onChange={(e) => onDateFromChange?.(e.target.value)}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+                      aria-label="From date"
+                      data-testid="chat-review-show-all-date-from"
+                    />
+                    <span className="text-slate-400 text-xs">to</span>
+                    <input
+                      type="date"
+                      value={dateTo || ""}
+                      onChange={(e) => onDateToChange?.(e.target.value)}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] text-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+                      aria-label="To date"
+                      data-testid="chat-review-show-all-date-to"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold mb-1.5">
+                    Amount range <span className="normal-case tracking-normal italic text-slate-400 font-normal">(absolute $)</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={amountMin || ""}
+                      onChange={(e) => onAmountMinChange?.(e.target.value)}
+                      placeholder="Min"
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+                      aria-label="Minimum amount"
+                      data-testid="chat-review-show-all-amount-min"
+                    />
+                    <span className="text-slate-400 text-xs">to</span>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      value={amountMax || ""}
+                      onChange={(e) => onAmountMaxChange?.(e.target.value)}
+                      placeholder="Max"
+                      className="flex-1 min-w-0 px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-[13px] text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 focus:border-slate-300"
+                      aria-label="Maximum amount"
+                      data-testid="chat-review-show-all-amount-max"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500 italic">
+                  {advancedCount > 0
+                    ? <>Showing <span className="font-semibold text-slate-700">{samples.length}</span> of {total} that match all filters.</>
+                    : "Set a date or amount range to narrow the list."}
+                </span>
+                <button
+                  type="button"
+                  onClick={onClearAdvanced}
+                  disabled={advancedCount === 0}
+                  className={`px-2 py-1 rounded font-medium transition-colors ${
+                    advancedCount > 0
+                      ? "text-sky-700 hover:bg-sky-100"
+                      : "text-slate-400 cursor-not-allowed"
+                  }`}
+                  data-testid="chat-review-show-all-advanced-clear"
+                >
+                  Clear advanced
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Full row list — scrolls internally within the modal so
@@ -4037,7 +4208,7 @@ function ShowAllModal({
               data-testid="chat-review-show-all-empty"
             >
               {isFiltered
-                ? <>No transactions match "{searchQuery}".</>
+                ? <>No transactions match the current filters.</>
                 : "No transactions."}
             </li>
           )}
