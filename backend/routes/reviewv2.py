@@ -2825,7 +2825,13 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
 
     for r in rows:
         # Fully-booked rows (human-reviewed with real category) → skip.
-        if r.get("human_reviewed") and not _is_no_category(r) and not r.get("needs_review"):
+        # A bill-payment assign has posted=True + human_reviewed=True
+        # but may carry no top-level category (the category lives on
+        # the bill's own default_account) — treat those as fully booked
+        # too so the card doesn't reappear after "Save" in Review Chat.
+        if r.get("human_reviewed") and not r.get("needs_review") and (
+            not _is_no_category(r) or r.get("posted")
+        ):
             continue
         is_check, signal = _is_check_txn(r)
         no_cat = _is_no_category(r)

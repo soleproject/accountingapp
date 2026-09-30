@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -55,12 +55,41 @@ export default function Bills() {
   };
   // Deep-link filters from Month Close: /bills?outstanding=1&as_of=YYYY-MM-DD
   // A/P Aging bucket click-through: /bills?bucket=<key>
+  // Highlights tile click-through:   /bills?overdue=1  (strictly late, bal>0)
   const [params, setParams] = useSearchParams();
   const outstanding = params.get("outstanding") === "1";
+  const overdue = params.get("overdue") === "1";
   const asOf = params.get("as_of") || "";
   const bucket = params.get("bucket") || "";
+  // Highlights vs A/P Aging card view — persisted so the CPA's last
+  // pick sticks across reloads (mirrors the Invoices A/R Aging toggle).
+  const [view, setView] = useState(() => {
+    try { return localStorage.getItem("ap_aging_view") || "highlights"; }
+    catch { return "highlights"; }
+  });
+  const setViewPersist = (v) => {
+    setView(v);
+    try { localStorage.setItem("ap_aging_view", v); } catch { /* ignore */ }
+  };
+  // Client-side text search — filters against number/vendor/status/amount.
+  const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
-    if (!outstanding && !asOf && !bucket) return items;
+    const q = search.trim().toLowerCase();
+    if (view === "paid") {
+      // "Paid" mode — bills fully settled. Ignore aging/bucket/overdue
+      // URL filters; still respect the search text.
+      return items.filter(b => {
+        const isPaid = (b.status === "paid") || (Number(b.balance_due) <= 0.005);
+        if (!isPaid) return false;
+        if (q) {
+          const hay = [b.number, b.contact_name, b.vendor_name, b.status, b.total, b.balance_due]
+            .map((v) => String(v ?? "").toLowerCase()).join(" ");
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+    if (!outstanding && !overdue && !asOf && !bucket && !q) return items;
     const today = new Date().toISOString().slice(0, 10);
     const daysLate = (due) => {
       if (!due) return -1;
@@ -69,6 +98,10 @@ export default function Bills() {
     };
     return items.filter(b => {
       if (outstanding && !(Number(b.balance_due) > 0.005)) return false;
+      if (overdue) {
+        if (!(Number(b.balance_due) > 0.005)) return false;
+        if (!(daysLate(b.due_date) >= 1)) return false;
+      }
       if (bucket) {
         if (!(Number(b.balance_due) > 0.005)) return false;
         const dl = daysLate(b.due_date);
@@ -82,12 +115,19 @@ export default function Bills() {
         const d = b.issue_date || b.date || "";
         if (d && d > asOf) return false;
       }
+      if (q) {
+        const hay = [
+          b.number, b.contact_name, b.vendor_name, b.status,
+          b.total, b.balance_due,
+        ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [items, outstanding, asOf, bucket]);
+  }, [items, outstanding, overdue, asOf, bucket, search, view]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
-    p.delete("outstanding"); p.delete("as_of"); p.delete("bucket");
+    p.delete("outstanding"); p.delete("overdue"); p.delete("as_of"); p.delete("bucket");
     setParams(p, { replace: true });
   };
   const onBucketClick = (k) => {
@@ -143,59 +183,174 @@ export default function Bills() {
         <div data-testid="ap-aging-widget" className="rounded-xl border bg-white p-5">
           <div className="flex items-center justify-between mb-3">
             <div>
-              <div className="font-heading font-semibold">A/P Aging</div>
+              <div className="font-heading font-semibold">
+                {view === "paid" ? "Paid" : view === "highlights" ? "Highlights" : "A/P Aging"}
+              </div>
               <div className="text-xs text-slate-500">
-                Outstanding payables as of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> total
+                {view === "paid"
+                  ? <>Bills already settled · <span className="font-mono-num font-semibold text-slate-800">{filtered.length}</span> shown</>
+                  : view === "highlights"
+                  ? <>As of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> outstanding</>
+                  : <>Outstanding payables as of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> total</>}
               </div>
             </div>
-            {(aging.buckets["61_90"] + aging.buckets["over_90"]) > 0 && (
-              <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
-                <AlertTriangle size={12} />
-                {fmtMoney(aging.buckets["61_90"] + aging.buckets["over_90"])} severely late
-              </div>
-            )}
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-            {BUCKETS.map(b => {
-              const amt = aging.buckets[b.key] || 0;
-              const pct = aging.total ? (amt / aging.total) * 100 : 0;
-              const isActive = bucket === b.key;
-              return (
+            <div className="flex items-center gap-2">
+              {(aging.buckets["61_90"] + aging.buckets["over_90"]) > 0 && view === "aging" && (
+                <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
+                  <AlertTriangle size={12} />
+                  {fmtMoney(aging.buckets["61_90"] + aging.buckets["over_90"])} severely late
+                </div>
+              )}
+              {/* Highlights ↔ A/P Aging ↔ Paid toggle — mirrors Invoices'
+                  A/R Aging toggle so bills has feature-parity. Persisted
+                  to localStorage `ap_aging_view`. Selecting Paid filters
+                  the list to bills with status=paid / balance_due=0 and
+                  hides the aging widget body. */}
+              <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5" data-testid="ap-aging-toggle">
                 <button
-                  key={b.key}
                   type="button"
-                  onClick={() => onBucketClick(b.key)}
-                  className={`text-left rounded-lg border p-3 transition ${BG[b.color]} hover:shadow-md hover:-translate-y-0.5 ${isActive ? "ring-2 ring-offset-1 ring-slate-900" : ""}`}
-                  data-testid={`ap-aging-bucket-${b.key}`}
-                  aria-pressed={isActive}
-                  title={isActive ? "Click again to clear filter" : `Filter bills to ${b.label}`}
+                  onClick={() => setViewPersist("highlights")}
+                  className={`text-xs font-semibold px-2.5 py-1 rounded ${
+                    view === "highlights" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  data-testid="ap-aging-toggle-highlights"
                 >
-                  <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
-                  <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
-                  <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                    <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
-                  </div>
-                  <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/P{isActive ? " · filtered" : ""}</div>
+                  Highlights
                 </button>
-              );
-            })}
-          </div>
-          <div className="mt-4">
-            <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
-              {BUCKETS.map(b => {
-                const amt = aging.buckets[b.key] || 0;
-                const pct = aging.total ? (amt / aging.total) * 100 : 0;
-                if (pct === 0) return null;
-                return <div key={b.key} className={BAR[b.color]} style={{ width: `${pct}%` }} title={`${b.label}: ${fmtMoney(amt)}`} />;
-              })}
+                <button
+                  type="button"
+                  onClick={() => setViewPersist("aging")}
+                  className={`text-xs font-semibold px-2.5 py-1 rounded ${
+                    view === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  data-testid="ap-aging-toggle-aging"
+                >
+                  A/P Aging
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewPersist("paid")}
+                  className={`text-xs font-semibold px-2.5 py-1 rounded ${
+                    view === "paid" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  data-testid="ap-aging-toggle-paid"
+                >
+                  Paid
+                </button>
+              </div>
             </div>
           </div>
+
+          {view === "aging" && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                {BUCKETS.map(b => {
+                  const amt = aging.buckets[b.key] || 0;
+                  const pct = aging.total ? (amt / aging.total) * 100 : 0;
+                  const isActive = bucket === b.key;
+                  return (
+                    <button
+                      key={b.key}
+                      type="button"
+                      onClick={() => onBucketClick(b.key)}
+                      className={`text-left rounded-lg border p-3 transition ${BG[b.color]} hover:shadow-md hover:-translate-y-0.5 ${isActive ? "ring-2 ring-offset-1 ring-slate-900" : ""}`}
+                      data-testid={`ap-aging-bucket-${b.key}`}
+                      aria-pressed={isActive}
+                      title={isActive ? "Click again to clear filter" : `Filter bills to ${b.label}`}
+                    >
+                      <div className={`text-[10px] uppercase tracking-wider font-semibold ${TEXT[b.color]}`}>{b.label}</div>
+                      <div className={`font-mono-num text-lg font-semibold mt-0.5 ${TEXT[b.color]}`}>{fmtMoney(amt)}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{b.desc}</div>
+                      <div className="mt-2 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                        <div className={`h-full ${BAR[b.color]} transition-all`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className={`text-[10px] mt-1 ${TEXT[b.color]}`}>{pct.toFixed(0)}% of A/P{isActive ? " · filtered" : ""}</div>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-4">
+                <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-100">
+                  {BUCKETS.map(b => {
+                    const amt = aging.buckets[b.key] || 0;
+                    const pct = aging.total ? (amt / aging.total) * 100 : 0;
+                    if (pct === 0) return null;
+                    return <div key={b.key} className={BAR[b.color]} style={{ width: `${pct}%` }} title={`${b.label}: ${fmtMoney(amt)}`} />;
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
+          {view === "highlights" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3" data-testid="ap-highlights">
+              {/* Overdue tile — clicking filters the list to strictly-
+                  late bills with a balance still due. */}
+              <button
+                type="button"
+                onClick={() => { const p = new URLSearchParams(params); p.set("overdue", "1"); p.delete("bucket"); setParams(p, { replace: true }); }}
+                className="text-left rounded-lg border border-rose-200 bg-rose-50 p-4 hover:shadow-md hover:-translate-y-0.5 transition"
+                data-testid="ap-highlight-overdue"
+              >
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-rose-700">Overdue · click to filter</div>
+                <div className="font-mono-num text-2xl font-bold mt-1 text-rose-800">
+                  {fmtMoney(
+                    (aging.buckets["1_30"]  || 0) +
+                    (aging.buckets["31_60"] || 0) +
+                    (aging.buckets["61_90"] || 0) +
+                    (aging.buckets["over_90"]|| 0)
+                  )}
+                </div>
+                <div className="text-[11px] text-rose-700 mt-1">Past-due bills need payment.</div>
+              </button>
+              {/* Due-within-30-days tile — routes to the same bucket
+                  filter Aging view uses so a click here == click "current". */}
+              <button
+                type="button"
+                onClick={() => { const p = new URLSearchParams(params); p.set("bucket", "current"); p.delete("overdue"); setParams(p, { replace: true }); }}
+                className="text-left rounded-lg border border-amber-200 bg-amber-50 p-4 hover:shadow-md hover:-translate-y-0.5 transition"
+                data-testid="ap-highlight-due-soon"
+              >
+                <div className="text-[10px] uppercase tracking-wider font-semibold text-amber-700">Due within 30 days · click to filter</div>
+                <div className="font-mono-num text-2xl font-bold mt-1 text-amber-800">
+                  {fmtMoney(aging.buckets["current"] || 0)}
+                </div>
+                <div className="text-[11px] text-amber-700 mt-1">Not yet late — pay soon to stay current.</div>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
-        {(outstanding || asOf || bucket) && (
+        {/* Client-side search input — filters the bills list by number,
+             vendor, status, or amount. Kept inside the table container
+             so it visually anchors above the header row. */}
+        <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/40">
+          <div className="relative max-w-md">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search bills — number, vendor, status…"
+              className="w-full pl-8 pr-8 py-1.5 rounded-md border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="bills-search"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Clear search"
+                data-testid="bills-search-clear"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+        {(outstanding || overdue || asOf || bucket) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
             data-testid="bills-filter-chip"
@@ -203,8 +358,9 @@ export default function Bills() {
             <span>
               Showing{" "}
               {outstanding && <b>outstanding</b>}
+              {overdue && <b>overdue</b>}
               {bucket && <b>{BUCKETS.find(b => b.key === bucket)?.label || bucket}</b>}
-              {(outstanding || bucket) && asOf && " "}
+              {(outstanding || overdue || bucket) && asOf && " "}
               {asOf && <>as of <b className="font-mono-num">{asOf}</b></>}
               {" "}·{" "}
               <span className="font-mono-num">{filtered.length}</span> of {items.length}

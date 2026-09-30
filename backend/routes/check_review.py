@@ -14,6 +14,7 @@ Endpoints (all prefixed `/api/companies/{cid}/check-review`):
 from __future__ import annotations
 
 import re
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -147,9 +148,15 @@ async def list_unassigned_checks(
 # ---------------------------------------------------------------------------
 
 class CheckLineItemIn(BaseModel):
-    category_account_id: str
+    # Either category_account_id OR bill_id must be set on each line.
+    # `bill_id` lines settle an open A/P bill (creates a db.payments doc
+    # and decrements bill.balance_due) mirroring the client-review
+    # /check-assign endpoint so the Review Chat has feature parity with
+    # Quick Check-in.
+    category_account_id: Optional[str] = None
+    bill_id: Optional[str] = None
     amount: float
-    description: str | None = None
+    description: Optional[str] = None
 
 
 class CheckAssignIn(BaseModel):
@@ -179,9 +186,31 @@ async def assign_check(
     if not txn:
         raise HTTPException(404, "Transaction not found")
 
+    # Pre-load bills referenced by any bill_id line (feature parity
+    # with the client-review /check-assign flow). Also lets a bill-only
+    # line derive the payee from the bill's vendor when the CPA didn't
+    # bother picking one.
+    bill_lookup: dict[str, dict] = {}
+    for li in inp.line_items:
+        if li.bill_id and li.bill_id not in bill_lookup:
+            b = await db.bills.find_one(
+                {"id": li.bill_id, "company_id": cid},
+            )
+            if not b:
+                raise HTTPException(400, f"Unknown bill_id {li.bill_id}")
+            bill_lookup[li.bill_id] = b
+
     # Resolve/create the payee.
     contact_id = inp.contact_id
     contact_name = ""
+    if bill_lookup and not contact_id and not inp.create_contact_name:
+        # Derive from bill vendor if all bills point to the same one.
+        vendors = {b.get("contact_id") for b in bill_lookup.values()
+                   if b.get("contact_id")}
+        if len(vendors) == 1:
+            contact_id = next(iter(vendors))
+            v = await db.contacts.find_one({"id": contact_id, "company_id": cid})
+            contact_name = (v or {}).get("name") or ""
     if not contact_id and inp.create_contact_name:
         # Reuse the existing /contacts/ensure semantics inline (avoid an
         # extra roundtrip). Idempotent by name.
@@ -209,7 +238,7 @@ async def assign_check(
             raise HTTPException(400, "contact_id not found")
         contact_name = c.get("name") or ""
     else:
-        raise HTTPException(400, "Provide contact_id or create_contact_name")
+        raise HTTPException(400, "Provide contact_id, create_contact_name, or a bill_id")
 
     # Validate sum matches the check amount.
     expected = round(abs(float(txn.get("amount") or 0)), 2)
@@ -219,9 +248,15 @@ async def assign_check(
             400,
             f"Line total ${got:.2f} doesn't match check amount ${expected:.2f}",
         )
+    # Each line must have either a category or a bill.
+    for li in inp.line_items:
+        if not li.category_account_id and not li.bill_id:
+            raise HTTPException(400, "Each line needs a category or a bill.")
 
-    # Resolve account names for the frontend display.
-    acct_ids = [li.category_account_id for li in inp.line_items]
+    # Resolve account names for the frontend display (only for
+    # category-lines — bill-lines derive their category from the bill's
+    # default account below).
+    acct_ids = [li.category_account_id for li in inp.line_items if li.category_account_id]
     acct_docs: dict[str, dict] = {}
     if acct_ids:
         async for a in db.accounts.find(
@@ -229,32 +264,99 @@ async def assign_check(
         ):
             acct_docs[a["id"]] = a
     for li in inp.line_items:
-        if li.category_account_id not in acct_docs:
+        if li.category_account_id and li.category_account_id not in acct_docs:
             raise HTTPException(
                 400,
                 f"category_account_id {li.category_account_id} not on this company",
             )
 
-    # Build the persisted line_items array. If only one line, we ALSO
-    # stamp the top-level `category_account_*` fields so the row shows
-    # correctly in every non-split-aware UI surface.
-    stored_lines = [
-        {
-            "category_account_id": li.category_account_id,
-            "category_account_code": acct_docs[li.category_account_id].get("code"),
-            "category_account_name": acct_docs[li.category_account_id].get("name"),
-            "amount": li.amount,
-            "description": li.description or "",
-        }
-        for li in inp.line_items
-    ]
+    # ---- Bill balance-due decrement + payment doc creation --------
+    # Mirrors client_review.apply_check_assign so a check applied to an
+    # open bill from Review Chat updates AP aging, vendor ledger, and
+    # bill status (paid/partial) exactly the same way as the client-side
+    # Quick Check-in path. payment_ids are stashed on the txn so a
+    # future reopen can reverse the linkage.
+    payment_ids: list[str] = []
+    for li in inp.line_items:
+        if not li.bill_id:
+            continue
+        b = bill_lookup[li.bill_id]
+        old_bal = float(b.get("balance_due", b.get("total", 0)) or 0)
+        new_bal = round(max(0.0, old_bal - float(li.amount)), 2)
+        new_status = "paid" if new_bal < 0.005 else "partial"
+        await db.bills.update_one(
+            {"id": li.bill_id, "company_id": cid},
+            {"$set": {"balance_due": new_bal,
+                      "status":      new_status,
+                      "updated_at":  now_iso()},
+             "$push": {"applied_check_txn_ids": txn_id}},
+        )
+        pid = str(uuid.uuid4())
+        payment_ids.append(pid)
+        await db.payments.insert_one({
+            "id":                    pid,
+            "company_id":            cid,
+            "date":                  txn.get("date"),
+            "amount":                round(float(li.amount), 2),
+            "contact_id":            contact_id,
+            "contact_name":          contact_name,
+            "method":                "check",
+            "direction":             "out",
+            "bank_account_id":       txn.get("bank_account_id"),
+            "memo":                  li.description or "",
+            "linked_bill_id":        li.bill_id,
+            "applications":          [{"bill_id": li.bill_id,
+                                       "amount":  round(float(li.amount), 2)}],
+            "source_transaction_id": txn_id,
+            "source":                "check_review_check_assign",
+            "created_at":            now_iso(),
+            "updated_at":            now_iso(),
+        })
+
+    # Build the persisted splits array — one entry per line. Bill-lines
+    # get their category derived from the bill's default_account_id
+    # (falls back to null if the bill has none). If only one line, we
+    # ALSO stamp the top-level `category_account_*` fields so the row
+    # shows correctly in every non-split-aware UI surface.
+    stored_lines = []
+    for li in inp.line_items:
+        if li.category_account_id:
+            a = acct_docs.get(li.category_account_id, {})
+            stored_lines.append({
+                "category_account_id":   li.category_account_id,
+                "category_account_code": a.get("code"),
+                "category_account_name": a.get("name"),
+                "bill_id":               li.bill_id,
+                "amount":                li.amount,
+                "description":           li.description or "",
+            })
+        else:
+            b = bill_lookup[li.bill_id]
+            default_acct = b.get("default_account_id")
+            a = {}
+            if default_acct:
+                a = await db.accounts.find_one(
+                    {"id": default_acct, "company_id": cid},
+                ) or {}
+            stored_lines.append({
+                "category_account_id":   default_acct,
+                "category_account_code": a.get("code"),
+                "category_account_name": a.get("name"),
+                "bill_id":               li.bill_id,
+                "amount":                li.amount,
+                "description":           li.description or "",
+            })
 
     update = {
         "contact_id": contact_id,
         "contact_name": contact_name,
         "line_items": stored_lines,
+        "splits":     stored_lines,
+        "posted":     True,
         "updated_at": now_iso(),
     }
+    if payment_ids:
+        update["linked_payment_ids"] = payment_ids
     if stored_lines:
         # Top-level category = first (or only) line. Multi-line splits
         # will show all lines in split-aware views (Transactions, JE,
@@ -277,7 +379,7 @@ async def assign_check(
     # same payee auto-categorize. Uses the existing rules collection
     # so the miner + UI pick it up seamlessly.
     rule_created = False
-    if inp.save_as_rule and len(stored_lines) == 1 and contact_id:
+    if inp.save_as_rule and len(stored_lines) == 1 and contact_id and stored_lines[0].get("category_account_id"):
         import uuid as _uuid
         existing_rule = await db.rules.find_one({
             "company_id": cid,

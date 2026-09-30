@@ -16,7 +16,7 @@ import { resolvePlaybook, PLAYBOOKS as PLAYBOOKS_ALL } from "@/tours/reviewChatP
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
-  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb,
+  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb, ChevronDown,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -2023,6 +2023,23 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   // business check would print it above the memo line.
   const { companies } = useCompany();
   const companyName = companies?.find((c) => c.id === companyId)?.name || "";
+  // Open A/P bills so the check-assign picker can offer "Apply to a
+  // bill" (feature parity with Quick Check-in). Loaded once on mount;
+  // any changes to bill balances after a save are reflected on the
+  // next parent refresh.
+  const [bills, setBills] = useState([]);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancel = false;
+    api.get(`/companies/${companyId}/bills/open`)
+      .then((r) => {
+        if (cancel) return;
+        const arr = r.data?.bills || r.data?.items || (Array.isArray(r.data) ? r.data : []);
+        setBills(arr.filter((b) => Number(b?.balance_due ?? b?.total ?? 0) > 0.005));
+      })
+      .catch(() => { if (!cancel) setBills([]); });
+    return () => { cancel = true; };
+  }, [companyId]);
   // Adapt the ChatReview `card` shape into the `row` shape CheckRow
   // expects (see CheckRegisterReview.jsx). Everything is derived so
   // updates flow straight from `cards` (kept in sync by the parent's
@@ -2043,49 +2060,60 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     (a) => !a.retired_at && !["9999", "6999", "4999"].includes(String(a.code))
   ), [accounts]);
   const [edits, setEdits] = useState({});
+  // Row IDs that have been saved successfully in this session — used to
+  // hide the card immediately instead of forcing the CPA to refresh.
+  // Cleared on unmount / new tab load via the parent's queue reload.
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
   const getEdit = (row) => edits[row.id] || {
     payeeQuery: "",
     contact_id: null,
-    lines: [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+    addingNew: false,
+    lines: [{ pick: "", amount: Math.abs(row.amount || 0) }],
     saveAsRule: false,
   };
-  const setEdit = (id, patch) => setEdits((e) => ({
+  // NOTE: fallback base must mirror getEdit(row) so the amount stays
+  // pre-filled to the check's total on the first-ever edit (e.g., when
+  // the CPA types a payee name before touching the amount). Prior code
+  // seeded amount: 0 here, which reset the "$175.50" to 0 on payee
+  // typing (Feb 2026 bug).
+  const setEdit = (row, patch) => setEdits((e) => ({
     ...e,
-    [id]: { ...(e[id] || {
-      payeeQuery: "",
-      contact_id: null,
-      lines: [{ category_account_id: "", amount: 0 }],
-      saveAsRule: false,
-    }), ...patch },
+    [row.id]: { ...(e[row.id] || getEdit(row)), ...patch },
   }));
   const addLine = (row) => {
     const cur = getEdit(row);
-    setEdit(row.id, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
+    setEdit(row, { lines: [...cur.lines, { pick: "", amount: 0 }] });
   };
   const removeLine = (row, idx) => {
     const cur = getEdit(row);
     if (cur.lines.length <= 1) return;
-    setEdit(row.id, { lines: cur.lines.filter((_, i) => i !== idx) });
+    setEdit(row, { lines: cur.lines.filter((_, i) => i !== idx) });
   };
   const updateLine = (row, idx, patch) => {
     const cur = getEdit(row);
-    setEdit(row.id, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
+    setEdit(row, { lines: cur.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)) });
   };
   const applySameAsAbove = (row, prevRow) => {
     if (!prevRow) return;
     const prev = getEdit(prevRow);
-    setEdit(row.id, {
+    setEdit(row, {
       payeeQuery: prev.payeeQuery,
       contact_id: prev.contact_id,
+      addingNew:  false,
       lines: prev.lines.length
         ? [{ ...prev.lines[0], amount: Math.abs(row.amount || 0) }]
-        : [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+        : [{ pick: "", amount: Math.abs(row.amount || 0) }],
       saveAsRule: false,
     });
   };
   const save = async (row) => {
     const cur = getEdit(row);
-    if (!cur.contact_id && !cur.payeeQuery.trim()) {
+    // Payee is optional when EVERY line is a bill (the backend can
+    // derive the vendor from the bill). If any line is a category,
+    // require an explicit payee just like Quick Check-in does.
+    const hasCatLine = cur.lines.some((l) => (l.pick || "").startsWith("acct:"));
+    const finalPayee = cur.addingNew ? (cur.payeeQuery || "").trim() : "";
+    if (hasCatLine && !cur.contact_id && !finalPayee) {
       toast.error("Enter or select a payee first.");
       return;
     }
@@ -2095,24 +2123,28 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
       toast.error(`Line total $${got.toFixed(2)} doesn't match check $${expected.toFixed(2)}.`);
       return;
     }
-    if (cur.lines.some((l) => !l.category_account_id)) {
-      toast.error("Every line needs a category.");
+    if (cur.lines.some((l) => !l.pick)) {
+      toast.error("Every line needs a category or a bill.");
       return;
     }
     try {
       await api.post(`/companies/${companyId}/check-review/${row.id}/assign`, {
         contact_id: cur.contact_id || null,
-        create_contact_name: cur.contact_id ? null : cur.payeeQuery.trim(),
+        create_contact_name: cur.contact_id
+          ? null
+          : (cur.addingNew ? finalPayee || null : null),
         line_items: cur.lines.map((l) => ({
-          category_account_id: l.category_account_id,
-          amount: Number(l.amount),
-          description: l.description || "",
+          category_account_id: (l.pick || "").startsWith("acct:") ? l.pick.slice(5) : null,
+          bill_id:             (l.pick || "").startsWith("bill:") ? l.pick.slice(5) : null,
+          amount:              Number(l.amount),
+          description:         l.description || "",
         })),
         save_as_rule: !!cur.saveAsRule,
         mark_reviewed: true,
       });
       toast.success(`Check #${row.number || ""} booked${cur.saveAsRule ? " + saved rule" : ""}.`);
       setEdits((e) => { const n = { ...e }; delete n[row.id]; return n; });
+      setHiddenIds((s) => { const n = new Set(s); n.add(row.id); return n; });
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Save failed");
@@ -2122,27 +2154,27 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     try {
       await api.post(`/companies/${companyId}/check-review/${row.id}/not-a-check`);
       toast.success(`Marked check #${row.number || ""} as not a check.`);
+      setHiddenIds((s) => { const n = new Set(s); n.add(row.id); return n; });
       await onDone();
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Failed to mark as not a check.");
     }
   };
   return (
-    <div className="space-y-4" data-testid="chat-review-checks-batch">
-      {rows.map((row, i) => (
-        <CheckPaperRow
+    <div className="space-y-3" data-testid="chat-review-checks-batch">
+      {rows.filter((row) => !hiddenIds.has(row.id)).map((row, i, visibleRows) => (
+        <CheckAssignCompactRow
           key={row.id}
           row={row}
-          prevRow={i > 0 ? rows[i - 1] : null}
           edit={getEdit(row)}
           accounts={filteredAccounts}
+          bills={bills}
           contacts={contacts}
           companyName={companyName}
           onUpdateLine={(idx, patch) => updateLine(row, idx, patch)}
           onAddLine={() => addLine(row)}
           onRemoveLine={(idx) => removeLine(row, idx)}
-          onSetEdit={(patch) => setEdit(row.id, patch)}
-          onSameAsAbove={() => applySameAsAbove(row, i > 0 ? rows[i - 1] : null)}
+          onSetEdit={(patch) => setEdit(row, patch)}
           onSave={() => save(row)}
           onNotACheck={() => notACheck(row)}
         />
@@ -2151,11 +2183,343 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   );
 }
 
-// Render a single check as a paper-check visual (QuickBooks style):
-// company drawer top-left, check # + date top-right, "Pay to the
-// order of" with payee typeahead + numeric amount, amount-in-words
-// line, memo + signature, and a footer strip with the category
-// picker + Save / Not-a-check actions.
+// Compact check-assign card — ported from the Quick Check-in
+// `ChecksAssignTable` (ClientReviewPage.jsx:6218-6589) so the CPA-side
+// Review Chat has the exact same visual + behavior as the client-side
+// "Checks without payee" flow. Payee is a contacts dropdown with an
+// inline "+ Add new contact" affordance, and category+amount lines
+// support multi-way splits with a Total indicator.
+function CheckAssignCompactRow({ row, edit, accounts, bills, contacts, companyName,
+                                 onUpdateLine, onAddLine, onRemoveLine,
+                                 onSetEdit, onSave, onNotACheck }) {
+  const target = Math.abs(Number(row.amount || 0));
+  const lineTotal = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+  const diff = Number((lineTotal - target).toFixed(2));
+  const addingNew = !!edit.addingNew;
+  const testId = `check-assign-${row.id}`;
+  return (
+    <div
+      className="rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:shadow-md transition-shadow px-4 py-4"
+      data-testid={testId}
+    >
+      {/* Header — #num · date · $amount · Save */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="font-mono-num text-slate-500 text-sm">
+            #{row.number || "—"}
+          </span>
+          <span className="text-slate-700 text-sm">{row.date || ""}</span>
+          <span className="font-mono-num tabular-nums font-semibold text-slate-900 text-base">
+            ${target.toFixed(2)}
+          </span>
+          {companyName && (
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+              {companyName}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onNotACheck}
+            className="text-[11px] text-slate-500 hover:text-rose-600 underline decoration-dotted"
+            data-testid={`check-assign-not-${row.id}`}
+          >
+            Not a check
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-1.5"
+            data-testid={`check-assign-save-${row.id}`}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
+      {/* Payee dropdown (with inline + Add new contact) */}
+      <div className="mb-3">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+          Payee
+        </div>
+        {addingNew ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              autoFocus
+              placeholder="New payee name…"
+              value={edit.payeeQuery || ""}
+              onChange={(e) => onSetEdit({ payeeQuery: e.target.value, contact_id: null })}
+              className="flex-1 min-w-0 rounded-md border border-indigo-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              data-testid={`check-assign-payee-new-${row.id}`}
+            />
+            <button
+              type="button"
+              onClick={() => onSetEdit({ addingNew: false, payeeQuery: "", contact_id: null })}
+              className="text-slate-400 hover:text-slate-700 text-xs"
+            >
+              cancel
+            </button>
+          </div>
+        ) : (
+          <select
+            value={edit.contact_id || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__NEW__") {
+                onSetEdit({ addingNew: true, payeeQuery: "", contact_id: null });
+              } else {
+                const c = (contacts || []).find((x) => x.id === v);
+                onSetEdit({
+                  contact_id: v || null,
+                  payeeQuery: c?.name || "",
+                  addingNew:  false,
+                });
+              }
+            }}
+            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+            data-testid={`check-assign-payee-${row.id}`}
+          >
+            <option value="">Select payee…</option>
+            {(contacts || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name || c.display_name}</option>
+            ))}
+            <option value="__NEW__">+ Add new contact…</option>
+          </select>
+        )}
+      </div>
+
+      {/* Categories & amounts — multi-line with per-line remove */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+          Categories &amp; amounts
+        </div>
+        <div className="space-y-2">
+          {edit.lines.map((l, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <CategoryOrBillCombobox
+                rowId={row.id}
+                idx={i}
+                value={l.pick || ""}
+                bills={bills}
+                accounts={accounts}
+                onChange={(pick) => onUpdateLine(i, { pick })}
+              />
+              <input
+                type="number"
+                step="0.01"
+                value={l.amount}
+                onChange={(e) => onUpdateLine(i, { amount: Number(e.target.value) })}
+                className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm font-mono-num tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                data-testid={`check-assign-amt-${row.id}-${i}`}
+              />
+              <button
+                type="button"
+                onClick={() => onRemoveLine(i)}
+                disabled={edit.lines.length <= 1}
+                className="text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                aria-label="Remove line"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-between mt-2 text-xs">
+          <button
+            type="button"
+            onClick={onAddLine}
+            className="text-indigo-600 hover:text-indigo-700 font-semibold"
+            data-testid={`check-assign-add-line-${row.id}`}
+          >
+            + Add another line
+          </button>
+          <div className={`tabular-nums flex items-center gap-1 ${
+            Math.abs(diff) < 0.005 ? "text-emerald-700"
+              : diff > 0 ? "text-rose-700" : "text-amber-700"
+          }`}>
+            <span>Total ${lineTotal.toFixed(2)}</span>
+            {Math.abs(diff) < 0.005
+              ? <CheckIcon className="h-3 w-3" />
+              : <span>· {diff > 0 ? `$${diff.toFixed(2)} over` : `$${Math.abs(diff).toFixed(2)} to go`}</span>}
+          </div>
+        </div>
+        {/* Save-as-rule checkbox — preserves the pre-existing convenience
+             of turning a check payee → category into a reusable rule. */}
+        <label className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+          <input
+            type="checkbox"
+            checked={!!edit.saveAsRule}
+            onChange={(e) => onSetEdit({ saveAsRule: e.target.checked })}
+            data-testid={`check-assign-rule-${row.id}`}
+          />
+          Save payee → category as a rule
+        </label>
+      </div>
+    </div>
+  );
+}
+
+// Searchable combobox for the bill+category picker in
+// CheckAssignCompactRow. Wraps a text input over a dropdown of two
+// virtual groups ("Apply to a bill" / "Or book to a category") and
+// filters by number, vendor, code, or name as the user types. Uses a
+// portal-free absolute-positioned dropdown so it lays inside the
+// scrolling row without needing extra machinery.
+function CategoryOrBillCombobox({ rowId, idx, value, bills, accounts, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ]       = useState("");
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Resolve the currently-selected label so the input shows the
+  // chosen bill/category rather than the raw "acct:<id>" token.
+  const selectedLabel = useMemo(() => {
+    if (!value) return "";
+    if (value.startsWith("bill:")) {
+      const b = (bills || []).find((x) => x.id === value.slice(5));
+      if (!b) return "";
+      const bal = Number(b.balance_due ?? b.total ?? 0);
+      return `Bill #${b.number || b.bill_number || b.id?.slice(0, 6)}${
+        b.contact_name ? " — " + b.contact_name : ""
+      } — $${bal.toFixed(2)}`;
+    }
+    if (value.startsWith("acct:")) {
+      const a = (accounts || []).find((x) => x.id === value.slice(5));
+      return a ? `${a.code ? a.code + " · " : ""}${a.name}` : "";
+    }
+    return "";
+  }, [value, bills, accounts]);
+
+  const query = q.trim().toLowerCase();
+  const filteredBills = useMemo(() => {
+    if (!bills) return [];
+    if (!query) return bills;
+    return bills.filter((b) => {
+      const hay = [b.number, b.bill_number, b.contact_name, b.vendor_name, b.balance_due, b.total, b.due_date]
+        .map((v) => String(v ?? "").toLowerCase()).join(" ");
+      return hay.includes(query);
+    });
+  }, [bills, query]);
+  const filteredAccounts = useMemo(() => {
+    if (!accounts) return [];
+    if (!query) return accounts;
+    return accounts.filter((a) => {
+      const hay = [a.code, a.name, a.type, a.subtype]
+        .map((v) => String(v ?? "").toLowerCase()).join(" ");
+      return hay.includes(query);
+    });
+  }, [accounts, query]);
+
+  const pickBill = (b) => { onChange(`bill:${b.id}`); setOpen(false); setQ(""); };
+  const pickAcct = (a) => { onChange(`acct:${a.id}`); setOpen(false); setQ(""); };
+  const clear    = () => { onChange(""); setQ(""); };
+
+  return (
+    <div ref={rootRef} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 flex items-center justify-between gap-2"
+        data-testid={`check-assign-cat-${rowId}-${idx}`}
+      >
+        <span className={`truncate ${selectedLabel ? "text-slate-900" : "text-slate-400"}`}>
+          {selectedLabel || "Select category or bill…"}
+        </span>
+        {selectedLabel ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); clear(); }}
+            className="text-slate-400 hover:text-rose-600 shrink-0"
+            aria-label="Clear selection"
+          >
+            <X className="h-3 w-3" />
+          </span>
+        ) : (
+          <ChevronDown className="h-3 w-3 text-slate-400 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full mt-1 rounded-md border border-slate-200 bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
+          data-testid={`check-assign-cat-menu-${rowId}-${idx}`}
+        >
+          <div className="sticky top-0 bg-white p-2 border-b border-slate-100">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search bill # / vendor / category…"
+                className="w-full pl-7 pr-2 py-1 rounded border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                data-testid={`check-assign-cat-search-${rowId}-${idx}`}
+              />
+            </div>
+          </div>
+          {filteredBills.length === 0 && filteredAccounts.length === 0 && (
+            <div className="px-3 py-4 text-xs text-slate-500 text-center">No matches</div>
+          )}
+          {filteredBills.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-emerald-700 font-semibold bg-emerald-50/50">
+                Apply to a bill
+              </div>
+              {filteredBills.map((b) => {
+                const bal = Number(b.balance_due ?? b.total ?? 0);
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => pickBill(b)}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 truncate"
+                  >
+                    Bill #{b.number || b.bill_number || b.id?.slice(0, 6)}
+                    {b.contact_name ? ` — ${b.contact_name}` : ""}
+                    {" — $"}{bal.toFixed(2)}
+                    {b.due_date || b.issue_date ? ` due ${b.due_date || b.issue_date}` : ""}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {filteredAccounts.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-slate-500 font-semibold bg-slate-50">
+                Or book to a category
+              </div>
+              {filteredAccounts.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => pickAcct(a)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 truncate"
+                >
+                  {a.code ? `${a.code} · ` : ""}{a.name}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Legacy paper-check visual — kept for reference/rollback but no longer
+// rendered by ChecksBatchCard. Safe to remove once CheckAssignCompactRow
+// has soaked in production.
 function CheckPaperRow({
   row, prevRow, edit, accounts, contacts, companyName,
   onUpdateLine, onAddLine, onRemoveLine, onSetEdit, onSameAsAbove, onSave, onNotACheck,
