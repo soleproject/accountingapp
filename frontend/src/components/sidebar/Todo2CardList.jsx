@@ -484,6 +484,17 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       )}
 
       <div className={`flex-1 overflow-y-auto no-scrollbar pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
+        {/* To Do section header — sits between the All accordion and
+            the actionable task cards. Hidden in rail (collapsed) mode
+            where there's no room for a text label. */}
+        {!collapsed && showQuickLinks && (
+          <div
+            className="px-3 pt-1 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold"
+            data-testid="sidebar-todo2-todo-header"
+          >
+            To Do
+          </div>
+        )}
         {loading && (
           <div className="flex items-center justify-center py-6 text-slate-400" data-testid="sidebar-todo2-loading">
             <Loader2 size={14} className="animate-spin" />
