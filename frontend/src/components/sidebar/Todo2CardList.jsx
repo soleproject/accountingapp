@@ -412,46 +412,14 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               variant — that mode intentionally shows nothing but
               the top-level toggle and the task cards. */}
           <div className="mb-2" data-testid="sidebar-todo2-quick-links">
-            {/* Section header above the accounting quick-links. Reads
-                "Firm Books" when the pro is looking at their own firm
-                (is_firm_books=true) and "Client Area" otherwise. Only
-                shown to firm users (pro/admin/partner/superadmin) so
-                the client-owner view stays clean. */}
-            {isFirmUser && (
-              <div
-                className="px-3 pt-1 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold"
-                data-testid="sidebar-todo2-context-header"
-              >
-                {clientAreaHeader}
-              </div>
-            )}
-            {QUICK_LINKS.map((l) => {
-              const active = location.pathname === l.to;
-              const Icon = l.icon;
-              return (
-                <button
-                  key={l.to}
-                  type="button"
-                  onClick={() => navigate(l.to)}
-                  className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
-                    active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
-                  }`}
-                  data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
-                >
-                  <Icon size={16} className="text-slate-500" strokeWidth={2} />
-                  <span className="truncate">{l.label}</span>
-                </button>
-              );
-            })}
-            <AccountingAccordion navigate={navigate} activePath={location.pathname} />
             {/* Professional section — firm-only cross-client shortcuts
-                (Today + Client Cockpit) rendered below the All accordion
-                with a header + separator to visually part them from the
-                per-company client-area links above. */}
+                (Today + Client Cockpit) rendered ABOVE the Client Area
+                so the most-used firm-wide tools are always the first
+                thing under the Accounting module. */}
             {isFirmUser && (
               <>
                 <div
-                  className="px-3 pt-3 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold"
+                  className="px-3 pt-1 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold"
                   data-testid="sidebar-todo2-professional-header"
                 >
                   Professional
@@ -479,6 +447,38 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 })}
               </>
             )}
+            {/* Section header above the accounting quick-links. Reads
+                "Firm Books" when the pro is looking at their own firm
+                (is_firm_books=true) and "Client Area" otherwise. Only
+                shown to firm users (pro/admin/partner/superadmin) so
+                the client-owner view stays clean. */}
+            {isFirmUser && (
+              <div
+                className="px-3 pt-3 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold"
+                data-testid="sidebar-todo2-context-header"
+              >
+                {clientAreaHeader}
+              </div>
+            )}
+            {QUICK_LINKS.map((l) => {
+              const active = location.pathname === l.to;
+              const Icon = l.icon;
+              return (
+                <button
+                  key={l.to}
+                  type="button"
+                  onClick={() => navigate(l.to)}
+                  className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+                    active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                >
+                  <Icon size={16} className="text-slate-500" strokeWidth={2} />
+                  <span className="truncate">{l.label}</span>
+                </button>
+              );
+            })}
+            <AccountingAccordion navigate={navigate} activePath={location.pathname} />
           </div>
         </>
       )}
