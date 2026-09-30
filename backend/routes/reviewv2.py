@@ -2878,6 +2878,12 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 "description": grp[0].get("description"),
                 "merchant":    grp[0].get("merchant"),
                 "account":     grp[0].get("bank_account_name"),
+                # Batch context so `chat_propose_account` can tell the
+                # LLM "this covers N txns totaling $X" instead of just
+                # the sample row's amount. The chosen category applies
+                # to ALL txn_ids in the card, not just this sample.
+                "batch_count": len(grp),
+                "batch_total": total,
             },
         })
     no_category.sort(key=lambda x: x["total_dollars"], reverse=True)
@@ -2916,6 +2922,11 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
                 "description": grp[0].get("description"),
                 "merchant":    grp[0].get("merchant"),
                 "account":     grp[0].get("bank_account_name"),
+                # Batch context so the LLM's booking narration
+                # references the FULL group (N txns · $X total), not
+                # just this representative sample.
+                "batch_count": len(grp),
+                "batch_total": total,
             },
         })
     transactions.sort(key=lambda x: x["total_dollars"], reverse=True)
@@ -4734,6 +4745,25 @@ async def chat_propose_account(
         "  If the client's wording (e.g., 'this is a loan') is compatible "
         "  with the direction, book it; do NOT ask an unnecessary "
         "  clarification.\n"
+        "• TRUST INCOME. Money IN + client says 'income', 'revenue', "
+        "  'sales', 'sale', 'donations', 'tithes', 'rent', 'rental', "
+        "  'interest', 'dividend', 'commission', 'royalty', 'consulting', "
+        "  or any other clearly-revenue-family word → the booking IS "
+        "  revenue. Do NOT re-ask whether it might be a loan, owner "
+        "  contribution, transfer, or other non-revenue destination — "
+        "  the client already committed to the revenue family. If more "
+        "  specificity is genuinely needed (Sales Revenue vs Service "
+        "  Revenue vs Rental Income vs Interest Income), you MAY ask a "
+        "  clarify, but the options MUST be limited to revenue accounts "
+        "  only — never mix in loan/equity/asset alternatives.\n"
+        "• TRUST EXPENSE. Money OUT + client says 'expense', 'expenses', "
+        "  'cost', 'costs', 'bill', 'bills', 'purchase', 'purchases', "
+        "  'spend', 'spent', 'operating', or names a specific expense "
+        "  category (advertising, meals, travel, rent, utilities, "
+        "  professional fees, etc.) → the booking IS an expense. Do NOT "
+        "  re-ask whether it might be an owner draw, loan repayment, "
+        "  asset purchase, or transfer. If more specificity is needed, "
+        "  clarify options MUST stay within the expense family.\n"
         "• REFUNDS / REIMBURSEMENTS / REBATES are the ONE class where "
         "  money-IN can flow to an EXPENSE account (as a contra-entry "
         "  that reduces the original expense) — and money-OUT can flow "
@@ -4813,13 +4843,33 @@ async def chat_propose_account(
         prior_qa_block = "Prior clarifications from the client:\n" + "\n".join(
             f"  Q: {q.get('q','')}\n  A: {q.get('a','')}" for q in prior_qas
         ) + "\n\n"
+    # Batch context — chosen category will be applied to EVERY txn in the
+    # card (bulk update_many), not just the sample row. Give the LLM the
+    # true count + aggregate so its `ai_message` describes reality, not
+    # the sample.
+    batch_count = int(ctx.get("batch_count") or 1)
+    try:
+        batch_total = float(ctx.get("batch_total") or abs(float(ctx.get("amount") or 0)))
+    except (TypeError, ValueError):
+        batch_total = 0.0
+    batch_line = (
+        f"Batch scope: this card covers {batch_count} transaction"
+        f"{'s' if batch_count != 1 else ''} totaling "
+        f"${batch_total:,.2f}. Your chosen category (and contact, if "
+        f"you override one) will be applied to ALL of them in a single "
+        f"bulk update. The `ai_message` you return MUST reference the "
+        f"full batch (e.g. \"Booking all {batch_count} deposits "
+        f"(${batch_total:,.2f}) to <account>\") — do NOT describe only "
+        f"the sample row's amount.\n"
+    ) if batch_count > 1 else ""
     user_msg = (
         f"Direction: {dir_hint}\n"
         f"Card kind: {card_kind or '—'}\n"
         f"Currently-assigned contact/party: {contact_name or '—'}\n"
         f"Client's answer: \"{user_answer}\"\n"
         f"{prior_qa_block}"
-        f"Transaction sample: date={ctx.get('date')}, "
+        f"{batch_line}"
+        f"Representative sample from the batch: date={ctx.get('date')}, "
         f"amount={ctx.get('amount')}, "
         f"description={ctx.get('description') or ctx.get('merchant') or '—'}\n\n"
         f"Existing Chart of Accounts (indent = sub-account):\n"
