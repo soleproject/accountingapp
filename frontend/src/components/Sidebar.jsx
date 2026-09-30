@@ -942,12 +942,43 @@ export default function Sidebar({ collapsed, onToggle }) {
   // with it across reloads. Pages (ToDo / ClientCockpit) can flip
   // this to "both" via the `todo2-open` action so the Menu/Page
   // toggle on those pages mirrors the sidebar state.
+  // Sidebar view mode — "todo" (compact cards only) / "both" (cards +
+  // menu) / "full" (deep-menu only). Personal per-user preference
+  // stored in localStorage. "both" is the default for every company
+  // as of Sept 2026 (moved from "full") because the hybrid layout
+  // surfaces the AI Q&A cards first while still keeping the full
+  // ledger menu one collapsible away — matches how CPAs actually
+  // work day-to-day. The toggle UI lives in Accounting Settings →
+  // Bookkeeping tab; changes there fire a `sidebar-mode-changed`
+  // custom event on `window` so this component updates without a
+  // page reload (localStorage's native `storage` event only fires
+  // cross-tab).
   const [sidebarMode, setSidebarMode] = useState(
-    () => localStorage.getItem("axiom_sidebar_mode") || "full"
+    () => localStorage.getItem("axiom_sidebar_mode") || "both"
   );
   useEffect(() => {
     localStorage.setItem("axiom_sidebar_mode", sidebarMode);
   }, [sidebarMode]);
+  useEffect(() => {
+    const onModeChanged = (e) => {
+      const nv = e?.detail?.mode;
+      if (nv === "todo" || nv === "both" || nv === "full") {
+        setSidebarMode(nv);
+      }
+    };
+    window.addEventListener("sidebar-mode-changed", onModeChanged);
+    // Cross-tab: someone flipped the setting in another window.
+    const onStorage = (e) => {
+      if (e.key === "axiom_sidebar_mode" && e.newValue) {
+        setSidebarMode(e.newValue);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("sidebar-mode-changed", onModeChanged);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
   const [todo2ReturnPath, setTodo2ReturnPath] = useState("/accounting/todo");
   useActionListener("todo2-open", (payload) => {
     if (payload?.returnPath) setTodo2ReturnPath(payload.returnPath);
@@ -1318,9 +1349,11 @@ export default function Sidebar({ collapsed, onToggle }) {
                 user={user}
               />
             )}
-            <div className="mb-2 flex" data-testid="sidebar-mode-toggle-wrap">
-              <SidebarModeToggle mode={sidebarMode} onChange={setSidebarMode} />
-            </div>
+            {/* The To Do / Both / Full sidebar-mode toggle used to
+                live here. It now lives in Accounting Settings →
+                Bookkeeping tab (Sept 2026); we listen for the
+                `sidebar-mode-changed` custom event from there so
+                changes update this component without a reload. */}
           </>
         )}
         {inCardMode ? (
@@ -1328,7 +1361,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             collapsed={showCollapsed}
             returnPath={todo2ReturnPath}
             variant={sidebarMode}
-            onExit={() => setSidebarMode("full")}
+            onExit={() => setSidebarMode("both")}
           />
         ) : (
         <>
