@@ -35,6 +35,65 @@ function normName(s) {
   return String(s).replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Segmented pill toggle for the per-user sidebar view mode
+ * (`axiom_sidebar_mode` in localStorage). Rendered inside the
+ * Bookkeeping settings tab so the CPA can flip between compact
+ * card mode and the deep-menu Full view without having to hunt
+ * a chip at the top of the sidebar.
+ *
+ * A `sidebar-mode-changed` CustomEvent is dispatched on `window`
+ * so `Sidebar.jsx` can hot-update — localStorage's native
+ * `storage` event only fires cross-tab, so we need an in-tab
+ * signal here.
+ */
+function SidebarModeSettingToggle() {
+  const OPTIONS = [
+    { value: "todo", label: "To Do", desc: "Cards only" },
+    { value: "both", label: "Both", desc: "Cards + menu (default)" },
+    { value: "full", label: "Full", desc: "Deep menu" },
+  ];
+  const [mode, setMode] = React.useState(
+    () => localStorage.getItem("axiom_sidebar_mode") || "both",
+  );
+  const pick = (v) => {
+    setMode(v);
+    try { localStorage.setItem("axiom_sidebar_mode", v); } catch { /* private mode */ }
+    window.dispatchEvent(
+      new CustomEvent("sidebar-mode-changed", { detail: { mode: v } })
+    );
+  };
+  return (
+    <div
+      role="tablist"
+      className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+      data-testid="settings-sidebar-mode-toggle"
+    >
+      {OPTIONS.map((o) => {
+        const active = mode === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => pick(o.value)}
+            className={`px-4 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
+              active
+                ? "bg-white text-slate-900 shadow-sm"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+            title={o.desc}
+            data-testid={`settings-sidebar-mode-${o.value}`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   const { currentId, current, refresh, companies } = useCompany();
   const { user } = useAuth();
@@ -256,6 +315,18 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
             companyId={currentId}
             initialMode={current?.categorization_mode || "standard"}
           />
+        </div>
+        <div className="border-t pt-4">
+          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
+            Sidebar mode
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            Personal preference — controls how the left nav renders for
+            <em> you</em>. <b>To&nbsp;Do</b> = compact card feed only ·
+            <b> Both</b> = card feed plus the full menu (default) ·
+            <b> Full</b> = classic deep menu with no cards.
+          </p>
+          <SidebarModeSettingToggle />
         </div>
       </div>
       )}

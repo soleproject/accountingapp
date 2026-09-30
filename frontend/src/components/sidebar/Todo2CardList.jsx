@@ -174,37 +174,42 @@ const CONNECT_LINKS = [
   { to: "/connections/qbo",         label: "Connect QBO",        icon: Link2 },
 ];
 const ACCOUNTING_LINKS = [
-  // Nested subgroup placeholders — rendered as inline collapsibles by
-  // AccountingAccordion. Same visual pattern as the "Full" sidebar
-  // view so the Both tab mirrors it exactly.
+  // ── Grouped view (Sept 2026) ─────────────────────────────────────
+  // Items are organized under section headers so the CPA can scan the
+  // menu vertically by workflow area. Headers are non-clickable rows
+  // rendered by AccountingAccordion via the `header: true` flag.
+  // Nested subgroups (Sales & Payments, Purchases, Connect & Import)
+  // keep the same `subGroup: true` inline-collapsible behavior.
+  { header: true,  label: "Sales & Money" },
   { subGroup: true, key: "sales",     label: "Sales & Payments", icon: FileText,     items: SALES_LINKS },
   { subGroup: true, key: "purchases", label: "Purchases",        icon: ShoppingCart, items: PURCHASES_LINKS },
-  // ── CPA-workflow order (Sept 2026 reorg) ─────────────────────────
-  // Assets/Loans/Inventory cluster (physical + financing basics),
-  // then Sales Tax + Tags, then the Contacts / Projections /
-  // Connect & Import / Chart-of-Accounts trio (people + planning +
-  // data-in + framework), then reconciliation-flavored items,
-  // closing/AI tooling, and finally the two audit logs at the
-  // bottom followed by Accounting settings.
-  { to: "/accounting/assets",             label: "Assets",             icon: Building2 },
   { to: "/accounting/loans",              label: "Loans",              icon: Wallet },
+  { to: "/accounting/assets",             label: "Assets",             icon: Building2 },
   { to: "/inventory-management",          label: "Inventory",          icon: Boxes },
   { to: "/accounting/sales-tax",          label: "Sales Tax Center",   icon: Percent },
-  { to: "/accounting/tags",               label: "Tags",               icon: Tags },
-  { to: "/contacts",                      label: "Contacts",           icon: Users },
-  { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp },
-  { subGroup: true, key: "connect",       label: "Connect & Import",   icon: Landmark, items: CONNECT_LINKS },
+
+  { header: true, label: "Accounting" },
   { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts",  icon: ListTree },
-  { to: "/accounting/checks",             label: "Print Checks",       icon: Printer },
   { to: "/accounting/reconciliation",     label: "Reconciliation",     icon: CheckCheck },
-  { to: "/compliance",                    label: "Compliance",         icon: ShieldCheck },
   { to: "/accounting/journal-entries",    label: "Journal Entries",    icon: BookOpen },
   { to: "/accounting/general-ledger",     label: "General Ledger",     icon: Notebook },
+  { to: "/accounting/checks",             label: "Print Checks",       icon: Printer },
+  { to: "/accounting/tags",               label: "Tags",               icon: Tags },
+
+  { header: true, label: "AI & Automation" },
   { to: "/accounting/ai-cleanup-review",  label: "AI Cleanup Review",  icon: Sparkles },
   { to: "/accounting/rules",              label: "AI Rules",           icon: Wand2 },
   { to: "/accounting/book-review",        label: "Book Review",        icon: ClipboardCheck },
+
+  { header: true, label: "Planning & Close" },
+  { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp },
   { to: "/accounting/month-close",        label: "Month Close",        icon: CalendarCheck },
   { to: "/accounting/close-books",        label: "Close the Books",    icon: Lock },
+  { to: "/compliance",                    label: "Compliance",         icon: ShieldCheck },
+
+  { header: true, label: "Business & Data" },
+  { to: "/contacts",                      label: "Contacts",           icon: Users },
+  { subGroup: true, key: "connect",       label: "Connect & Import",   icon: Landmark, items: CONNECT_LINKS },
   { to: "/communications-audit",          label: "Email log",          icon: Inbox },
   { to: "/audit-log",                     label: "Audit log",          icon: History },
   { to: "/accounting/settings",           label: "Accounting settings",icon: Settings2 },
@@ -588,9 +593,11 @@ function AccountingAccordion({ navigate, activePath }) {
     return next;
   });
   const anyChildActive = ACCOUNTING_LINKS.some((l) =>
-    l.subGroup
-      ? (l.items || []).some((s) => activePath === s.to.split("?")[0])
-      : activePath === l.to
+    l.header
+      ? false
+      : l.subGroup
+        ? (l.items || []).some((s) => activePath === s.to.split("?")[0])
+        : activePath === l.to
   );
   return (
     <div className="mt-0.5" data-testid="sidebar-todo2-accounting-accordion">
@@ -614,7 +621,24 @@ function AccountingAccordion({ navigate, activePath }) {
       </button>
       {open && (
         <div className="pl-4 mt-0.5" data-testid="sidebar-todo2-accounting-panel">
-          {ACCOUNTING_LINKS.map((l) => {
+          {ACCOUNTING_LINKS.map((l, idx) => {
+            // Section header — non-clickable divider. Uppercase +
+            // small so it visually separates workflow clusters
+            // without competing with the leaf-link rows. First
+            // header has less top-margin so it hugs the accordion.
+            if (l.header) {
+              return (
+                <div
+                  key={`hdr-${l.label}-${idx}`}
+                  className={`text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 pb-1 border-b border-slate-200 mb-1 ${
+                    idx === 0 ? "pt-1" : "pt-3"
+                  }`}
+                  data-testid={`sidebar-todo2-accounting-header-${l.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+                >
+                  {l.label}
+                </div>
+              );
+            }
             // Nested subgroup — inline collapsible one indent-level
             // deeper than a leaf link. Same visual pattern as the
             // Full-mode sidebar's subGroup rendering.
