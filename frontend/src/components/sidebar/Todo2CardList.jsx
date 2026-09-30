@@ -23,6 +23,10 @@ import {
   // Icons for the nested Sales & Payments / Purchases subgroups on
   // the Both-tab accordion (mirrors the Full-mode Sidebar icons).
   CreditCard, Package, Repeat, MailCheck, UserCircle, Store, ShoppingCart,
+  // Icons for CPA-workflow items promoted into the All accordion
+  // (Contacts, Projections, Compliance, Email log). Kept in one
+  // dedicated group so it's obvious where to add more later.
+  Users, TrendingUp, ShieldCheck, Inbox,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -166,22 +170,32 @@ const ACCOUNTING_LINKS = [
   // view so the Both tab mirrors it exactly.
   { subGroup: true, key: "sales",     label: "Sales & Payments", icon: FileText,     items: SALES_LINKS },
   { subGroup: true, key: "purchases", label: "Purchases",        icon: ShoppingCart, items: PURCHASES_LINKS },
-  { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts", icon: ListTree },
-  { to: "/accounting/assets",             label: "Assets",           icon: Building2 },
-  { to: "/accounting/loans",              label: "Loans",            icon: Wallet },
-  { to: "/inventory-management",          label: "Inventory",        icon: Boxes },
-  { to: "/accounting/tags",               label: "Tags",             icon: Tags },
-  { to: "/accounting/reconciliation",     label: "Reconciliation",   icon: CheckCheck },
-  { to: "/accounting/checks",             label: "Print Checks",     icon: Printer },
-  { to: "/accounting/journal-entries",    label: "Journal Entries",  icon: BookOpen },
-  { to: "/accounting/general-ledger",     label: "General Ledger",   icon: Notebook },
-  { to: "/accounting/sales-tax",          label: "Sales Tax Center", icon: Percent },
-  { to: "/accounting/ai-cleanup-review",  label: "AI Cleanup Review",icon: Sparkles },
-  { to: "/accounting/rules",              label: "AI Rules",         icon: Wand2 },
-  { to: "/accounting/book-review",        label: "Book Review",      icon: ClipboardCheck },
-  { to: "/accounting/month-close",        label: "Month Close",      icon: CalendarCheck },
-  { to: "/accounting/close-books",        label: "Close the Books",  icon: Lock },
-  { to: "/audit-log",                     label: "Audit log",        icon: History },
+  // ── CPA-workflow order (Sept 2026 reorg) ─────────────────────────
+  // Assets/Loans/Inventory cluster (physical + financing basics),
+  // then Sales Tax + Tags, then the Contacts / Projections /
+  // Chart-of-Accounts trio (people + planning + framework), then
+  // reconciliation-flavored items, closing/AI tooling, and finally
+  // the two audit logs at the bottom.
+  { to: "/accounting/assets",             label: "Assets",             icon: Building2 },
+  { to: "/accounting/loans",              label: "Loans",              icon: Wallet },
+  { to: "/inventory-management",          label: "Inventory",          icon: Boxes },
+  { to: "/accounting/sales-tax",          label: "Sales Tax Center",   icon: Percent },
+  { to: "/accounting/tags",               label: "Tags",               icon: Tags },
+  { to: "/contacts",                      label: "Contacts",           icon: Users },
+  { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp },
+  { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts",  icon: ListTree },
+  { to: "/accounting/checks",             label: "Print Checks",       icon: Printer },
+  { to: "/accounting/reconciliation",     label: "Reconciliation",     icon: CheckCheck },
+  { to: "/compliance",                    label: "Compliance",         icon: ShieldCheck },
+  { to: "/accounting/journal-entries",    label: "Journal Entries",    icon: BookOpen },
+  { to: "/accounting/general-ledger",     label: "General Ledger",     icon: Notebook },
+  { to: "/accounting/ai-cleanup-review",  label: "AI Cleanup Review",  icon: Sparkles },
+  { to: "/accounting/rules",              label: "AI Rules",           icon: Wand2 },
+  { to: "/accounting/book-review",        label: "Book Review",        icon: ClipboardCheck },
+  { to: "/accounting/month-close",        label: "Month Close",        icon: CalendarCheck },
+  { to: "/accounting/close-books",        label: "Close the Books",    icon: Lock },
+  { to: "/communications-audit",          label: "Email log",          icon: Inbox },
+  { to: "/audit-log",                     label: "Audit log",          icon: History },
 ];
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
