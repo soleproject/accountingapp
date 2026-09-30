@@ -890,6 +890,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+  // When chat-review mode is active, fetch the chat-review-queue so
+  // the header badge can show live "X questions · Y checks" totals
+  // plus a dollar-based progress ring, instead of the checklist-mode
+  // "Review N categories" copy that would otherwise leak from the
+  // firm-glance step1 payload.
+  const [chatQueue, setChatQueue] = useState(null);
+  useEffect(() => {
+    if (!chatModeOn || !currentId) { setChatQueue(null); return; }
+    let cancel = false;
+    api.get(`/companies/${currentId}/reviewv2/chat-review-queue`)
+      .then((r) => { if (!cancel) setChatQueue(r.data || null); })
+      .catch(() => { if (!cancel) setChatQueue(null); });
+    return () => { cancel = true; };
+  }, [chatModeOn, currentId, data]);
 
   const activeStep = (() => {
     if (!checklistTodos) return null;
@@ -1943,9 +1957,26 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   return "/accounting/review-chat?tab=no_category";
                 })();
                 const targetHref = chatModeOn ? chatCta : activeStep.cta_link;
-                const tipLabel = chatModeOn
-                  ? `Go to chat review — ${activeStep.title}`
-                  : `Go to Step ${activeStep.display} — ${activeStep.title}`;
+                // Chat-mode overrides — when the CPA has flipped todos
+                // into chat-review, show the live chat-queue totals
+                // ("X questions · Y checks") and a dollar-value progress
+                // ring instead of the checklist-mode step count.
+                const useChat = !!(chatModeOn && chatQueue);
+                const noCatN = useChat ? (chatQueue.no_category?.length || 0) : 0;
+                const txnN   = useChat ? (chatQueue.transactions?.length || 0) : 0;
+                const checkN = useChat ? (chatQueue.checks?.length || 0) : 0;
+                const qCount = noCatN + txnN;
+                const pct    = useChat ? Math.max(0, Math.min(100, Number(chatQueue.progress?.pct_confirmed || 0))) : 0;
+                const title  = useChat ? "Review questions & checks" : `Step ${activeStep.display}: ${activeStep.title}`;
+                const tipLabel = useChat
+                  ? `Go to chat review — ${qCount} questions, ${checkN} checks (${pct}% by $ done)`
+                  : (chatModeOn
+                      ? `Go to chat review — ${activeStep.title}`
+                      : `Go to Step ${activeStep.display} — ${activeStep.title}`);
+                // Small SVG donut for the dollar-value ring; 34px so it
+                // fits alongside the count in the same right rail slot.
+                const R = 15, C = 2 * Math.PI * R;
+                const dash = (pct / 100) * C;
                 return (
               <button
                 type="button"
@@ -1956,21 +1987,52 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
               >
                 <div className="flex-1 min-w-0">
                   <div className="font-heading font-semibold text-slate-900 text-[15px] leading-tight truncate">
-                    Step {activeStep.display}: {activeStep.title}
+                    {title}
                   </div>
-                  {(activeStep.subtitle_parts || activeStep.subtitle) && (
-                    <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
-                      <StepSubtitle step={activeStep} onNavigate={navigate} />
+                  {useChat ? (
+                    <div className="mt-1 text-[12px] text-slate-500 leading-snug">
+                      <span className="font-mono-num font-semibold text-slate-700">{qCount}</span> questions ·{" "}
+                      <span className="font-mono-num font-semibold text-slate-700">{checkN}</span> checks
                     </div>
+                  ) : (
+                    (activeStep.subtitle_parts || activeStep.subtitle) && (
+                      <div className="mt-1 text-[12px] text-slate-500 leading-snug line-clamp-2">
+                        <StepSubtitle step={activeStep} onNavigate={navigate} />
+                      </div>
+                    )
                   )}
                 </div>
                 <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
-                  <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
-                    {activeStep.count.toLocaleString()}
-                  </div>
-                  <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
-                    {activeStep.unit}
-                  </div>
+                  {useChat ? (
+                    <>
+                      <div className="relative h-9 w-9">
+                        <svg viewBox="0 0 34 34" className="h-9 w-9 -rotate-90">
+                          <circle cx="17" cy="17" r={R} fill="none" stroke="#e2e8f0" strokeWidth="3" />
+                          <circle
+                            cx="17" cy="17" r={R} fill="none"
+                            stroke={pct >= 66 ? "#059669" : pct >= 33 ? "#d97706" : "#e11d48"}
+                            strokeWidth="3" strokeLinecap="round"
+                            strokeDasharray={`${dash} ${C - dash}`}
+                          />
+                        </svg>
+                        <div className="absolute inset-0 flex items-center justify-center font-mono-num text-[10px] font-bold text-slate-800">
+                          {pct}%
+                        </div>
+                      </div>
+                      <div className="mt-1 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                        by $ done
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
+                        {activeStep.count.toLocaleString()}
+                      </div>
+                      <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
+                        {activeStep.unit}
+                      </div>
+                    </>
+                  )}
                 </div>
               </button>
                 );
