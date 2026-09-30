@@ -2023,6 +2023,23 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   // business check would print it above the memo line.
   const { companies } = useCompany();
   const companyName = companies?.find((c) => c.id === companyId)?.name || "";
+  // Open A/P bills so the check-assign picker can offer "Apply to a
+  // bill" (feature parity with Quick Check-in). Loaded once on mount;
+  // any changes to bill balances after a save are reflected on the
+  // next parent refresh.
+  const [bills, setBills] = useState([]);
+  useEffect(() => {
+    if (!companyId) return;
+    let cancel = false;
+    api.get(`/companies/${companyId}/bills/open`)
+      .then((r) => {
+        if (cancel) return;
+        const arr = r.data?.bills || r.data?.items || (Array.isArray(r.data) ? r.data : []);
+        setBills(arr.filter((b) => Number(b?.balance_due ?? b?.total ?? 0) > 0.005));
+      })
+      .catch(() => { if (!cancel) setBills([]); });
+    return () => { cancel = true; };
+  }, [companyId]);
   // Adapt the ChatReview `card` shape into the `row` shape CheckRow
   // expects (see CheckRegisterReview.jsx). Everything is derived so
   // updates flow straight from `cards` (kept in sync by the parent's
@@ -2050,7 +2067,8 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   const getEdit = (row) => edits[row.id] || {
     payeeQuery: "",
     contact_id: null,
-    lines: [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+    addingNew: false,
+    lines: [{ pick: "", amount: Math.abs(row.amount || 0) }],
     saveAsRule: false,
   };
   // NOTE: fallback base must mirror getEdit(row) so the amount stays
@@ -2064,7 +2082,7 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
   }));
   const addLine = (row) => {
     const cur = getEdit(row);
-    setEdit(row, { lines: [...cur.lines, { category_account_id: "", amount: 0 }] });
+    setEdit(row, { lines: [...cur.lines, { pick: "", amount: 0 }] });
   };
   const removeLine = (row, idx) => {
     const cur = getEdit(row);
@@ -2081,15 +2099,21 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     setEdit(row, {
       payeeQuery: prev.payeeQuery,
       contact_id: prev.contact_id,
+      addingNew:  false,
       lines: prev.lines.length
         ? [{ ...prev.lines[0], amount: Math.abs(row.amount || 0) }]
-        : [{ category_account_id: "", amount: Math.abs(row.amount || 0) }],
+        : [{ pick: "", amount: Math.abs(row.amount || 0) }],
       saveAsRule: false,
     });
   };
   const save = async (row) => {
     const cur = getEdit(row);
-    if (!cur.contact_id && !cur.payeeQuery.trim()) {
+    // Payee is optional when EVERY line is a bill (the backend can
+    // derive the vendor from the bill). If any line is a category,
+    // require an explicit payee just like Quick Check-in does.
+    const hasCatLine = cur.lines.some((l) => (l.pick || "").startsWith("acct:"));
+    const finalPayee = cur.addingNew ? (cur.payeeQuery || "").trim() : "";
+    if (hasCatLine && !cur.contact_id && !finalPayee) {
       toast.error("Enter or select a payee first.");
       return;
     }
@@ -2099,26 +2123,27 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
       toast.error(`Line total $${got.toFixed(2)} doesn't match check $${expected.toFixed(2)}.`);
       return;
     }
-    if (cur.lines.some((l) => !l.category_account_id)) {
-      toast.error("Every line needs a category.");
+    if (cur.lines.some((l) => !l.pick)) {
+      toast.error("Every line needs a category or a bill.");
       return;
     }
     try {
       await api.post(`/companies/${companyId}/check-review/${row.id}/assign`, {
         contact_id: cur.contact_id || null,
-        create_contact_name: cur.contact_id ? null : cur.payeeQuery.trim(),
+        create_contact_name: cur.contact_id
+          ? null
+          : (cur.addingNew ? finalPayee || null : null),
         line_items: cur.lines.map((l) => ({
-          category_account_id: l.category_account_id,
-          amount: Number(l.amount),
-          description: l.description || "",
+          category_account_id: (l.pick || "").startsWith("acct:") ? l.pick.slice(5) : null,
+          bill_id:             (l.pick || "").startsWith("bill:") ? l.pick.slice(5) : null,
+          amount:              Number(l.amount),
+          description:         l.description || "",
         })),
         save_as_rule: !!cur.saveAsRule,
         mark_reviewed: true,
       });
       toast.success(`Check #${row.number || ""} booked${cur.saveAsRule ? " + saved rule" : ""}.`);
       setEdits((e) => { const n = { ...e }; delete n[row.id]; return n; });
-      // Hide this card immediately (Feb 2026 bug fix) — previously the
-      // CPA had to hit refresh to make the booked check disappear.
       setHiddenIds((s) => { const n = new Set(s); n.add(row.id); return n; });
       await onDone();
     } catch (e) {
@@ -2143,6 +2168,7 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
           row={row}
           edit={getEdit(row)}
           accounts={filteredAccounts}
+          bills={bills}
           contacts={contacts}
           companyName={companyName}
           onUpdateLine={(idx, patch) => updateLine(row, idx, patch)}
@@ -2163,7 +2189,7 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
 // "Checks without payee" flow. Payee is a contacts dropdown with an
 // inline "+ Add new contact" affordance, and category+amount lines
 // support multi-way splits with a Total indicator.
-function CheckAssignCompactRow({ row, edit, accounts, contacts, companyName,
+function CheckAssignCompactRow({ row, edit, accounts, bills, contacts, companyName,
                                  onUpdateLine, onAddLine, onRemoveLine,
                                  onSetEdit, onSave, onNotACheck }) {
   const target = Math.abs(Number(row.amount || 0));
@@ -2273,17 +2299,32 @@ function CheckAssignCompactRow({ row, edit, accounts, contacts, companyName,
           {edit.lines.map((l, i) => (
             <div key={i} className="flex items-center gap-2">
               <select
-                value={l.category_account_id || ""}
-                onChange={(e) => onUpdateLine(i, { category_account_id: e.target.value })}
+                value={l.pick || ""}
+                onChange={(e) => onUpdateLine(i, { pick: e.target.value })}
                 className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 data-testid={`check-assign-cat-${row.id}-${i}`}
               >
-                <option value="">Select category…</option>
-                {(accounts || []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code ? `${a.code} · ` : ""}{a.name}
-                  </option>
-                ))}
+                <option value="">Select category or bill…</option>
+                {(bills || []).length > 0 && (
+                  <optgroup label="Apply to a bill">
+                    {bills.map((b) => {
+                      const bal = Number(b.balance_due ?? b.total ?? 0);
+                      const label = `Bill #${b.number || b.bill_number || b.id?.slice(0, 6)}${
+                        b.contact_name ? " — " + b.contact_name : ""
+                      } — $${bal.toFixed(2)} due ${b.due_date || b.issue_date || b.date || ""}`.trim();
+                      return (
+                        <option key={b.id} value={`bill:${b.id}`}>{label}</option>
+                      );
+                    })}
+                  </optgroup>
+                )}
+                <optgroup label="Or book to a category">
+                  {(accounts || []).map((a) => (
+                    <option key={a.id} value={`acct:${a.id}`}>
+                      {a.code ? `${a.code} · ` : ""}{a.name}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
               <input
                 type="number"
