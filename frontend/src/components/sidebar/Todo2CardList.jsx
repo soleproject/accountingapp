@@ -14,6 +14,8 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
+import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useUserPref } from "@/hooks/useUserPref";
 import {
   ArrowLeft, Loader2, ChevronRight, ChevronDown, CircleAlert, User, Bot, Wrench,
@@ -29,6 +31,9 @@ import {
   // one dedicated group so it's obvious where to add more later.
   Users, TrendingUp, ShieldCheck, Inbox,
   Landmark, Link2, Download, Settings2,
+  // Icons for the firm-only Professional section (Today + Client
+  // Cockpit) added below the All accordion for pros/superadmins.
+  Sunrise, Activity,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -217,9 +222,29 @@ const ACCOUNTING_LINKS = [
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
   const { currentId, current } = useCompany();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const showQuickLinks = variant === "both";
+  const isFirmUser = canUseCockpit(user);
+  const isFirmBooks = current?.is_firm_books === true;
+  const clientAreaHeader = isFirmBooks ? "Firm Books" : "Client Area";
+  // Collapse state per section — persisted to localStorage so it sticks
+  // across reloads. Default: all sections open.
+  const [collapsedPro, setCollapsedPro] = useState(() => {
+    try { return localStorage.getItem("sidebar-both-collapsed-pro") === "1"; } catch { return false; }
+  });
+  const [collapsedClient, setCollapsedClient] = useState(() => {
+    try { return localStorage.getItem("sidebar-both-collapsed-client") === "1"; } catch { return false; }
+  });
+  const [collapsedTodo, setCollapsedTodo] = useState(() => {
+    try { return localStorage.getItem("sidebar-both-collapsed-todo") === "1"; } catch { return false; }
+  });
+  const toggleCollapse = (key, current, setter) => {
+    const next = !current;
+    setter(next);
+    try { localStorage.setItem(`sidebar-both-collapsed-${key}`, next ? "1" : "0"); } catch { /* ignore */ }
+  };
   const [items, setItems]   = useState([]);
   const [cashFlow, setCashFlow] = useState(null);
   const [loading, setLoad]  = useState(true);
@@ -403,52 +428,135 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               variant — that mode intentionally shows nothing but
               the top-level toggle and the task cards. */}
           <div className="mb-2" data-testid="sidebar-todo2-quick-links">
-            {QUICK_LINKS.map((l) => {
-              const active = location.pathname === l.to;
-              const Icon = l.icon;
-              return (
+            {/* Professional section — firm-only cross-client shortcuts
+                (Today + Client Cockpit) rendered ABOVE the Client Area
+                so the most-used firm-wide tools are always the first
+                thing under the Accounting module. Header is clickable
+                to collapse the section. */}
+            {isFirmUser && (
+              <>
                 <button
-                  key={l.to}
                   type="button"
-                  onClick={() => navigate(l.to)}
-                  className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
-                    active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
-                  }`}
-                  data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                  onClick={() => toggleCollapse("pro", collapsedPro, setCollapsedPro)}
+                  className="w-full flex items-center justify-between px-3 pt-3 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold hover:text-slate-600 transition-colors"
+                  data-testid="sidebar-todo2-professional-header"
+                  aria-expanded={!collapsedPro}
                 >
-                  <Icon size={16} className="text-slate-500" strokeWidth={2} />
-                  <span className="truncate">{l.label}</span>
+                  <span>Professional</span>
+                  {collapsedPro
+                    ? <ChevronRight size={12} className="text-slate-400" />
+                    : <ChevronDown size={12} className="text-slate-400" />}
                 </button>
-              );
-            })}
-            <AccountingAccordion navigate={navigate} activePath={location.pathname} />
+                {!collapsedPro && [
+                  { to: "/cockpit",        label: "Today",          icon: Sunrise },
+                  { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
+                ].map((l) => {
+                  const active = location.pathname === l.to;
+                  const Icon = l.icon;
+                  return (
+                    <button
+                      key={l.to}
+                      type="button"
+                      onClick={() => navigate(l.to)}
+                      className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+                        active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      data-testid={`sidebar-todo2-pro-link-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Icon size={16} className="text-slate-500" strokeWidth={2} />
+                      <span className="truncate">{l.label}</span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+            {/* Section header above the accounting quick-links. Reads
+                "Firm Books" when the pro is looking at their own firm
+                (is_firm_books=true) and "Client Area" otherwise. Only
+                shown to firm users (pro/admin/partner/superadmin) so
+                the client-owner view stays clean. Clickable to collapse. */}
+            {isFirmUser && (
+              <button
+                type="button"
+                onClick={() => toggleCollapse("client", collapsedClient, setCollapsedClient)}
+                className="w-full flex items-center justify-between px-3 pt-3 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold hover:text-slate-600 transition-colors"
+                data-testid="sidebar-todo2-context-header"
+                aria-expanded={!collapsedClient}
+              >
+                <span>{clientAreaHeader}</span>
+                {collapsedClient
+                  ? <ChevronRight size={12} className="text-slate-400" />
+                  : <ChevronDown size={12} className="text-slate-400" />}
+              </button>
+            )}
+            {!collapsedClient && (
+              <>
+                {QUICK_LINKS.map((l) => {
+                  const active = location.pathname === l.to;
+                  const Icon = l.icon;
+                  return (
+                    <button
+                      key={l.to}
+                      type="button"
+                      onClick={() => navigate(l.to)}
+                      className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+                        active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
+                      }`}
+                      data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                    >
+                      <Icon size={16} className="text-slate-500" strokeWidth={2} />
+                      <span className="truncate">{l.label}</span>
+                    </button>
+                  );
+                })}
+                <AccountingAccordion navigate={navigate} activePath={location.pathname} />
+              </>
+            )}
           </div>
         </>
       )}
 
       <div className={`flex-1 overflow-y-auto no-scrollbar pb-3 ${collapsed ? "px-0 space-y-1" : "px-1.5 space-y-1.5"}`}>
-        {loading && (
+        {/* To Do section header — sits between the All accordion and
+            the actionable task cards. Hidden in rail (collapsed) mode
+            where there's no room for a text label. Clickable to
+            collapse the task-cards list below. */}
+        {!collapsed && showQuickLinks && (
+          <button
+            type="button"
+            onClick={() => toggleCollapse("todo", collapsedTodo, setCollapsedTodo)}
+            className="w-full flex items-center justify-between px-3 pt-1 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold hover:text-slate-600 transition-colors"
+            data-testid="sidebar-todo2-todo-header"
+            aria-expanded={!collapsedTodo}
+          >
+            <span>To Do</span>
+            {collapsedTodo
+              ? <ChevronRight size={12} className="text-slate-400" />
+              : <ChevronDown size={12} className="text-slate-400" />}
+          </button>
+        )}
+        {!collapsedTodo && loading && (
           <div className="flex items-center justify-center py-6 text-slate-400" data-testid="sidebar-todo2-loading">
             <Loader2 size={14} className="animate-spin" />
           </div>
         )}
-        {error && !loading && !collapsed && (
+        {!collapsedTodo && error && !loading && !collapsed && (
           <div className="rounded-md border border-red-200 bg-red-50 px-2 py-2 text-[11px] text-red-700 flex items-start gap-1.5" data-testid="sidebar-todo2-error">
             <CircleAlert size={12} className="mt-0.5 shrink-0" /> {error}
           </div>
         )}
-        {error && !loading && collapsed && (
+        {!collapsedTodo && error && !loading && collapsed && (
           <div className="flex justify-center py-2 text-red-600" title={error} data-testid="sidebar-todo2-error">
             <CircleAlert size={16} />
           </div>
         )}
-        {!loading && !error && openItems.length === 0 && !collapsed && (
+        {!collapsedTodo && !loading && !error && openItems.length === 0 && !collapsed && (
           <div className="rounded-md border border-dashed border-emerald-200 bg-emerald-50/40 px-3 py-4 text-center text-[12px] text-emerald-700"
                data-testid="sidebar-todo2-empty">
             🎉 You're clear.<br/>Enjoy the quiet.
           </div>
         )}
-        {!loading && !error && openItems.map((it) => {
+        {!collapsedTodo && !loading && !error && openItems.map((it) => {
           const meta = TIER[it.key] || { tier: "pro", label: "Professional" };
           const style = TIER_STYLES[meta.tier];
           const Icon = style.Icon;

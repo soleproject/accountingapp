@@ -66,7 +66,7 @@ import ReorderAlertsTile from "@/components/ReorderAlertsTile";
 import WelcomeModal, { hasSeenWelcome, markWelcomeSeen, ReplayWelcomeButton } from "@/components/WelcomeModal";
 import PostOnboardingTour, { hasSeenPostOnboarding, markPostOnboardingSeen } from "@/components/PostOnboardingTour";
 import PendingReviewCard from "@/components/PendingReviewCard";
-import { LayoutGrid, Sparkle, Grid3x3, GraduationCap } from "lucide-react";
+import { LayoutGrid, Sparkle, Grid3x3, GraduationCap, CheckSquare } from "lucide-react";
 
 const kindLabel = {
   categorize: "Transactions Categorized",
@@ -365,6 +365,15 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
+        <Link
+          to="/accounting/todo"
+          data-testid="dashboard-view-cockpit"
+          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-sm"
+          title="Open the accounting Cockpit"
+        >
+          <CheckSquare size={12} />
+          Cockpit
+        </Link>
         <Link
           to="/onboarding"
           data-testid="dashboard-view-onboarding"
