@@ -33,7 +33,9 @@ import {
   Landmark, Link2, Download, Settings2,
   // Icons for the firm-only Professional section (Today + Client
   // Cockpit) added below the All accordion for pros/superadmins.
-  Sunrise, Activity,
+  // Extra icons (Shield/Briefcase/Rocket) power the Superadmin-flavor
+  // of that same section — see isSuperadmin branch below.
+  Sunrise, Activity, Shield, Briefcase, Rocket,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -227,8 +229,26 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   const location = useLocation();
   const showQuickLinks = variant === "both";
   const isFirmUser = canUseCockpit(user);
+  const isSuperadmin = (user?.role || "").toLowerCase() === "superadmin";
   const isFirmBooks = current?.is_firm_books === true;
   const clientAreaHeader = isFirmBooks ? "Firm Books" : "Client Area";
+  // Section-1 flavor: superadmins get a "Superadmin" header + platform
+  // admin links; every other firm user gets the standard "Professional"
+  // header with Today / Clients / Client Cockpit.
+  const proSectionHeader = isSuperadmin ? "Superadmin" : "Professional";
+  const proSectionLinks = isSuperadmin
+    ? [
+        { to: "/admin",                  label: "Superadmin",            icon: Shield },
+        { to: "/pro/clients",            label: "Clients",               icon: Briefcase },
+        { to: "/admin/usage",            label: "Usage & Costs",         icon: Activity },
+        { to: "/admin/product-launches", label: "Product Launch",        icon: Rocket },
+        { to: "/cockpit/payments-apps",  label: "Payments Applications", icon: CreditCard },
+      ]
+    : [
+        { to: "/cockpit",        label: "Today",          icon: Sunrise },
+        { to: "/pro/clients",    label: "Clients",        icon: Users   },
+        { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
+      ];
   // Collapse state per section — persisted to localStorage so it sticks
   // across reloads. Default: all sections open.
   const [collapsedPro, setCollapsedPro] = useState(() => {
@@ -428,11 +448,10 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
               variant — that mode intentionally shows nothing but
               the top-level toggle and the task cards. */}
           <div className="mb-2" data-testid="sidebar-todo2-quick-links">
-            {/* Professional section — firm-only cross-client shortcuts
-                (Today + Client Cockpit) rendered ABOVE the Client Area
-                so the most-used firm-wide tools are always the first
-                thing under the Accounting module. Header is clickable
-                to collapse the section. */}
+            {/* Professional / Superadmin section — firm-only cross-client
+                shortcuts rendered ABOVE the Client Area. Header label
+                and link list flip to a Superadmin flavor when the user
+                has role=superadmin. */}
             {isFirmUser && (
               <>
                 <button
@@ -442,16 +461,12 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                   data-testid="sidebar-todo2-professional-header"
                   aria-expanded={!collapsedPro}
                 >
-                  <span>Professional</span>
+                  <span>{proSectionHeader}</span>
                   {collapsedPro
                     ? <ChevronRight size={12} className="text-slate-400" />
                     : <ChevronDown size={12} className="text-slate-400" />}
                 </button>
-                {!collapsedPro && [
-                  { to: "/cockpit",        label: "Today",          icon: Sunrise },
-                  { to: "/pro/clients",    label: "Clients",        icon: Users   },
-                  { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
-                ].map((l) => {
+                {!collapsedPro && proSectionLinks.map((l) => {
                   const active = location.pathname === l.to;
                   const Icon = l.icon;
                   return (
