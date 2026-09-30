@@ -449,6 +449,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 </button>
                 {!collapsedPro && [
                   { to: "/cockpit",        label: "Today",          icon: Sunrise },
+                  { to: "/pro/clients",    label: "Clients",        icon: Users   },
                   { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
                 ].map((l) => {
                   const active = location.pathname === l.to;
