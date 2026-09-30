@@ -8,14 +8,74 @@
  * when the month switcher moves.
  */
 import React from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useCompany } from "@/lib/company";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
-import { Users } from "lucide-react";
+import { Users, LayoutGrid, Sparkle, Grid3x3, CheckSquare, GraduationCap } from "lucide-react";
 import Todo2ViewToggle from "@/components/Todo2ViewToggle";
 
 import PendingReviewCard from "@/components/PendingReviewCard";
+
+/**
+ * Small pill group mirroring the one on /dashboard so the CPA can jump
+ * between Classic / Firm / Business dashboard views (persisted via
+ * `dashboard_view` localStorage key), Cockpit (active here), and the
+ * Onboarding wizard without hunting through the sidebar.
+ */
+function CockpitViewPills() {
+  const navigate = useNavigate();
+  const openDashboard = (view) => {
+    try { localStorage.setItem("dashboard_view", view); } catch { /* ignore */ }
+    navigate("/dashboard");
+  };
+  const dashPills = [
+    { key: "classic", label: "Classic", Icon: LayoutGrid },
+    { key: "firm", label: "Firm at a Glance", Icon: Sparkle },
+    { key: "business", label: "Business Overview", Icon: Grid3x3 },
+  ];
+  return (
+    <div className="flex items-center gap-2 flex-wrap" data-testid="cockpit-view-pills">
+      <div
+        role="tablist"
+        aria-label="Dashboard view"
+        className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 p-0.5"
+      >
+        {dashPills.map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            role="tab"
+            onClick={() => openDashboard(key)}
+            data-testid={`cockpit-view-${key}`}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors"
+          >
+            <Icon size={12} />
+            {label}
+          </button>
+        ))}
+      </div>
+      <span
+        aria-current="page"
+        data-testid="cockpit-view-cockpit"
+        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-900 shadow-sm"
+        title="You are on the Cockpit page"
+      >
+        <CheckSquare size={12} />
+        Cockpit
+      </span>
+      <Link
+        to="/onboarding"
+        data-testid="cockpit-view-onboarding"
+        className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 transition-colors shadow-sm"
+        title="Run the onboarding wizard again"
+      >
+        <GraduationCap size={12} />
+        Onboarding
+      </Link>
+    </div>
+  );
+}
 
 export default function ToDo() {
   const { currentId, current } = useCompany();
@@ -42,11 +102,14 @@ export default function ToDo() {
               Your monthly items for {current?.name}
             </div>
           </div>
-          {/* View toggle — currently on Page. Clicking Menu flips the
-              left sidebar into To Do 2 cards mode so the same list is
-              always one glance away. The toggle in the sidebar
-              (Todo2CardList header) flips back to this page. */}
-          <Todo2ViewToggle mode="page" returnPath="/accounting/todo" />
+          {/* Dashboard-view pill group — mirrors the one on /dashboard so
+              the CPA can hop between Classic / Firm / Business / Cockpit /
+              Onboarding without going through the sidebar. Cockpit is the
+              active state here. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <CockpitViewPills />
+            <Todo2ViewToggle mode="page" returnPath="/accounting/todo" />
+          </div>
         </div>
         <p className="text-sm text-slate-500 mt-1">
           Everything on this page was assigned to you (or shared) at onboarding.
