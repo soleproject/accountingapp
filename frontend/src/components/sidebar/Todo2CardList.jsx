@@ -438,7 +438,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 <button
                   type="button"
                   onClick={() => toggleCollapse("pro", collapsedPro, setCollapsedPro)}
-                  className="w-full flex items-center justify-between px-3 pt-1 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold hover:text-slate-600 transition-colors"
+                  className="w-full flex items-center justify-between px-3 pt-3 pb-1 mb-1 border-b border-slate-200 text-[10px] uppercase tracking-widest text-slate-400 font-semibold hover:text-slate-600 transition-colors"
                   data-testid="sidebar-todo2-professional-header"
                   aria-expanded={!collapsedPro}
                 >
