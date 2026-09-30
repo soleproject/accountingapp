@@ -16,7 +16,7 @@ import { resolvePlaybook, PLAYBOOKS as PLAYBOOKS_ALL } from "@/tours/reviewChatP
 import {
   ArrowLeft, MessageCircle, Send, Mic, MicOff, Check as CheckIcon,
   Plus, X, AlertTriangle, Loader2, Sparkles, MoreHorizontal, RotateCcw,
-  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb,
+  Search, HelpCircle, Maximize2, Scissors, UserCog, Lightbulb, ChevronDown,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -2298,34 +2298,14 @@ function CheckAssignCompactRow({ row, edit, accounts, bills, contacts, companyNa
         <div className="space-y-2">
           {edit.lines.map((l, i) => (
             <div key={i} className="flex items-center gap-2">
-              <select
+              <CategoryOrBillCombobox
+                rowId={row.id}
+                idx={i}
                 value={l.pick || ""}
-                onChange={(e) => onUpdateLine(i, { pick: e.target.value })}
-                className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                data-testid={`check-assign-cat-${row.id}-${i}`}
-              >
-                <option value="">Select category or bill…</option>
-                {(bills || []).length > 0 && (
-                  <optgroup label="Apply to a bill">
-                    {bills.map((b) => {
-                      const bal = Number(b.balance_due ?? b.total ?? 0);
-                      const label = `Bill #${b.number || b.bill_number || b.id?.slice(0, 6)}${
-                        b.contact_name ? " — " + b.contact_name : ""
-                      } — $${bal.toFixed(2)} due ${b.due_date || b.issue_date || b.date || ""}`.trim();
-                      return (
-                        <option key={b.id} value={`bill:${b.id}`}>{label}</option>
-                      );
-                    })}
-                  </optgroup>
-                )}
-                <optgroup label="Or book to a category">
-                  {(accounts || []).map((a) => (
-                    <option key={a.id} value={`acct:${a.id}`}>
-                      {a.code ? `${a.code} · ` : ""}{a.name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+                bills={bills}
+                accounts={accounts}
+                onChange={(pick) => onUpdateLine(i, { pick })}
+              />
               <input
                 type="number"
                 step="0.01"
@@ -2381,11 +2361,165 @@ function CheckAssignCompactRow({ row, edit, accounts, bills, contacts, companyNa
   );
 }
 
-// Render a single check as a paper-check visual (QuickBooks style):
-// company drawer top-left, check # + date top-right, "Pay to the
-// order of" with payee typeahead + numeric amount, amount-in-words
-// line, memo + signature, and a footer strip with the category
-// picker + Save / Not-a-check actions.
+// Searchable combobox for the bill+category picker in
+// CheckAssignCompactRow. Wraps a text input over a dropdown of two
+// virtual groups ("Apply to a bill" / "Or book to a category") and
+// filters by number, vendor, code, or name as the user types. Uses a
+// portal-free absolute-positioned dropdown so it lays inside the
+// scrolling row without needing extra machinery.
+function CategoryOrBillCombobox({ rowId, idx, value, bills, accounts, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ]       = useState("");
+  const rootRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  // Resolve the currently-selected label so the input shows the
+  // chosen bill/category rather than the raw "acct:<id>" token.
+  const selectedLabel = useMemo(() => {
+    if (!value) return "";
+    if (value.startsWith("bill:")) {
+      const b = (bills || []).find((x) => x.id === value.slice(5));
+      if (!b) return "";
+      const bal = Number(b.balance_due ?? b.total ?? 0);
+      return `Bill #${b.number || b.bill_number || b.id?.slice(0, 6)}${
+        b.contact_name ? " — " + b.contact_name : ""
+      } — $${bal.toFixed(2)}`;
+    }
+    if (value.startsWith("acct:")) {
+      const a = (accounts || []).find((x) => x.id === value.slice(5));
+      return a ? `${a.code ? a.code + " · " : ""}${a.name}` : "";
+    }
+    return "";
+  }, [value, bills, accounts]);
+
+  const query = q.trim().toLowerCase();
+  const filteredBills = useMemo(() => {
+    if (!bills) return [];
+    if (!query) return bills;
+    return bills.filter((b) => {
+      const hay = [b.number, b.bill_number, b.contact_name, b.vendor_name, b.balance_due, b.total, b.due_date]
+        .map((v) => String(v ?? "").toLowerCase()).join(" ");
+      return hay.includes(query);
+    });
+  }, [bills, query]);
+  const filteredAccounts = useMemo(() => {
+    if (!accounts) return [];
+    if (!query) return accounts;
+    return accounts.filter((a) => {
+      const hay = [a.code, a.name, a.type, a.subtype]
+        .map((v) => String(v ?? "").toLowerCase()).join(" ");
+      return hay.includes(query);
+    });
+  }, [accounts, query]);
+
+  const pickBill = (b) => { onChange(`bill:${b.id}`); setOpen(false); setQ(""); };
+  const pickAcct = (a) => { onChange(`acct:${a.id}`); setOpen(false); setQ(""); };
+  const clear    = () => { onChange(""); setQ(""); };
+
+  return (
+    <div ref={rootRef} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full text-left rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 flex items-center justify-between gap-2"
+        data-testid={`check-assign-cat-${rowId}-${idx}`}
+      >
+        <span className={`truncate ${selectedLabel ? "text-slate-900" : "text-slate-400"}`}>
+          {selectedLabel || "Select category or bill…"}
+        </span>
+        {selectedLabel ? (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => { e.stopPropagation(); clear(); }}
+            className="text-slate-400 hover:text-rose-600 shrink-0"
+            aria-label="Clear selection"
+          >
+            <X className="h-3 w-3" />
+          </span>
+        ) : (
+          <ChevronDown className="h-3 w-3 text-slate-400 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 right-0 top-full mt-1 rounded-md border border-slate-200 bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
+          data-testid={`check-assign-cat-menu-${rowId}-${idx}`}
+        >
+          <div className="sticky top-0 bg-white p-2 border-b border-slate-100">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search bill # / vendor / category…"
+                className="w-full pl-7 pr-2 py-1 rounded border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                data-testid={`check-assign-cat-search-${rowId}-${idx}`}
+              />
+            </div>
+          </div>
+          {filteredBills.length === 0 && filteredAccounts.length === 0 && (
+            <div className="px-3 py-4 text-xs text-slate-500 text-center">No matches</div>
+          )}
+          {filteredBills.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-emerald-700 font-semibold bg-emerald-50/50">
+                Apply to a bill
+              </div>
+              {filteredBills.map((b) => {
+                const bal = Number(b.balance_due ?? b.total ?? 0);
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => pickBill(b)}
+                    className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 truncate"
+                  >
+                    Bill #{b.number || b.bill_number || b.id?.slice(0, 6)}
+                    {b.contact_name ? ` — ${b.contact_name}` : ""}
+                    {" — $"}{bal.toFixed(2)}
+                    {b.due_date || b.issue_date ? ` due ${b.due_date || b.issue_date}` : ""}
+                  </button>
+                );
+              })}
+            </>
+          )}
+          {filteredAccounts.length > 0 && (
+            <>
+              <div className="px-3 py-1 text-[10px] uppercase tracking-widest text-slate-500 font-semibold bg-slate-50">
+                Or book to a category
+              </div>
+              {filteredAccounts.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => pickAcct(a)}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-50 truncate"
+                >
+                  {a.code ? `${a.code} · ` : ""}{a.name}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Legacy paper-check visual — kept for reference/rollback but no longer
+// rendered by ChecksBatchCard. Safe to remove once CheckAssignCompactRow
+// has soaked in production.
 function CheckPaperRow({
   row, prevRow, edit, accounts, contacts, companyName,
   onUpdateLine, onAddLine, onRemoveLine, onSetEdit, onSameAsAbove, onSave, onNotACheck,
