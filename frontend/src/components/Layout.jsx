@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Outlet, Link } from "react-router-dom";
+import { Outlet, Link, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import AiPanel from "./AiPanel";
 import InsightsChatWidget from "./InsightsChatWidget";
@@ -17,7 +17,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
@@ -27,6 +27,8 @@ import FeedbackModal from "./FeedbackModal";
 
 export function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef(null);
@@ -191,6 +193,19 @@ export function CompanySwitcher() {
                 })}
               </div>
             ))}
+            {/* "+ Add new company" footer — always visible at the
+                 bottom of the switcher so any CPA can spin up a new
+                 client without hunting through the Clients page.
+                 Navigates to /clients?new=1 which auto-opens the
+                 NewClientModal on that page. */}
+            <button
+              type="button"
+              onClick={() => { setOpen(false); navigate("/pro/clients?new=1"); }}
+              className="w-full text-left px-3 py-2 text-sm text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5 border-t border-slate-100 sticky bottom-0 bg-white"
+              data-testid="company-switcher-add-new"
+            >
+              <Plus size={14} /> Add new company
+            </button>
           </div>
         </div>
       )}

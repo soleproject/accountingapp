@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -20,6 +20,18 @@ export default function ProClients() {
   const [clients, setClients] = useState([]);
   const [firm, setFirm] = useState(null);
   const [creating, setCreating] = useState(false);
+  // Deep-link hook: /pro/clients?new=1 auto-opens the "Add client"
+  // modal so the company-switcher's "+ Add new company" footer can
+  // jump straight into new-client creation without an extra click.
+  const [sp, setSp] = useSearchParams();
+  useEffect(() => {
+    if (sp.get("new") === "1") {
+      setCreating(true);
+      const next = new URLSearchParams(sp);
+      next.delete("new");
+      setSp(next, { replace: true });
+    }
+  }, [sp, setSp]);
   // Superadmin-only: open the "Add Enterprise" modal from the header on
   // the Enterprises tab. On success we re-run the enterprises fetch so
   // the new record shows up immediately in the grid without a reload.

@@ -409,6 +409,10 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
+  // Disables the "Finish" / "Next step" button on the last step while
+  // finish() awaits its persist call — invite emails fire in the
+  // background so they don't hold up navigation.
+  const [finishing, setFinishing] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [coaSelected, setCoaSelected] = useState(new Set());
   const [previewing, setPreviewing] = useState(false);
@@ -992,52 +996,69 @@ export default function Onboarding() {
     if (nextStep !== step) setStep(nextStep);
   };
   const finish = async () => {
+    if (finishing) return;
+    setFinishing(true);
     // Fire outbound invites for any Contact-step people that were
-    // flagged with `send_invite: true`. We do this BEFORE marking the
-    // onboarding complete so a mid-flight failure doesn't strand the
-    // owner on `/dashboard` — errors surface as toasts and never block
-    // finishing.
+    // flagged with `send_invite: true`. We do this in the BACKGROUND
+    // (Promise.allSettled, no await) so an outbound Resend round-trip
+    // per contact doesn't freeze the "Next step" button for 5-10s.
+    // Errors still surface as toasts; navigation happens after the
+    // fast `persist` + `refresh` calls resolve.
     const contactsToInvite = Array.isArray(answers.contacts)
       ? answers.contacts.filter(c => c?.send_invite && (c?.email || "").trim())
       : [];
-    let sent = 0;
-    let failed = 0;
-    for (const c of contactsToInvite) {
-      try {
-        await api.post(`/companies/${currentId}/invites`, {
-          email: (c.email || "").trim(),
-          name: (c.name || "").trim() || undefined,
-          role: "editor",
+    const invitePromises = contactsToInvite.map((c) =>
+      api.post(`/companies/${currentId}/invites`, {
+        email: (c.email || "").trim(),
+        name: (c.name || "").trim() || undefined,
+        role: "editor",
+      }).then(() => ({ ok: true, c }))
+        .catch((e) => ({ ok: false, c, err: e }))
+    );
+    // Fire-and-forget: attach a handler that toasts failures but do NOT
+    // await this before navigating. The user's UI moves on immediately.
+    if (invitePromises.length > 0) {
+      Promise.allSettled(invitePromises).then((results) => {
+        const settled = results.map((r) => r.value || {});
+        const sent = settled.filter((s) => s.ok).length;
+        const failed = settled.filter((s) => s && !s.ok);
+        failed.forEach((f) => {
+          toast.error(
+            `Couldn't invite ${f.c?.email}: ${f.err?.response?.data?.detail || f.err?.message || "email failed"}`,
+          );
         });
-        sent += 1;
-      } catch (e) {
-        failed += 1;
-        toast.error(
-          `Couldn't invite ${c.email}: ${e?.response?.data?.detail || e.message}`,
-        );
-      }
+        if (sent > 0) {
+          toast.success(`${sent} invite${sent === 1 ? "" : "s"} sent.`);
+        }
+      });
     }
-    // Clear the invite flag on contacts we already sent so returning to
-    // /onboarding + hitting Finish again doesn't double-send.
-    if (sent > 0) {
-      const cleared = (answers.contacts || []).map(c =>
-        c?.send_invite && (c?.email || "").trim()
-          ? { ...c, send_invite: false, invited_at: new Date().toISOString() }
-          : c
+    // Optimistically clear the invite flag so returning here and hitting
+    // Finish again doesn't double-send (backend re-invites also idempotent).
+    const optimisticContacts = contactsToInvite.length
+      ? (answers.contacts || []).map((c) =>
+          c?.send_invite && (c?.email || "").trim()
+            ? { ...c, send_invite: false, invited_at: new Date().toISOString() }
+            : c,
+        )
+      : answers.contacts;
+    try {
+      await persist({
+        complete: true,
+        step: STEPS.length,
+        answers: optimisticContacts !== answers.contacts
+          ? { ...answers, contacts: optimisticContacts }
+          : answers,
+      });
+      await refresh();
+      toast.success(
+        contactsToInvite.length
+          ? "Onboarding complete! Sending invites in the background."
+          : "Onboarding complete! Welcome to SmartBooks.",
       );
-      await persist({ complete: true, step: STEPS.length, answers: { ...answers, contacts: cleared } });
-    } else {
-      await persist({ complete: true, step: STEPS.length, answers });
+      nav("/welcome");
+    } finally {
+      setFinishing(false);
     }
-    await refresh();
-    if (sent > 0 && failed === 0) {
-      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"}. Welcome to SmartBooks.`);
-    } else if (sent > 0 && failed > 0) {
-      toast.success(`Onboarding complete! Sent ${sent} invite${sent === 1 ? "" : "s"} (${failed} failed — see toasts above).`);
-    } else {
-      toast.success("Onboarding complete! Welcome to SmartBooks.");
-    }
-    nav("/welcome");
   };
   // Keep the coach-handler refs pointed at the latest closures.
   useEffect(() => { nextRef.current = next; });
@@ -2082,9 +2103,14 @@ export default function Onboarding() {
             <button
               data-testid={TID.onboardingComplete}
               onClick={finish}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700"
+              disabled={finishing}
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 text-white text-sm shadow-md hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-wait"
             >
-              Next step <ChevronRight size={14} />
+              {finishing ? (
+                <>Finishing… <Loader2 size={14} className="animate-spin" /></>
+              ) : (
+                <>Next step <ChevronRight size={14} /></>
+              )}
             </button>
           )}
         </div>
