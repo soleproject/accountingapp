@@ -20,6 +20,9 @@ import {
   LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
   ListTree, Building2, Wallet, Boxes, Tags, CheckCheck, Printer, BookOpen,
   Notebook, Percent, Sparkles, Wand2, ClipboardCheck, CalendarCheck, Lock, History,
+  // Icons for the nested Sales & Payments / Purchases subgroups on
+  // the Both-tab accordion (mirrors the Full-mode Sidebar icons).
+  CreditCard, Package, Repeat, MailCheck, UserCircle, Store, ShoppingCart,
 } from "lucide-react";
 
 // Sidebar-card label overrides — shorter, action-oriented names that
@@ -131,12 +134,38 @@ const QUICK_LINKS = [
   { to: "/reports",               label: "Reports",      icon: BarChart3 },
 ];
 
-// Full Accounting submenu — same routes as the "Accounting" section of
-// the sidebar's Full mode, exposed here as a collapsible accordion so
+// Full Accounting submenu — same routes as the "All" section of the
+// sidebar's Full mode, exposed here as a collapsible accordion so
 // the CPA can dive into ledger tools without leaving cards mode.
 // Kept in sync manually with the master list in Sidebar.jsx.
+//
+// Note: the standalone `Transactions` link that used to live at the
+// top of this list is intentionally removed — it's already covered
+// by the QUICK_LINKS strip above, so keeping it here surfaced the
+// same page twice in a row.
+const SALES_LINKS = [
+  { to: "/estimates",                     label: "Estimates",           icon: FileText },
+  { to: "/invoices",                      label: "Invoices",            icon: FileText },
+  { to: "/payments?direction=in",         label: "Payments",            icon: CreditCard },
+  { to: "/items?usage=sales",             label: "Products & Services", icon: Package },
+  { to: "/recurring",                     label: "Recurring",           icon: Repeat },
+  { to: "/customer-statements",           label: "Customer Statements", icon: MailCheck },
+  { to: "/contacts?type=customer",        label: "Customers",           icon: UserCircle },
+];
+const PURCHASES_LINKS = [
+  { to: "/purchase-orders",               label: "Purchase Orders",     icon: FileText },
+  { to: "/bills",                         label: "Bills",               icon: Receipt },
+  { to: "/payments?direction=out",        label: "Payments",            icon: CreditCard },
+  { to: "/payments?type=cc",              label: "Credit Card Payments",icon: CreditCard },
+  { to: "/items?usage=purchases",         label: "Items",               icon: Package },
+  { to: "/contacts?type=vendor",          label: "Vendors",             icon: Store },
+];
 const ACCOUNTING_LINKS = [
-  { to: "/accounting/transactions",       label: "Transactions",     icon: ArrowLeftRight },
+  // Nested subgroup placeholders — rendered as inline collapsibles by
+  // AccountingAccordion. Same visual pattern as the "Full" sidebar
+  // view so the Both tab mirrors it exactly.
+  { subGroup: true, key: "sales",     label: "Sales & Payments", icon: FileText,     items: SALES_LINKS },
+  { subGroup: true, key: "purchases", label: "Purchases",        icon: ShoppingCart, items: PURCHASES_LINKS },
   { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts", icon: ListTree },
   { to: "/accounting/assets",             label: "Assets",           icon: Building2 },
   { to: "/accounting/loans",              label: "Loans",            icon: Wallet },
@@ -499,14 +528,26 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   );
 }
 
-// Collapsible "Accounting" accordion rendered under the Reports quick-link.
+// Collapsible "All" accordion rendered under the Reports quick-link.
 // Persists its open/closed state in localStorage so the CPA doesn't have to
 // re-expand it every time they navigate. Uses the same row styling as the
 // quick-links above for visual continuity.
+//
+// Renamed from "Accounting" → "All" (Sep 2026) to match the Full-mode
+// sidebar and also supports one-level-deep nested subgroups
+// (Sales & Payments, Purchases) via `subGroup: true` entries in
+// ACCOUNTING_LINKS.
 function AccountingAccordion({ navigate, activePath }) {
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem("axiom_todo2_accounting_open") === "1"; }
     catch (_) { return false; }
+  });
+  // Per-subgroup open state, persisted independently. Keeps the two
+  // nested "Sales & Payments" / "Purchases" accordions from resetting
+  // every time the outer "All" toggle is flipped.
+  const [subOpen, setSubOpen] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("axiom_todo2_accounting_subopen") || "{}"); }
+    catch (_) { return {}; }
   });
   const toggle = () => setOpen((v) => {
     const nv = !v;
@@ -514,7 +555,17 @@ function AccountingAccordion({ navigate, activePath }) {
     catch (_) { /* private mode — best-effort */ }
     return nv;
   });
-  const anyChildActive = ACCOUNTING_LINKS.some((l) => activePath === l.to);
+  const toggleSub = (key) => setSubOpen((prev) => {
+    const next = { ...prev, [key]: !prev[key] };
+    try { localStorage.setItem("axiom_todo2_accounting_subopen", JSON.stringify(next)); }
+    catch (_) { /* best-effort */ }
+    return next;
+  });
+  const anyChildActive = ACCOUNTING_LINKS.some((l) =>
+    l.subGroup
+      ? (l.items || []).some((s) => activePath === s.to.split("?")[0])
+      : activePath === l.to
+  );
   return (
     <div className="mt-0.5" data-testid="sidebar-todo2-accounting-accordion">
       <button
@@ -529,7 +580,7 @@ function AccountingAccordion({ navigate, activePath }) {
         data-testid="sidebar-todo2-accounting-toggle"
       >
         <ListTree size={16} className="text-slate-500" strokeWidth={2} />
-        <span className="truncate flex-1">Accounting</span>
+        <span className="truncate flex-1">All</span>
         <ChevronDown
           size={14}
           className={`text-slate-400 transition-transform ${open ? "rotate-0" : "-rotate-90"}`}
@@ -538,6 +589,55 @@ function AccountingAccordion({ navigate, activePath }) {
       {open && (
         <div className="pl-4 mt-0.5" data-testid="sidebar-todo2-accounting-panel">
           {ACCOUNTING_LINKS.map((l) => {
+            // Nested subgroup — inline collapsible one indent-level
+            // deeper than a leaf link. Same visual pattern as the
+            // Full-mode sidebar's subGroup rendering.
+            if (l.subGroup) {
+              const isOpen = !!subOpen[l.key];
+              const SubIcon = l.icon;
+              return (
+                <div key={l.key} data-testid={`sidebar-todo2-accounting-subgroup-${l.key}`}>
+                  <button
+                    type="button"
+                    onClick={() => toggleSub(l.key)}
+                    aria-expanded={isOpen}
+                    className="w-full flex items-center gap-3 rounded-md px-3 py-1.5 text-[13px] text-slate-700 hover:bg-slate-100 text-left"
+                    data-testid={`sidebar-todo2-accounting-subgroup-toggle-${l.key}`}
+                  >
+                    <SubIcon size={14} className="text-slate-500" strokeWidth={2} />
+                    <span className="truncate flex-1">{l.label}</span>
+                    <ChevronDown
+                      size={12}
+                      className={`text-slate-400 transition-transform ${isOpen ? "rotate-0" : "-rotate-90"}`}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="pl-4 mt-0.5">
+                      {(l.items || []).map((sub) => {
+                        const active = activePath === sub.to.split("?")[0];
+                        const SIcon = sub.icon;
+                        return (
+                          <button
+                            key={sub.to}
+                            type="button"
+                            onClick={() => navigate(sub.to)}
+                            className={`w-full flex items-center gap-3 rounded-md px-3 py-1.5 text-[13px] text-left transition-colors ${
+                              active
+                                ? "bg-slate-100 text-slate-900 font-medium"
+                                : "text-slate-700 hover:bg-slate-100"
+                            }`}
+                            data-testid={`sidebar-todo2-accounting-${l.key}-${sub.label.toLowerCase().replace(/\s+/g, "-")}`}
+                          >
+                            <SIcon size={14} className="text-slate-500" strokeWidth={2} />
+                            <span className="truncate">{sub.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
             const active = activePath === l.to;
             const Icon = l.icon;
             return (
