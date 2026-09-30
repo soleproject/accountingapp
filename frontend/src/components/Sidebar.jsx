@@ -1437,6 +1437,13 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/product-launches", label: "Product Launch", icon: Rocket }} />
         )}
+        {/* Payments Applications — firm-wide roll-up of every client's
+            merchant-services application in progress or submitted.
+            Moved here from the Today page (Feb 2026) so it lives in
+            the superadmin area only. */}
+        {user?.role === "superadmin" && (
+          <Item item={{ to: "/cockpit/payments-apps", label: "Payments Applications", icon: CreditCard }} />
+        )}
         {/* Partner top link — their own scoped dashboard with the
             "My Clients" section (Clients | Enterprises toggle). Sits
             in the same slot Superadmin uses so the top-of-nav pattern
