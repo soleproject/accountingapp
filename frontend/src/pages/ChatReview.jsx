@@ -2136,12 +2136,11 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
     }
   };
   return (
-    <div className="space-y-4" data-testid="chat-review-checks-batch">
+    <div className="space-y-3" data-testid="chat-review-checks-batch">
       {rows.filter((row) => !hiddenIds.has(row.id)).map((row, i, visibleRows) => (
-        <CheckPaperRow
+        <CheckAssignCompactRow
           key={row.id}
           row={row}
-          prevRow={i > 0 ? visibleRows[i - 1] : null}
           edit={getEdit(row)}
           accounts={filteredAccounts}
           contacts={contacts}
@@ -2150,11 +2149,193 @@ function ChecksBatchCard({ cards, accounts, contacts, companyId, onDone }) {
           onAddLine={() => addLine(row)}
           onRemoveLine={(idx) => removeLine(row, idx)}
           onSetEdit={(patch) => setEdit(row, patch)}
-          onSameAsAbove={() => applySameAsAbove(row, i > 0 ? visibleRows[i - 1] : null)}
           onSave={() => save(row)}
           onNotACheck={() => notACheck(row)}
         />
       ))}
+    </div>
+  );
+}
+
+// Compact check-assign card — ported from the Quick Check-in
+// `ChecksAssignTable` (ClientReviewPage.jsx:6218-6589) so the CPA-side
+// Review Chat has the exact same visual + behavior as the client-side
+// "Checks without payee" flow. Payee is a contacts dropdown with an
+// inline "+ Add new contact" affordance, and category+amount lines
+// support multi-way splits with a Total indicator.
+function CheckAssignCompactRow({ row, edit, accounts, contacts, companyName,
+                                 onUpdateLine, onAddLine, onRemoveLine,
+                                 onSetEdit, onSave, onNotACheck }) {
+  const target = Math.abs(Number(row.amount || 0));
+  const lineTotal = edit.lines.reduce((s, l) => s + Number(l.amount || 0), 0);
+  const diff = Number((lineTotal - target).toFixed(2));
+  const addingNew = !!edit.addingNew;
+  const testId = `check-assign-${row.id}`;
+  return (
+    <div
+      className="rounded-xl bg-white ring-1 ring-slate-200 shadow-sm hover:shadow-md transition-shadow px-4 py-4"
+      data-testid={testId}
+    >
+      {/* Header — #num · date · $amount · Save */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="font-mono-num text-slate-500 text-sm">
+            #{row.number || "—"}
+          </span>
+          <span className="text-slate-700 text-sm">{row.date || ""}</span>
+          <span className="font-mono-num tabular-nums font-semibold text-slate-900 text-base">
+            ${target.toFixed(2)}
+          </span>
+          {companyName && (
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+              {companyName}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onNotACheck}
+            className="text-[11px] text-slate-500 hover:text-rose-600 underline decoration-dotted"
+            data-testid={`check-assign-not-${row.id}`}
+          >
+            Not a check
+          </button>
+          <button
+            type="button"
+            onClick={onSave}
+            className="rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-1.5"
+            data-testid={`check-assign-save-${row.id}`}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
+      {/* Payee dropdown (with inline + Add new contact) */}
+      <div className="mb-3">
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+          Payee
+        </div>
+        {addingNew ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              autoFocus
+              placeholder="New payee name…"
+              value={edit.payeeQuery || ""}
+              onChange={(e) => onSetEdit({ payeeQuery: e.target.value, contact_id: null })}
+              className="flex-1 min-w-0 rounded-md border border-indigo-300 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+              data-testid={`check-assign-payee-new-${row.id}`}
+            />
+            <button
+              type="button"
+              onClick={() => onSetEdit({ addingNew: false, payeeQuery: "", contact_id: null })}
+              className="text-slate-400 hover:text-slate-700 text-xs"
+            >
+              cancel
+            </button>
+          </div>
+        ) : (
+          <select
+            value={edit.contact_id || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "__NEW__") {
+                onSetEdit({ addingNew: true, payeeQuery: "", contact_id: null });
+              } else {
+                const c = (contacts || []).find((x) => x.id === v);
+                onSetEdit({
+                  contact_id: v || null,
+                  payeeQuery: c?.name || "",
+                  addingNew:  false,
+                });
+              }
+            }}
+            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400"
+            data-testid={`check-assign-payee-${row.id}`}
+          >
+            <option value="">Select payee…</option>
+            {(contacts || []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name || c.display_name}</option>
+            ))}
+            <option value="__NEW__">+ Add new contact…</option>
+          </select>
+        )}
+      </div>
+
+      {/* Categories & amounts — multi-line with per-line remove */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+          Categories &amp; amounts
+        </div>
+        <div className="space-y-2">
+          {edit.lines.map((l, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <select
+                value={l.category_account_id || ""}
+                onChange={(e) => onUpdateLine(i, { category_account_id: e.target.value })}
+                className="flex-1 min-w-0 rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                data-testid={`check-assign-cat-${row.id}-${i}`}
+              >
+                <option value="">Select category…</option>
+                {(accounts || []).map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code ? `${a.code} · ` : ""}{a.name}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="number"
+                step="0.01"
+                value={l.amount}
+                onChange={(e) => onUpdateLine(i, { amount: Number(e.target.value) })}
+                className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-sm font-mono-num tabular-nums text-right focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                data-testid={`check-assign-amt-${row.id}-${i}`}
+              />
+              <button
+                type="button"
+                onClick={() => onRemoveLine(i)}
+                disabled={edit.lines.length <= 1}
+                className="text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                aria-label="Remove line"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center justify-between mt-2 text-xs">
+          <button
+            type="button"
+            onClick={onAddLine}
+            className="text-indigo-600 hover:text-indigo-700 font-semibold"
+            data-testid={`check-assign-add-line-${row.id}`}
+          >
+            + Add another line
+          </button>
+          <div className={`tabular-nums flex items-center gap-1 ${
+            Math.abs(diff) < 0.005 ? "text-emerald-700"
+              : diff > 0 ? "text-rose-700" : "text-amber-700"
+          }`}>
+            <span>Total ${lineTotal.toFixed(2)}</span>
+            {Math.abs(diff) < 0.005
+              ? <CheckIcon className="h-3 w-3" />
+              : <span>· {diff > 0 ? `$${diff.toFixed(2)} over` : `$${Math.abs(diff).toFixed(2)} to go`}</span>}
+          </div>
+        </div>
+        {/* Save-as-rule checkbox — preserves the pre-existing convenience
+             of turning a check payee → category into a reusable rule. */}
+        <label className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
+          <input
+            type="checkbox"
+            checked={!!edit.saveAsRule}
+            onChange={(e) => onSetEdit({ saveAsRule: e.target.checked })}
+            data-testid={`check-assign-rule-${row.id}`}
+          />
+          Save payee → category as a rule
+        </label>
+      </div>
     </div>
   );
 }
