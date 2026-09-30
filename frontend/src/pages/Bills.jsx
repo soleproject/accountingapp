@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -71,8 +71,11 @@ export default function Bills() {
     setView(v);
     try { localStorage.setItem("ap_aging_view", v); } catch { /* ignore */ }
   };
+  // Client-side text search — filters against number/vendor/status/amount.
+  const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
-    if (!outstanding && !overdue && !asOf && !bucket) return items;
+    const q = search.trim().toLowerCase();
+    if (!outstanding && !overdue && !asOf && !bucket && !q) return items;
     const today = new Date().toISOString().slice(0, 10);
     const daysLate = (due) => {
       if (!due) return -1;
@@ -98,9 +101,16 @@ export default function Bills() {
         const d = b.issue_date || b.date || "";
         if (d && d > asOf) return false;
       }
+      if (q) {
+        const hay = [
+          b.number, b.contact_name, b.vendor_name, b.status,
+          b.total, b.balance_due,
+        ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [items, outstanding, overdue, asOf, bucket]);
+  }, [items, outstanding, overdue, asOf, bucket, search]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
     p.delete("outstanding"); p.delete("overdue"); p.delete("as_of"); p.delete("bucket");
@@ -285,6 +295,33 @@ export default function Bills() {
       )}
 
       <div className="rounded-xl border bg-white overflow-hidden">
+        {/* Client-side search input — filters the bills list by number,
+             vendor, status, or amount. Kept inside the table container
+             so it visually anchors above the header row. */}
+        <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/40">
+          <div className="relative max-w-md">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search bills — number, vendor, status…"
+              className="w-full pl-8 pr-8 py-1.5 rounded-md border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="bills-search"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Clear search"
+                data-testid="bills-search-clear"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
         {(outstanding || overdue || asOf || bucket) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"

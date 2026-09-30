@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { useMoneyFmt, useDateFmt } from "@/lib/company";
 import { useCompany } from "@/lib/company";
 import { TID } from "@/constants/testIds";
-import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning, Clock, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Trash2, X, AlertTriangle, Pencil, Repeat, Check, Package, Sparkles, Send, Loader2, MailWarning, Clock, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { toast } from "sonner";
 import { useCreateListener, useActionListener } from "@/lib/createBus";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
@@ -49,6 +49,8 @@ export default function Invoices() {
   // Inline-edit state for invoice numbers on list rows.
   const [numEditId, setNumEditId] = useState(null);
   const [numEditVal, setNumEditVal] = useState("");
+  // Client-side text search — filters against number/customer/status/amount.
+  const [search, setSearch] = useState("");
   const commitNumberEdit = async (inv) => {
     const val = (numEditVal || "").trim();
     if (!val || val === inv.number) { setNumEditId(null); return; }
@@ -79,7 +81,8 @@ export default function Invoices() {
   const asOf = params.get("as_of") || "";
   const bucket = params.get("bucket") || "";
   const filtered = useMemo(() => {
-    if (!outstanding && !asOf && !overdueOnly && !bucket) return items;
+    const q = search.trim().toLowerCase();
+    if (!outstanding && !asOf && !overdueOnly && !bucket && !q) return items;
     const today = new Date().toISOString().slice(0, 10);
     const daysLate = (due) => {
       if (!due) return -1; // no due date → treat as "not yet due"
@@ -106,9 +109,16 @@ export default function Invoices() {
         const d = inv.issue_date || inv.date || "";
         if (d && d > asOf) return false;
       }
+      if (q) {
+        const hay = [
+          inv.number, inv.contact_name, inv.customer_name, inv.status,
+          inv.total, inv.balance_due,
+        ].map((v) => String(v ?? "").toLowerCase()).join(" ");
+        if (!hay.includes(q)) return false;
+      }
       return true;
     });
-  }, [items, outstanding, asOf, overdueOnly, bucket]);
+  }, [items, outstanding, asOf, overdueOnly, bucket, search]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
     p.delete("outstanding"); p.delete("as_of"); p.delete("overdue"); p.delete("bucket");
@@ -176,6 +186,33 @@ export default function Invoices() {
         />
       )}
       <div className="rounded-xl border bg-white overflow-hidden">
+        {/* Client-side search input — filters the invoices list by number,
+             customer, status, or amount. Kept inside the table container
+             so it visually anchors above the header row. */}
+        <div className="px-3 py-2 border-b border-slate-100 bg-slate-50/40">
+          <div className="relative max-w-md">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search invoices — number, customer, status…"
+              className="w-full pl-8 pr-8 py-1.5 rounded-md border border-slate-300 text-xs focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400 outline-none"
+              data-testid="invoices-search"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                aria-label="Clear search"
+                data-testid="invoices-search-clear"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+        </div>
         {(outstanding || asOf || overdueOnly || bucket) && (
           <div
             className="flex items-center justify-between px-3 py-2 bg-cyan-50 border-b border-cyan-100 text-xs text-cyan-900"
