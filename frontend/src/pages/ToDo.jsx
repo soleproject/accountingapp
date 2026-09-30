@@ -14,7 +14,6 @@ import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
 import CashFlowMonitorCard from "@/components/cockpit/CashFlowMonitorCard";
 import { Users, LayoutGrid, Sparkle, Grid3x3, CheckSquare, GraduationCap } from "lucide-react";
-import Todo2ViewToggle from "@/components/Todo2ViewToggle";
 
 import PendingReviewCard from "@/components/PendingReviewCard";
 
@@ -92,24 +91,19 @@ export default function ToDo() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-4" data-testid="todo-page">
+      {/* Dashboard-view pill group — mirrors /dashboard so the CPA can hop
+          between Classic / Firm / Business / Cockpit / Onboarding without
+          going through the sidebar. Right-aligned in its own row so this
+          page looks like another Dashboard tab. */}
+      <div className="flex justify-end items-center gap-2">
+        <CockpitViewPills />
+      </div>
       <div>
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
-              Accounting · To Do
-            </div>
-            <div className="text-2xl font-bold text-slate-900">
-              Your monthly items for {current?.name}
-            </div>
-          </div>
-          {/* Dashboard-view pill group — mirrors the one on /dashboard so
-              the CPA can hop between Classic / Firm / Business / Cockpit /
-              Onboarding without going through the sidebar. Cockpit is the
-              active state here. */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <CockpitViewPills />
-            <Todo2ViewToggle mode="page" returnPath="/accounting/todo" />
-          </div>
+        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
+          Accounting · To Do
+        </div>
+        <div className="text-2xl font-bold text-slate-900">
+          Your monthly items for {current?.name}
         </div>
         <p className="text-sm text-slate-500 mt-1">
           Everything on this page was assigned to you (or shared) at onboarding.
