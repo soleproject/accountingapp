@@ -1343,6 +1343,55 @@ export default function Sidebar({ collapsed, onToggle }) {
                 the CPA can jump between products without exiting cards
                 mode. In "full" the regular sidebar already exposes it
                 deeper in the tree so we skip the duplicate. */}
+            {inCardMode && !showCollapsed && (
+              <div className="relative mb-2" data-testid="sidebar-search">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
+                />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowDown") { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, searchHits.length - 1)); }
+                    else if (e.key === "ArrowUp") { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
+                    else if (e.key === "Enter" && searchHits.length > 0) { e.preventDefault(); gotoHit(searchHits[searchIdx]); }
+                    else if (e.key === "Escape") { e.preventDefault(); setSearchQ(""); e.currentTarget.blur(); }
+                  }}
+                  placeholder="Search — try “aging”, “tax”, “bills”"
+                  className="w-full pl-7 pr-2 py-1.5 rounded-md border border-slate-200 bg-white text-xs placeholder:text-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none"
+                  data-testid="sidebar-search-input"
+                />
+                {searchQ && (
+                  <div
+                    className="absolute left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
+                    data-testid="sidebar-search-results"
+                  >
+                    {searchHits.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-slate-500">No matches</div>
+                    )}
+                    {searchHits.map((hit, i) => (
+                      <button
+                        key={`${hit.to}-${hit.label}`}
+                        onClick={() => gotoHit(hit)}
+                        onMouseEnter={() => setSearchIdx(i)}
+                        className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 ${
+                          i === searchIdx ? "bg-slate-100" : "hover:bg-slate-50"
+                        }`}
+                        data-testid={`sidebar-search-result-${i}`}
+                      >
+                        <span className="truncate text-slate-800">{hit.label}</span>
+                        {hit.groupLabel && (
+                          <span className="text-[10px] text-slate-400 shrink-0">{hit.groupLabel}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {inCardMode && (
               <ModulesDropdown
                 activeKey={detectProduct(loc.pathname, loc.search)}
@@ -1365,59 +1414,6 @@ export default function Sidebar({ collapsed, onToggle }) {
           />
         ) : (
         <>
-        {/* Sidebar search — type-to-jump. Hidden in rail mode (no room
-             for a real input); Cmd/Ctrl+K auto-expands the rail via
-             focus and gives the user a text box. */}
-        {!showCollapsed && (
-          <div className="relative mb-2" data-testid="sidebar-search">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"
-            />
-            <input
-              ref={searchRef}
-              type="text"
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") { e.preventDefault(); setSearchIdx(i => Math.min(i + 1, searchHits.length - 1)); }
-                else if (e.key === "ArrowUp") { e.preventDefault(); setSearchIdx(i => Math.max(i - 1, 0)); }
-                else if (e.key === "Enter" && searchHits.length > 0) { e.preventDefault(); gotoHit(searchHits[searchIdx]); }
-                else if (e.key === "Escape") { e.preventDefault(); setSearchQ(""); e.currentTarget.blur(); }
-              }}
-              placeholder="Search — try “aging”, “tax”, “bills”"
-              className="w-full pl-7 pr-2 py-1.5 rounded-md border border-slate-200 bg-white text-xs placeholder:text-slate-400 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none"
-              data-testid="sidebar-search-input"
-            />
-            {searchQ && (
-              <div
-                className="absolute left-0 right-0 top-full mt-1 rounded-md border bg-white shadow-lg z-40 max-h-72 overflow-y-auto"
-                data-testid="sidebar-search-results"
-              >
-                {searchHits.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-slate-500">No matches</div>
-                )}
-                {searchHits.map((hit, i) => (
-                  <button
-                    key={`${hit.to}-${hit.label}`}
-                    onClick={() => gotoHit(hit)}
-                    onMouseEnter={() => setSearchIdx(i)}
-                    className={`w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 ${
-                      i === searchIdx ? "bg-slate-100" : "hover:bg-slate-50"
-                    }`}
-                    data-testid={`sidebar-search-result-${i}`}
-                  >
-                    <span className="truncate text-slate-800">{hit.label}</span>
-                    {hit.groupLabel && (
-                      <span className="text-[10px] text-slate-400 shrink-0">{hit.groupLabel}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Role-specific top links */}
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin", label: "Superadmin", icon: Shield }} />
