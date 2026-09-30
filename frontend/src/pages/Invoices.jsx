@@ -51,6 +51,16 @@ export default function Invoices() {
   const [numEditVal, setNumEditVal] = useState("");
   // Client-side text search — filters against number/customer/status/amount.
   const [search, setSearch] = useState("");
+  // Highlights ↔ A/R Aging ↔ Paid toggle — lifted here from ArAgingCard
+  // so the parent's `filtered` memo can react to Paid mode.
+  const [arView, setArView] = useState(() => {
+    try { return localStorage.getItem("ar_aging_view") || "highlights"; }
+    catch { return "highlights"; }
+  });
+  const setArViewPersist = (v) => {
+    setArView(v);
+    try { localStorage.setItem("ar_aging_view", v); } catch {}
+  };
   const commitNumberEdit = async (inv) => {
     const val = (numEditVal || "").trim();
     if (!val || val === inv.number) { setNumEditId(null); return; }
@@ -82,6 +92,20 @@ export default function Invoices() {
   const bucket = params.get("bucket") || "";
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    if (arView === "paid") {
+      // "Paid" mode — invoices already settled. Ignore aging/bucket/
+      // outstanding/overdue URL filters; still respect search text.
+      return items.filter(inv => {
+        const isPaid = (inv.status === "paid") || (Number(inv.balance_due) <= 0.005);
+        if (!isPaid) return false;
+        if (q) {
+          const hay = [inv.number, inv.contact_name, inv.customer_name, inv.status, inv.total, inv.balance_due]
+            .map((v) => String(v ?? "").toLowerCase()).join(" ");
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+    }
     if (!outstanding && !asOf && !overdueOnly && !bucket && !q) return items;
     const today = new Date().toISOString().slice(0, 10);
     const daysLate = (due) => {
@@ -118,7 +142,7 @@ export default function Invoices() {
       }
       return true;
     });
-  }, [items, outstanding, asOf, overdueOnly, bucket, search]);
+  }, [items, outstanding, asOf, overdueOnly, bucket, search, arView]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
     p.delete("outstanding"); p.delete("as_of"); p.delete("overdue"); p.delete("bucket");
@@ -177,6 +201,8 @@ export default function Invoices() {
           aging={aging}
           navigate={navigate}
           activeBucket={bucket}
+          view={arView}
+          setView={setArViewPersist}
           onBucketClick={(k) => {
             const p = new URLSearchParams(params);
             if (bucket === k) p.delete("bucket");
@@ -549,14 +575,19 @@ function InvoiceModal({ contacts, itemsCatalog, currentId, invoice, prefill, onC
  *   overdue           = 1_30 + 31_60 + 61_90 + over_90
  *   due within 30 days = the "current" bucket (not yet due, Net 30 default)
  */
-function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick }) {
+function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick, view, setView }) {
   const fmtMoney = useMoneyFmt();
-  const [view, setView] = useState(() => {
+  // View state now controlled by parent so its `filtered` memo can react
+  // to "paid" mode. Keep a local fallback for standalone use just in
+  // case, mirroring the persisted default.
+  const [localView, setLocalView] = useState(() => {
     try { return localStorage.getItem("ar_aging_view") || "highlights"; }
     catch { return "highlights"; }
   });
+  const effectiveView = view ?? localView;
   const setViewPersist = (v) => {
-    setView(v);
+    if (setView) return setView(v);
+    setLocalView(v);
     try { localStorage.setItem("ar_aging_view", v); } catch {}
   };
   const [aiOpen, setAiOpen] = useState(false);
@@ -571,36 +602,43 @@ function ArAgingCard({ aging, navigate, activeBucket = "", onBucketClick }) {
       <div className="flex items-center justify-between mb-3 flex-wrap gap-3">
         <div>
           <div className="font-heading font-semibold">
-            {view === "aging" ? "A/R Aging" : "Highlights"}
+            {effectiveView === "paid" ? "Paid" : effectiveView === "aging" ? "A/R Aging" : "Highlights"}
           </div>
           <div className="text-xs text-slate-500">
-            As of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> outstanding
+            {effectiveView === "paid"
+              ? <>Invoices already settled</>
+              : <>As of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> outstanding</>}
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {atRisk > 0 && view === "aging" && (
+          {atRisk > 0 && effectiveView === "aging" && (
             <div className="text-xs px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-700 flex items-center gap-1">
               <AlertTriangle size={12} />
               {fmtMoney(atRisk)} at collection risk
             </div>
           )}
-          {/* Toggle — Highlights on the left (default), A/R Aging on the right */}
+          {/* Toggle — Highlights / A/R Aging / Paid */}
           <div className="inline-flex rounded-md border overflow-hidden text-xs bg-slate-50" data-testid="ar-aging-toggle">
             <button
               onClick={() => setViewPersist("highlights")}
-              className={`px-3 py-1.5 ${view === "highlights" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+              className={`px-3 py-1.5 ${effectiveView === "highlights" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
               data-testid="ar-aging-toggle-highlights"
             >Highlights</button>
             <button
               onClick={() => setViewPersist("aging")}
-              className={`px-3 py-1.5 ${view === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
+              className={`px-3 py-1.5 ${effectiveView === "aging" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-white"}`}
               data-testid="ar-aging-toggle-aging"
             >A/R Aging</button>
+            <button
+              onClick={() => setViewPersist("paid")}
+              className={`px-3 py-1.5 ${effectiveView === "paid" ? "bg-emerald-600 text-white" : "text-slate-600 hover:bg-white"}`}
+              data-testid="ar-aging-toggle-paid"
+            >Paid</button>
           </div>
         </div>
       </div>
 
-      {view === "aging" ? (
+      {effectiveView === "paid" ? null : effectiveView === "aging" ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
             {BUCKETS.map(b => {

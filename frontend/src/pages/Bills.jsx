@@ -75,6 +75,20 @@ export default function Bills() {
   const [search, setSearch] = useState("");
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    if (view === "paid") {
+      // "Paid" mode — bills fully settled. Ignore aging/bucket/overdue
+      // URL filters; still respect the search text.
+      return items.filter(b => {
+        const isPaid = (b.status === "paid") || (Number(b.balance_due) <= 0.005);
+        if (!isPaid) return false;
+        if (q) {
+          const hay = [b.number, b.contact_name, b.vendor_name, b.status, b.total, b.balance_due]
+            .map((v) => String(v ?? "").toLowerCase()).join(" ");
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      });
+    }
     if (!outstanding && !overdue && !asOf && !bucket && !q) return items;
     const today = new Date().toISOString().slice(0, 10);
     const daysLate = (due) => {
@@ -110,7 +124,7 @@ export default function Bills() {
       }
       return true;
     });
-  }, [items, outstanding, overdue, asOf, bucket, search]);
+  }, [items, outstanding, overdue, asOf, bucket, search, view]);
   const clearFilters = () => {
     const p = new URLSearchParams(params);
     p.delete("outstanding"); p.delete("overdue"); p.delete("as_of"); p.delete("bucket");
@@ -170,10 +184,12 @@ export default function Bills() {
           <div className="flex items-center justify-between mb-3">
             <div>
               <div className="font-heading font-semibold">
-                {view === "highlights" ? "Highlights" : "A/P Aging"}
+                {view === "paid" ? "Paid" : view === "highlights" ? "Highlights" : "A/P Aging"}
               </div>
               <div className="text-xs text-slate-500">
-                {view === "highlights"
+                {view === "paid"
+                  ? <>Bills already settled · <span className="font-mono-num font-semibold text-slate-800">{filtered.length}</span> shown</>
+                  : view === "highlights"
                   ? <>As of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> outstanding</>
                   : <>Outstanding payables as of {aging.as_of} · <span className="font-mono-num font-semibold text-slate-800">{fmtMoney(aging.total)}</span> total</>}
               </div>
@@ -185,9 +201,11 @@ export default function Bills() {
                   {fmtMoney(aging.buckets["61_90"] + aging.buckets["over_90"])} severely late
                 </div>
               )}
-              {/* Highlights ↔ A/P Aging toggle — mirrors Invoices' A/R
-                  Aging toggle so bills has feature-parity. Persisted to
-                  localStorage `ap_aging_view`. */}
+              {/* Highlights ↔ A/P Aging ↔ Paid toggle — mirrors Invoices'
+                  A/R Aging toggle so bills has feature-parity. Persisted
+                  to localStorage `ap_aging_view`. Selecting Paid filters
+                  the list to bills with status=paid / balance_due=0 and
+                  hides the aging widget body. */}
               <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5" data-testid="ap-aging-toggle">
                 <button
                   type="button"
@@ -208,6 +226,16 @@ export default function Bills() {
                   data-testid="ap-aging-toggle-aging"
                 >
                   A/P Aging
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewPersist("paid")}
+                  className={`text-xs font-semibold px-2.5 py-1 rounded ${
+                    view === "paid" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"
+                  }`}
+                  data-testid="ap-aging-toggle-paid"
+                >
+                  Paid
                 </button>
               </div>
             </div>
