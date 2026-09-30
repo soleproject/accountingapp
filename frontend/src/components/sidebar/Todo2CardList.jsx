@@ -231,7 +231,13 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   const isFirmUser = canUseCockpit(user);
   const isSuperadmin = (user?.role || "").toLowerCase() === "superadmin";
   const isFirmBooks = current?.is_firm_books === true;
-  const clientAreaHeader = isFirmBooks ? "Firm Books" : "Client Area";
+  // Section-2 header label:
+  //   • Firm user on firm's own books  → "Firm Books"
+  //   • Firm user on a client company  → "Client Area"
+  //   • Client-role user (their books) → "Your Books"
+  const clientAreaHeader = isFirmUser
+    ? (isFirmBooks ? "Firm Books" : "Client Area")
+    : "Your Books";
   // Section-1 flavor: superadmins get a "Superadmin" header + platform
   // admin links; every other firm user gets the standard "Professional"
   // header with Today / Clients / Client Cockpit.
@@ -486,12 +492,12 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 })}
               </>
             )}
-            {/* Section header above the accounting quick-links. Reads
-                "Firm Books" when the pro is looking at their own firm
-                (is_firm_books=true) and "Client Area" otherwise. Only
-                shown to firm users (pro/admin/partner/superadmin) so
-                the client-owner view stays clean. Clickable to collapse. */}
-            {isFirmUser && (
+            {/* Section header above the accounting quick-links.
+                Reads "Firm Books" / "Client Area" for firm users based
+                on which company they're viewing, and "Your Books" for
+                the client-role owner viewing their own company. Always
+                shown so every user gets a visual anchor. */}
+            {showQuickLinks && (
               <button
                 type="button"
                 onClick={() => toggleCollapse("client", collapsedClient, setCollapsedClient)}
