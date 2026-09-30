@@ -630,7 +630,7 @@ function AccountingAccordion({ navigate, activePath }) {
               return (
                 <div
                   key={`hdr-${l.label}-${idx}`}
-                  className={`text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 pb-1 ${
+                  className={`text-[10px] uppercase tracking-widest font-semibold text-slate-400 px-3 pb-1 border-b border-slate-200 mb-1 ${
                     idx === 0 ? "pt-1" : "pt-3"
                   }`}
                   data-testid={`sidebar-todo2-accounting-header-${l.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
