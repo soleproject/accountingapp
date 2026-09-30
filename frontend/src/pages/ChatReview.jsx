@@ -3796,8 +3796,14 @@ function ChatBox({ text, setText, onSend, busy, placeholder, compact, rightSlot 
         </div>
       )}
       <div className={
-        "flex items-center gap-2 border rounded-lg bg-white focus-within:ring-2 focus-within:ring-indigo-200 " +
-        (micActive ? "border-rose-300 ring-1 ring-rose-200" : "border-slate-300")
+        // Blue glow (idle) + slightly stronger blue ring on focus so
+        // the chat box visually invites the user to talk. When the
+        // mic is recording we swap the whole glow to rose so the
+        // "hot" state remains unambiguous.
+        "flex items-center gap-2 border rounded-lg bg-white transition-shadow focus-within:ring-2 focus-within:ring-blue-400 focus-within:shadow-[0_0_16px_2px_rgba(59,130,246,0.35)] " +
+        (micActive
+          ? "border-rose-300 ring-1 ring-rose-200 shadow-[0_0_12px_2px_rgba(244,63,94,0.3)]"
+          : "border-blue-300 ring-2 ring-blue-300/50 shadow-[0_0_12px_2px_rgba(59,130,246,0.28)]")
       }>
         <input
           type="text"
