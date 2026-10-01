@@ -235,7 +235,8 @@ async def cockpit_scheduled_qc(
     """
     accessible = await require_firm_or_pro(user)
     if not accessible:
-        return {"scheduled": [], "sent_awaiting": [], "last_completed": []}
+        return {"scheduled": [], "missed": [], "sent_awaiting": [],
+                "expired_no_response": [], "last_completed": []}
     now = datetime.now(timezone.utc)
 
     co_names: dict[str, str] = {}
@@ -245,19 +246,58 @@ async def cockpit_scheduled_qc(
         co_names[c["id"]] = c.get("name") or "Untitled"
 
     scheduled: list[dict] = []
+    missed: list[dict] = []
     async for b in db.client_review_batches.find({
         "company_id": {"$in": accessible},
         "status": "scheduled",
     }).sort("scheduled_for", 1).limit(200):
-        scheduled.append({
+        engaged = (int(b.get("answer_count") or 0) + int(b.get("defer_count") or 0)) > 0
+        sf = b.get("scheduled_for")
+        try:
+            sf_dt = datetime.fromisoformat(str(sf).replace("Z", "+00:00"))
+            if sf_dt.tzinfo is None:
+                sf_dt = sf_dt.replace(tzinfo=timezone.utc)
+            days_past = (now - sf_dt).days if sf_dt < now else -1
+        except Exception:  # noqa: BLE001
+            days_past = -1
+        row = {
+            "batch_id":     b.get("id"),
+            "client_token": b.get("client_token"),
+            "company_id":   b.get("company_id"),
+            "company_name": co_names.get(b.get("company_id") or "", "—"),
+            "client_email": b.get("client_email"),
+            "scheduled_for": sf,
+            "item_count":   len(b.get("items") or []),
+            "note":         b.get("note") or "",
+            "answered":     int(b.get("answer_count") or 0),
+            "days_past":    max(0, days_past),
+            "reminder_sent": bool(b.get("reminder_sent_at")),
+            "nudge_sent":    bool(b.get("nudge_sent_at")),
+        }
+        if days_past >= 0 and not engaged:
+            missed.append(row)
+        else:
+            scheduled.append(row)
+    missed.sort(key=lambda r: -r["days_past"])
+
+    # Ghosted — link lapsed with zero answers in the last 60 days.
+    expired_no_response: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id":   {"$in": accessible},
+        "status":       "expired",
+        "expired_at":   {"$gte": (now - timedelta(days=60)).isoformat()},
+        "$or": [{"answer_count": {"$in": [None, 0]}}],
+    }).sort("expired_at", -1).limit(100):
+        expired_no_response.append({
             "batch_id":     b.get("id"),
             "client_token": b.get("client_token"),
             "company_id":   b.get("company_id"),
             "company_name": co_names.get(b.get("company_id") or "", "—"),
             "client_email": b.get("client_email"),
             "scheduled_for": b.get("scheduled_for"),
+            "email_sent_at": b.get("email_sent_at"),
+            "expired_at":   b.get("expired_at"),
             "item_count":   len(b.get("items") or []),
-            "note":         b.get("note") or "",
         })
 
     sent_awaiting: list[dict] = []
@@ -356,7 +396,9 @@ async def cockpit_scheduled_qc(
 
     return {
         "scheduled":      scheduled,
+        "missed":         missed,
         "sent_awaiting":  sent_awaiting,
+        "expired_no_response": expired_no_response,
         "last_completed": last_completed,
     }
 

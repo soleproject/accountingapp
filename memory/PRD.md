@@ -624,3 +624,7 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-01 — Inline QC viewer in In Progress
 - Every QC-backed row (Messages, AI Email Questions, Scheduled / Awaiting / Engagement) has an "Open QC" button that loads the client Quick Check-in inline (iframe to /client-review/{token}) under the tab strip; tabs stay clickable and switching tabs returns to the list. "Open in new tab" link included.
 - Backend scheduled-qc + today-v4 now return client_token on batch rows.
+
+## 2026-10-01 — Scheduled QC pills
+- Scheduled QC tab now has Scheduled / Missed / No Response pills. Scheduled = upcoming + emailed-in-progress; Missed = scheduled_for passed with zero engagement (shows reminded/nudged); No Response = emailed with 0 answers + expired-unanswered (60d) + never-completed clients.
+- Backend scheduled-qc returns `missed` and `expired_no_response` arrays.

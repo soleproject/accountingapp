@@ -1410,8 +1410,8 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   useEffect(() => {
     if (tab === "scheduled" && scheduledQc === null) {
       api.get("/cockpit/scheduled-qc")
-        .then(r => setScheduledQc(r.data || { scheduled: [], sent_awaiting: [], last_completed: [] }))
-        .catch(() => setScheduledQc({ scheduled: [], sent_awaiting: [], last_completed: [] }));
+        .then(r => setScheduledQc(r.data || { scheduled: [], missed: [], sent_awaiting: [], expired_no_response: [], last_completed: [] }))
+        .catch(() => setScheduledQc({ scheduled: [], missed: [], sent_awaiting: [], expired_no_response: [], last_completed: [] }));
     }
     if (tab === "autorecon" && autoRecon === null) {
       api.get("/cockpit/pending-reconciliations")
@@ -1429,7 +1429,9 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
     scheduledQc:   scheduledQc ? {
       ...scheduledQc,
       scheduled:      byCo(scheduledQc.scheduled),
+      missed:         byCo(scheduledQc.missed || []),
       sent_awaiting:  byCo(scheduledQc.sent_awaiting),
+      expired_no_response: byCo(scheduledQc.expired_no_response || []),
       last_completed: byCo(scheduledQc.last_completed),
     } : null,
     autoRecon: autoRecon ? { ...autoRecon, companies: byCo(autoRecon.companies) } : null,
@@ -1441,7 +1443,8 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
     const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
     const cockpit   = filtered.assistant.length;
     const scheduled = filtered.scheduledQc
-      ? (filtered.scheduledQc.scheduled.length + filtered.scheduledQc.sent_awaiting.length)
+      ? (filtered.scheduledQc.scheduled.length + (filtered.scheduledQc.missed || []).length
+         + filtered.scheduledQc.sent_awaiting.length + (filtered.scheduledQc.expired_no_response || []).length)
       : null;
     const autorecon = filtered.autoRecon
       ? (filtered.autoRecon.companies || []).reduce(
@@ -1640,117 +1643,151 @@ function _fmtRelDays(iso) {
   } catch { return "—"; }
 }
 
+const QC_PILLS = [
+  { key: "scheduled",   label: "Scheduled" },
+  { key: "missed",      label: "Missed" },
+  { key: "no_response", label: "No Response" },
+];
+
+// One row shared by all three Scheduled QC pills: company / email line on
+// the left, a status string on the right, and the inline Open QC button.
+function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta }) {
+  return (
+    <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
+      <div className="min-w-0">
+        <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
+        <div className="text-[11px] text-slate-500 truncate">{sub}</div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <div className={`text-[11px] font-medium ${statusClass}`}>{status}</div>
+        <OpenQcButton token={r.client_token} testid={`${testid}-open`}
+          onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
+                                   client_email: r.client_email, meta })} />
+      </div>
+    </li>
+  );
+}
+
+function QcSection({ title, count, empty, children }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
+        {title} · {count}
+      </div>
+      {count === 0
+        ? <div className="text-[12px] text-slate-400">{empty}</div>
+        : <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">{children}</ul>}
+    </div>
+  );
+}
+
 function InProgressScheduledQc({ data, onNav, onOpenQc }) {
+  const [pill, setPill] = useState("scheduled");
   if (!data) {
     return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
   }
-  const { scheduled = [], sent_awaiting = [], last_completed = [] } = data;
-  const empty = !scheduled.length && !sent_awaiting.length && !last_completed.length;
-  if (empty) return <_EmptyTab text="No Quick Check-ins in flight." />;
+  const {
+    scheduled = [], missed = [], sent_awaiting = [],
+    expired_no_response = [], last_completed = [],
+  } = data;
+  const inFlight   = sent_awaiting.filter(b => (b.answered || 0) > 0);
+  const noAnswer   = sent_awaiting.filter(b => !(b.answered || 0));
+  const neverDone  = last_completed.filter(r => r.never);
+  const pillCounts = {
+    scheduled:   scheduled.length + inFlight.length,
+    missed:      missed.length,
+    no_response: noAnswer.length + expired_no_response.length,
+  };
+  const items = (arr) => arr.slice(0, 20);
 
   return (
-    <div className="space-y-5">
-      {/* Upcoming scheduled */}
-      <div>
-        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
-          Scheduled · {scheduled.length}
-        </div>
-        {scheduled.length === 0 ? (
-          <div className="text-[12px] text-slate-400">Nothing scheduled.</div>
-        ) : (
-          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
-            {scheduled.slice(0, 12).map(b => (
-              <li key={b.batch_id} className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
-                  data-testid={`v7-ip-sched-${b.batch_id}`}>
-                <div className="min-w-0">
-                  <div className="text-[13px] text-slate-900 truncate">{b.company_name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {b.client_email || "—"} · {b.item_count} item{b.item_count === 1 ? "" : "s"}
-                    {b.note ? ` · ${b.note}` : ""}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className="text-[11px] text-indigo-700 font-medium">
-                    Sends {_fmtDate(b.scheduled_for)}
-                  </div>
-                  <OpenQcButton token={b.client_token} testid={`v7-ip-sched-open-${b.batch_id}`}
-                    onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name,
-                                             client_email: b.client_email, meta: `${b.item_count} items · sends ${_fmtDate(b.scheduled_for)}` })} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-qc-pills">
+        {QC_PILLS.map(p => {
+          const on = pill === p.key;
+          const n  = pillCounts[p.key];
+          return (
+            <button key={p.key} type="button" onClick={() => setPill(p.key)}
+                    data-testid={`v7-ip-qc-pill-${p.key}`}
+                    className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+                      on ? "bg-indigo-600 border-indigo-600 text-white"
+                         : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}>
+              {p.label}
+              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
+                on ? "bg-white/20 text-white" : p.key === "scheduled" ? "bg-slate-100 text-slate-600"
+                   : n > 0 ? (p.key === "missed" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700")
+                   : "bg-slate-100 text-slate-500"
+              }`}>{n}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Emailed · awaiting client response */}
-      <div>
-        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
-          Emailed · awaiting response · {sent_awaiting.length}
-        </div>
-        {sent_awaiting.length === 0 ? (
-          <div className="text-[12px] text-slate-400">Every emailed check-in has been answered.</div>
-        ) : (
-          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
-            {sent_awaiting.slice(0, 12).map(b => (
-              <li key={b.batch_id} className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
-                  data-testid={`v7-ip-await-${b.batch_id}`}>
-                <div className="min-w-0">
-                  <div className="text-[13px] text-slate-900 truncate">{b.company_name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {b.client_email || "—"} · {b.answered}/{b.item_count} answered
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className={`text-[11px] font-medium ${
-                    b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"
-                  }`}>
-                    Sent {_fmtRelDays(b.email_sent_at)}
-                  </div>
-                  <OpenQcButton token={b.client_token} testid={`v7-ip-await-open-${b.batch_id}`}
-                    onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name,
-                                             client_email: b.client_email, meta: `${b.answered}/${b.item_count} answered` })} />
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      {pill === "scheduled" && (<>
+        <QcSection title="Upcoming" count={scheduled.length} empty="Nothing scheduled.">
+          {items(scheduled).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-sched-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"}${b.note ? ` · ${b.note}` : ""}`}
+              status={`Sends ${_fmtDate(b.scheduled_for)}`} statusClass="text-indigo-700"
+              meta={`${b.item_count} items · sends ${_fmtDate(b.scheduled_for)}`} />
+          ))}
+        </QcSection>
+        <QcSection title="Emailed · in progress" count={inFlight.length} empty="No partially answered check-ins.">
+          {items(inFlight).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-await-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${b.answered}/${b.item_count} answered`}
+              status={`Sent ${_fmtRelDays(b.email_sent_at)}`} statusClass="text-emerald-700"
+              meta={`${b.answered}/${b.item_count} answered`} />
+          ))}
+        </QcSection>
+      </>)}
 
-      {/* Last completed roster */}
-      <div>
-        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
-          Client engagement · {last_completed.length}
-        </div>
-        {last_completed.length === 0 ? (
-          <div className="text-[12px] text-slate-400">No check-ins completed yet.</div>
-        ) : (
-          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
-            {last_completed.slice(0, 20).map((r, i) => (
-              <li key={`${r.company_id}-${r.client_email}-${i}`}
-                  className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
-                  data-testid={`v7-ip-engagement-${i}`}>
-                <div className="min-w-0">
-                  <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">{r.client_email || "—"}</div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <div className={`text-[11px] font-medium ${
-                    r.never ? "text-rose-600" : "text-emerald-700"
-                  }`}>
-                    {r.never
-                      ? `Never completed · emailed ${_fmtRelDays(r.first_sent)}`
-                      : `Last done ${_fmtRelDays(r.completed_at)}`}
-                  </div>
-                  <OpenQcButton token={r.client_token} testid={`v7-ip-engagement-open-${i}`}
-                    onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
-                                             client_email: r.client_email, meta: `last completed ${_fmtRelDays(r.completed_at)}` })} />
-                </div>
-              </li>
+      {pill === "missed" && (
+        <QcSection title="Scheduled time passed · no engagement" count={missed.length}
+                   empty="No missed check-ins — every scheduled slot was kept.">
+          {items(missed).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-missed-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"} · was ${_fmtDate(b.scheduled_for)}${
+                b.nudge_sent ? " · nudged" : b.reminder_sent ? " · reminded" : ""}`}
+              status={b.days_past === 0 ? "Missed today" : `Missed · ${b.days_past}d ago`}
+              statusClass={b.days_past >= 3 ? "text-rose-600" : "text-amber-600"}
+              meta={`missed ${_fmtDate(b.scheduled_for)}`} />
+          ))}
+        </QcSection>
+      )}
+
+      {pill === "no_response" && (<>
+        <QcSection title="Emailed · nothing answered" count={noAnswer.length}
+                   empty="Every emailed check-in has at least one answer.">
+          {items(noAnswer).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-noresp-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · 0/${b.item_count} answered`}
+              status={`Sent ${_fmtRelDays(b.email_sent_at)}`}
+              statusClass={b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"}
+              meta={`0/${b.item_count} answered`} />
+          ))}
+        </QcSection>
+        <QcSection title="Link expired · never opened" count={expired_no_response.length}
+                   empty="No check-ins have lapsed unanswered in the last 60 days.">
+          {items(expired_no_response).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-expired-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"} · sent ${_fmtDate(b.email_sent_at || b.scheduled_for)}`}
+              status={`Expired ${_fmtRelDays(b.expired_at)}`} statusClass="text-rose-600"
+              meta={`expired ${_fmtRelDays(b.expired_at)}`} />
+          ))}
+        </QcSection>
+        {neverDone.length > 0 && (
+          <QcSection title="Clients who have never completed a check-in" count={neverDone.length} empty="">
+            {items(neverDone).map((r, i) => (
+              <QcRow key={`${r.company_id}-${r.client_email}-${i}`} r={r} testid={`v7-ip-engagement-${i}`} onOpenQc={onOpenQc}
+                sub={r.client_email || "—"}
+                status={`First emailed ${_fmtRelDays(r.first_sent)}`} statusClass="text-rose-600"
+                meta="never completed" />
             ))}
-          </ul>
+          </QcSection>
         )}
-      </div>
+      </>)}
     </div>
   );
 }
