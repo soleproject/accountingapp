@@ -18,8 +18,9 @@ import logging
 import os
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Query
 
+from auth import require_role
 from db import db
 
 log = logging.getLogger("axiom.cron.auto_finalize")
@@ -82,7 +83,10 @@ async def _run_sweep() -> dict:
 
     stats["elapsed_ms"] = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
     log.info("auto_finalize sweep done: %s", stats)
-    # Persist a tiny breadcrumb so an on-call pro can inspect last-run status.
+    # Persist two breadcrumbs so an on-call pro can inspect last-run status.
+    # 1) `cron_runs` — latest run per cron name (upsert, one doc).
+    # 2) `cron_run_history` — append-only log (last ~90 days worth) so the
+    #    admin page can show a run-timeline, not just the most recent state.
     try:
         await db.cron_runs.update_one(
             {"name": "auto_finalize_reconciliations"},
@@ -93,6 +97,24 @@ async def _run_sweep() -> dict:
             }},
             upsert=True,
         )
+        await db.cron_run_history.insert_one({
+            "name": "auto_finalize_reconciliations",
+            "run_at": now_dt.isoformat(),
+            "stats": stats,
+        })
+        # Trim history to last 500 docs per cron name — plenty for an audit
+        # trail without unbounded growth.
+        total = await db.cron_run_history.count_documents(
+            {"name": "auto_finalize_reconciliations"},
+        )
+        if total > 500:
+            # Drop the oldest (total - 500) rows.
+            to_drop = total - 500
+            async for doc in db.cron_run_history.find(
+                {"name": "auto_finalize_reconciliations"},
+                {"_id": 1},
+            ).sort("run_at", 1).limit(to_drop):
+                await db.cron_run_history.delete_one({"_id": doc["_id"]})
     except Exception:  # noqa: BLE001
         pass
     return stats
@@ -127,3 +149,36 @@ async def auto_finalize_cron(
     # happens. We only need to ack the dispatcher.
     asyncio.create_task(_run_sweep())
     return {"accepted": True, "run_id": x_webhook_id or ""}
+
+
+# --- Admin surface: last-run status + history, and a manual trigger ----
+@router.get("/runs", tags=["admin"])
+async def list_cron_runs(
+    limit: int = Query(50, ge=1, le=500),
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Return latest state per cron + recent run history. Backs the
+    admin Cron Runs panel so pros can see 'last sweep ran at 2:15am ·
+    23 companies, 7 finalized, 2 errors' at a glance.
+    """
+    latest = []
+    async for d in db.cron_runs.find({}, {"_id": 0}).sort("last_run_at", -1):
+        latest.append(d)
+    history = []
+    async for d in db.cron_run_history.find({}, {"_id": 0}).sort("run_at", -1).limit(limit):
+        history.append(d)
+    return {"latest": latest, "history": history}
+
+
+@router.post("/runs/trigger", tags=["admin"])
+async def trigger_cron_now(
+    user: dict = Depends(require_role("superadmin")),
+):
+    """Manually fire the auto-finalize sweep right now (admin-only).
+    Same backgrounded worker as the nightly cron — handy for ad-hoc
+    runs and for confirming the sweep is working without waiting
+    until 02:15 UTC.
+    """
+    asyncio.create_task(_run_sweep())
+    return {"accepted": True, "triggered_at": datetime.now(timezone.utc).isoformat()}
+

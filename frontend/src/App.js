@@ -72,6 +72,7 @@ import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
 import AdminFeedback from "@/pages/AdminFeedback";
 import AdminLeads from "@/pages/AdminLeads";
+import AdminCronRuns from "@/pages/AdminCronRuns";
 import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
@@ -243,6 +244,7 @@ function App() {
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/leads" element={<AdminLeads />} />
+              <Route path="/admin/cron-runs" element={<AdminCronRuns />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
