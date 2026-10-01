@@ -36,7 +36,18 @@ import {
   // Extra icons (Shield/Briefcase/Rocket) power the Superadmin-flavor
   // of that same section — see isSuperadmin branch below.
   Sunrise, Activity, Shield, Briefcase, Rocket,
+  MoreHorizontal, Share2,
 } from "lucide-react";
+
+// "More" — sits directly under the "All" accordion. Mirrors the Full
+// sidebar's bottom group (My Businesses, Billing, Refer & earn,
+// Settings) and shares its persisted open-state key.
+const MORE_LINKS = [
+  { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
+  { to: "/billing",       label: "Billing",       icon: CreditCard },
+  { to: "/share",         label: "Refer & earn",  icon: Share2 },
+  { to: "/settings",      label: "Settings",      icon: Settings2 },
+];
 
 // Sidebar-card label overrides — shorter, action-oriented names that
 // fit a rail-width column. Keep the mapping tight so a new catalog
@@ -532,6 +543,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                   );
                 })}
                 <AccountingAccordion navigate={navigate} activePath={location.pathname} />
+                <MoreAccordion navigate={navigate} activePath={location.pathname} />
               </>
             )}
           </div>
@@ -698,6 +710,64 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
 // sidebar and also supports one-level-deep nested subgroups
 // (Sales & Payments, Purchases) via `subGroup: true` entries in
 // ACCOUNTING_LINKS.
+function MoreAccordion({ navigate, activePath }) {
+  const anyChildActive = MORE_LINKS.some((l) => activePath.startsWith(l.to));
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem("sb_more_open") === "1"; }
+    catch (_) { return false; }
+  });
+  useEffect(() => { if (anyChildActive) setOpen(true); }, [anyChildActive]);
+  const toggle = () => setOpen((v) => {
+    const nv = !v;
+    try { localStorage.setItem("sb_more_open", nv ? "1" : "0"); } catch (_) { /* best-effort */ }
+    return nv;
+  });
+  return (
+    <div className="mt-0.5" data-testid="sidebar-todo2-more-accordion">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
+          anyChildActive && !open
+            ? "bg-slate-100 text-slate-900 font-medium"
+            : "text-slate-700 hover:bg-slate-100"
+        }`}
+        data-testid="sidebar-todo2-more-toggle"
+      >
+        <MoreHorizontal size={16} className="text-slate-500" strokeWidth={2} />
+        <span className="truncate flex-1">More</span>
+        <ChevronDown
+          size={14}
+          className={`text-slate-400 transition-transform ${open ? "rotate-0" : "-rotate-90"}`}
+        />
+      </button>
+      {open && (
+        <div className="pl-4 mt-0.5" data-testid="sidebar-todo2-more-panel">
+          {MORE_LINKS.map((l) => {
+            const active = activePath.startsWith(l.to);
+            const Icon = l.icon;
+            return (
+              <button
+                key={l.to}
+                type="button"
+                onClick={() => navigate(l.to)}
+                className={`w-full flex items-center gap-3 rounded-md px-3 py-1.5 text-[13px] text-left transition-colors ${
+                  active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
+                }`}
+                data-testid={`sidebar-todo2-more-${l.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+              >
+                <Icon size={14} className="text-slate-500" strokeWidth={2} />
+                <span className="truncate">{l.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AccountingAccordion({ navigate, activePath }) {
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem("axiom_todo2_accounting_open") === "1"; }

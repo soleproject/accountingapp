@@ -648,3 +648,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Answered by pro attribution
 - Inline viewer / Messages nav open QC with ?via=pro; ClientReviewPage then POSTs /{token}/items/{id}/attribute with the pro JWT after each markCompleted → items.$.answered_by {user_id,name,email,role,via,at}, batch.pro_participants, audit_events `client_review.item_answered_by_pro`. Header chips: "answering as pro", "answered by <name>" (client sees "by your bookkeeper"). Cockpit rows show "N by <Pro>".
+
+## 2026-10-01 — More dropdown under All (card-mode sidebar)
+- Todo2CardList: added MoreAccordion (My Businesses, Billing, Refer & earn, Settings) directly below the All accordion; shares sb_more_open key with Full-mode sidebar.
