@@ -2,18 +2,20 @@ import CompanySettings from "@/pages/CompanySettings";
 
 /**
  * AccountingSettings — /accounting/settings (Round 7.7, Feb 2026).
- * Accounting-scoped sub-page of Company Settings. Renders only the
- * five tabs relevant to bookkeeping workflows: Bookkeeping,
- * QuickBooks, Advanced Features, Report Styling, and Tours & Tips.
- * The User Settings, Profile, and Danger Zone tabs stay on the
- * platform-wide /settings page.
+ * Company-scoped settings. Holds every per-company tab: Bookkeeping,
+ * Profile, Advanced Features, Report Styling, Tours & Tips,
+ * QuickBooks, Notifications & Mobile App, Danger Zone. Only the
+ * per-user "User Settings" tab stays on the platform-wide /settings.
  */
 const ACCOUNTING_TABS = [
   "bookkeeping",
-  "quickbooks",
+  "profile",
   "advanced",
   "report_style",
   "tours",
+  "quickbooks",
+  "notifications",
+  "danger",
 ];
 
 export default function AccountingSettings() {

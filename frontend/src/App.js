@@ -293,7 +293,7 @@ function App() {
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/settings/notifications" element={<NotificationSettings />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
-              <Route path="/settings" element={<CompanySettings allowedTabs={["user", "profile", "danger"]} />} />
+              <Route path="/settings" element={<CompanySettings allowedTabs={["user"]} />} />
               <Route path="/completed-actions" element={<CompletedActions />} />
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />

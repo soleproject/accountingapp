@@ -651,3 +651,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — More dropdown under All (card-mode sidebar)
 - Todo2CardList: added MoreAccordion (My Businesses, Billing, Refer & earn, Settings) directly below the All accordion; shares sb_more_open key with Full-mode sidebar.
+
+## 2026-10-01 — Settings consolidation
+- Profile, Danger Zone, Notifications & Mobile App moved from /settings to /accounting/settings (AccountingSettings ACCOUNTING_TABS). /settings now shows only User Settings. Notifications button gated by allowedTabs "notifications" pseudo-key.
