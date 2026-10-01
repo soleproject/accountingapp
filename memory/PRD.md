@@ -654,3 +654,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Settings consolidation
 - Profile, Danger Zone, Notifications & Mobile App moved from /settings to /accounting/settings (AccountingSettings ACCOUNTING_TABS). /settings now shows only User Settings. Notifications button gated by allowedTabs "notifications" pseudo-key.
+
+## 2026-10-01 — Email log under Audit log
+- Full sidebar: Email log moved into the Accounting group directly after Audit log (removed standalone entry). Card-mode All list reordered to match.

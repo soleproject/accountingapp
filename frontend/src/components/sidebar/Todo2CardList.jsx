@@ -228,8 +228,8 @@ const ACCOUNTING_LINKS = [
   { header: true, label: "Business & Data" },
   { to: "/contacts",                      label: "Contacts",           icon: Users },
   { subGroup: true, key: "connect",       label: "Connect & Import",   icon: Landmark, items: CONNECT_LINKS },
-  { to: "/communications-audit",          label: "Email log",          icon: Inbox },
   { to: "/audit-log",                     label: "Audit log",          icon: History },
+  { to: "/communications-audit",          label: "Email log",          icon: Inbox },
   { to: "/accounting/settings",           label: "Accounting settings",icon: Settings2 },
 ];
 

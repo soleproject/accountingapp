@@ -310,6 +310,8 @@ const GROUPS = [
       // Audit log sits directly under Close the Books so the audit trail
       // lives inside the Accounting group next to the workflows it records.
       { to: "/audit-log", label: "Audit log", icon: History },
+      // Email log (outbound email audit) sits directly under Audit log.
+      { to: "/communications-audit", label: "Email log", icon: Inbox },
     ],
   },
 ];
@@ -1597,14 +1599,6 @@ export default function Sidebar({ collapsed, onToggle }) {
             <Item item={{ to: "/compliance", label: "Compliance", icon: ShieldCheck, matchPath: "/compliance" }} />
             {/* Grouped: Accounting */}
             <Group group={GROUPS[3]} />
-
-            {/* Communications kept discoverable (previously top-level).
-                Note: this entry points at the OUTBOUND email audit log
-                (kept for parity with the legacy sidebar surface). The
-                Communications inbox for client-review transcripts
-                lives at `/communications` and is rendered as a
-                top-level firm nav item above (see `canUseCockpit`). */}
-            <Item item={{ to: "/communications-audit", label: "Email log", icon: Inbox }} />
 
             {/* Grouped: Banking — moved BELOW Communications so daily
                 workflows (transactions, reports, comms) sit at the top of
