@@ -62,13 +62,23 @@ export default function Reconciliation() {
   }, [monthFilter]);
 
   // Hydrate the start-new form + open it once when arriving with ?month=.
+  // When landing from the Cockpit with ?month=YYYY-MM we show the roster
+  // ONLY — the Start form and history table stay hidden until the pro
+  // picks an account via a Reconcile button on the roster. That turns
+  // the page into a clean two-step: pick an account → reconcile it.
   useEffect(() => {
     if (!monthBounds) return;
     setPeriodStart(monthBounds.start);
     setPeriodEnd(monthBounds.end);
-    setStartOpen(true);
+    // Intentionally do NOT setStartOpen(true) here — pro must click a
+    // row's Reconcile button first.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthFilter]);
+
+  // Roster-mode: landing from ?month= with no account chosen yet →
+  // hide everything except the roster. First Reconcile click flips it.
+  const [rosterMode, setRosterMode] = useState(Boolean(monthFilter));
+  useEffect(() => { setRosterMode(Boolean(monthFilter)); }, [monthFilter]);
 
   // Per-account roster for the month (powers the one-click "Reconcile"
   // table that appears at the top when ?month= is in the URL). Only
@@ -104,6 +114,8 @@ export default function Reconciliation() {
     setOpenBal("");
     setCloseBal("");
     setStartOpen(true);
+    // Exit roster-mode so the Start form + history become visible.
+    setRosterMode(false);
     setTimeout(() => {
       const el = document.querySelector('[data-testid="recon-start-new"]');
       if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -469,13 +481,15 @@ export default function Reconciliation() {
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Reconciliation</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {monthBounds
-              ? <>{visibleHistory.length} reconciliation{visibleHistory.length === 1 ? "" : "s"} in {monthBounds.start.slice(0, 7)} · <b>{history.length} total</b></>
-              : <>{history.length} reconciliation period{history.length === 1 ? "" : "s"} · Plaid txns auto-clear after 5 days.</>}
+            {rosterMode
+              ? <>Pick an account to reconcile for {monthBounds ? monthBounds.start.slice(0, 7) : ""}.</>
+              : monthBounds
+                ? <>{visibleHistory.length} reconciliation{visibleHistory.length === 1 ? "" : "s"} in {monthBounds.start.slice(0, 7)} · <b>{history.length} total</b></>
+                : <>{history.length} reconciliation period{history.length === 1 ? "" : "s"} · Plaid txns auto-clear after 5 days.</>}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {!startOpen && (
+          {!rosterMode && !startOpen && (
             <button
               onClick={() => setStartOpen(true)}
               data-testid="recon-start-new-btn"
@@ -503,7 +517,7 @@ export default function Reconciliation() {
       )}
 
       {/* Collapsible: start-new interactive matcher */}
-      {startOpen && (
+      {!rosterMode && startOpen && (
         <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-start-new">
           <div className="flex items-center justify-between px-4 py-2 border-b bg-slate-50">
             <div className="font-heading font-semibold text-sm">New reconciliation</div>
@@ -661,7 +675,10 @@ export default function Reconciliation() {
         </div>
       )}
 
-      {/* History table — primary surface */}
+      {/* History table — primary surface. Hidden when the page is in
+          roster-mode (deep-link from Cockpit with ?month=…) so the pro
+          sees a clean account picker first. */}
+      {!rosterMode && (
       <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-history">
         {/* Account filter — populated from accounts that actually have a
             reconciliation so the dropdown stays clean. Shown as soon as
@@ -820,6 +837,7 @@ export default function Reconciliation() {
           </tbody>
         </table>
       </div>
+      )}
 
       {bootstrapConfirm && (
         <div
