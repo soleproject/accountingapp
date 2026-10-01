@@ -290,7 +290,6 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
       {/* --- User Settings (Round 7.6, Feb 2026) --- */}
       {tab === "user" && hasCrm && (
         <div className="space-y-4" data-testid="user-settings-tab">
-          <NavStyleCard />
           <BookingPanel />
           <NoteTakersPanel />
         </div>
@@ -339,6 +338,7 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
         <SidebarModeSettingToggle />
       </div>
       )}
+      {tab === "sidebar" && <NavStyleCard />}
 
       {/* --- Profile card --- */}
       {tab === "profile" && (

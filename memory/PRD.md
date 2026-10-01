@@ -663,3 +663,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Sidebar Mode tab
 - Moved Sidebar Mode toggle out of Bookkeeping into its own "Sidebar Mode" tab (key "sidebar") on /accounting/settings.
+
+## 2026-10-01 — Navigation style moved
+- NavStyleCard moved from /settings User Settings tab to /accounting/settings Sidebar Mode tab (below Sidebar Mode card). /settings User Settings now = Booking + Note-takers only.
