@@ -1238,6 +1238,69 @@ const IN_PROGRESS_TABS = [
   { key: "cockpit",    label: "Client Cockpit",       tint: "violet",  icon: "📍" },
 ];
 
+// Small "Open QC" affordance rendered at the end of every In Progress
+// row that maps to a client review batch. Opens the client's Quick
+// Check-in inline (under the tabs) so the pro can walk it with the
+// client on a call.
+function OpenQcButton({ token, onOpen, testid }) {
+  if (!token) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      data-testid={testid}
+      className="text-[11px] font-medium px-2 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 shrink-0 inline-flex items-center gap-1"
+    >
+      Open QC <ArrowUpRight size={11} />
+    </button>
+  );
+}
+
+function InProgressQcViewer({ qc, onBack, backLabel }) {
+  const url = `/client-review/${qc.token}`;
+  return (
+    <div data-testid="v7-ip-qc-viewer" className="-m-4">
+      <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-slate-200 bg-slate-50 rounded-t-lg">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={onBack}
+            data-testid="v7-ip-qc-back"
+            className="text-[11px] font-medium px-2 py-1 rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1"
+          >
+            <ChevronLeft size={12} /> {backLabel}
+          </button>
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold text-slate-900 truncate">
+              {qc.company_name || "Quick Check-in"}
+            </div>
+            <div className="text-[11px] text-slate-500 truncate">
+              {qc.client_email || "client"}{qc.meta ? ` · ${qc.meta}` : ""} · live client view — answers you enter here post exactly as if the client did
+            </div>
+          </div>
+        </div>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          data-testid="v7-ip-qc-new-tab"
+          className="text-[11px] text-indigo-700 hover:underline inline-flex items-center gap-1"
+        >
+          Open in new tab <ArrowUpRight size={11} />
+        </a>
+      </div>
+      <iframe
+        key={qc.token}
+        title="Client Quick Check-in"
+        src={url}
+        data-testid="v7-ip-qc-iframe"
+        className="w-full bg-white rounded-b-lg"
+        style={{ height: "min(78vh, 820px)", border: 0 }}
+      />
+    </div>
+  );
+}
+
 // Matches an in-progress item to a set of selected company ids. Items
 // carry `company_id` when the backend knows it; otherwise fall back to
 // the display name so legacy rows still filter correctly.
@@ -1328,6 +1391,9 @@ function InProgressCompanyFilter({ companies, selected, onChange }) {
 function InProgressPanel({ d, onNav, refetch, onClose }) {
   const [tab, setTab] = useState("messages");
   const [selectedCos, setSelectedCos] = useState(() => new Set());
+  // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
+  const [openQc, setOpenQc] = useState(null);
+  const switchTab = (k) => { setTab(k); setOpenQc(null); };
 
   const companies = useMemo(
     () => (d?.clients || []).map(c => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -1439,7 +1505,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
           return (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              onClick={() => switchTab(t.key)}
               data-testid={`v7-in-progress-tab-${t.key}`}
               className={`text-[12px] font-medium px-3 py-2 -mb-px border-b-2 transition-colors ${
                 on
@@ -1463,14 +1529,22 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
 
       {/* Tab bodies */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
-        {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} />}
-        {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} />}
-        {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} />}
+        {openQc ? (
+          <InProgressQcViewer
+            qc={openQc}
+            onBack={() => setOpenQc(null)}
+            backLabel={IN_PROGRESS_TABS.find(t => t.key === tab)?.label || "Back"}
+          />
+        ) : (<>
+        {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc} />}
         {tab === "autorecon" && <InProgressAutoRecon data={filtered.autoRecon} onNav={onNav} />}
         {tab === "sent_pro"  && <InProgressSentPro professional={filtered.professional}
                                                    priorUnclosed={filtered.priorUnclosed}
                                                    onNav={onNav} />}
         {tab === "cockpit"   && <InProgressCockpit items={filtered.assistant} onNav={onNav} />}
+        </>)}
       </div>
     </div>
   );
@@ -1482,7 +1556,7 @@ function _EmptyTab({ text }) {
   );
 }
 
-function InProgressMessages({ items, onNav }) {
+function InProgressMessages({ items, onNav, onOpenQc }) {
   if (!items.length) return <_EmptyTab text="No live conversations right now." />;
   return (
     <ul className="divide-y divide-slate-100">
@@ -1500,8 +1574,13 @@ function InProgressMessages({ items, onNav }) {
                 {b.client_email || "client"} · {b.item_count || (b.items?.length) || 0} question{(b.item_count === 1) ? "" : "s"}
               </div>
             </div>
-            <div className="text-[11px] text-emerald-700 font-medium shrink-0">
-              {b.answered || 0}/{b.item_count || (b.items?.length) || 0} answered
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="text-[11px] text-emerald-700 font-medium">
+                {b.answered || 0}/{b.item_count || b.total || (b.items?.length) || 0} answered
+              </div>
+              <OpenQcButton token={b.client_token} testid={`v7-ip-msg-open-${b.id}`}
+                onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name || b.company,
+                                         client_email: b.client_email, meta: `${b.answered || 0}/${b.total || 0} answered` })} />
             </div>
           </div>
         </li>
@@ -1510,7 +1589,7 @@ function InProgressMessages({ items, onNav }) {
   );
 }
 
-function InProgressAiEmails({ items, onNav }) {
+function InProgressAiEmails({ items, onNav, onOpenQc }) {
   if (!items.length) return <_EmptyTab text="No AI email questions queued. The assistant is caught up." />;
   return (
     <ul className="divide-y divide-slate-100">
@@ -1526,8 +1605,13 @@ function InProgressAiEmails({ items, onNav }) {
                 {w.count} question{w.count === 1 ? "" : "s"} queued for client
               </div>
             </div>
-            <div className={`text-[11px] shrink-0 ${w.days_silent >= 3 ? "text-rose-600" : "text-slate-500"}`}>
-              {w.days_silent}d silent
+            <div className="flex items-center gap-2 shrink-0">
+              <div className={`text-[11px] ${w.days_silent >= 3 ? "text-rose-600" : "text-slate-500"}`}>
+                {w.days_silent}d silent
+              </div>
+              <OpenQcButton token={w.client_token} testid={`v7-ip-ai-open-${w.id}`}
+                onOpen={() => onOpenQc({ token: w.client_token, company_name: w.company,
+                                         client_email: null, meta: `${w.count} question${w.count === 1 ? "" : "s"} · ${w.days_silent}d silent` })} />
             </div>
           </div>
         </li>
@@ -1556,7 +1640,7 @@ function _fmtRelDays(iso) {
   } catch { return "—"; }
 }
 
-function InProgressScheduledQc({ data, onNav }) {
+function InProgressScheduledQc({ data, onNav, onOpenQc }) {
   if (!data) {
     return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
   }
@@ -1585,8 +1669,13 @@ function InProgressScheduledQc({ data, onNav }) {
                     {b.note ? ` · ${b.note}` : ""}
                   </div>
                 </div>
-                <div className="text-[11px] text-indigo-700 font-medium shrink-0">
-                  Sends {_fmtDate(b.scheduled_for)}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="text-[11px] text-indigo-700 font-medium">
+                    Sends {_fmtDate(b.scheduled_for)}
+                  </div>
+                  <OpenQcButton token={b.client_token} testid={`v7-ip-sched-open-${b.batch_id}`}
+                    onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name,
+                                             client_email: b.client_email, meta: `${b.item_count} items · sends ${_fmtDate(b.scheduled_for)}` })} />
                 </div>
               </li>
             ))}
@@ -1612,10 +1701,15 @@ function InProgressScheduledQc({ data, onNav }) {
                     {b.client_email || "—"} · {b.answered}/{b.item_count} answered
                   </div>
                 </div>
-                <div className={`text-[11px] font-medium shrink-0 ${
-                  b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"
-                }`}>
-                  Sent {_fmtRelDays(b.email_sent_at)}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className={`text-[11px] font-medium ${
+                    b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"
+                  }`}>
+                    Sent {_fmtRelDays(b.email_sent_at)}
+                  </div>
+                  <OpenQcButton token={b.client_token} testid={`v7-ip-await-open-${b.batch_id}`}
+                    onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name,
+                                             client_email: b.client_email, meta: `${b.answered}/${b.item_count} answered` })} />
                 </div>
               </li>
             ))}
@@ -1640,12 +1734,17 @@ function InProgressScheduledQc({ data, onNav }) {
                   <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
                   <div className="text-[11px] text-slate-500 truncate">{r.client_email || "—"}</div>
                 </div>
-                <div className={`text-[11px] font-medium shrink-0 ${
-                  r.never ? "text-rose-600" : "text-emerald-700"
-                }`}>
-                  {r.never
-                    ? `Never completed · emailed ${_fmtRelDays(r.first_sent)}`
-                    : `Last done ${_fmtRelDays(r.completed_at)}`}
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className={`text-[11px] font-medium ${
+                    r.never ? "text-rose-600" : "text-emerald-700"
+                  }`}>
+                    {r.never
+                      ? `Never completed · emailed ${_fmtRelDays(r.first_sent)}`
+                      : `Last done ${_fmtRelDays(r.completed_at)}`}
+                  </div>
+                  <OpenQcButton token={r.client_token} testid={`v7-ip-engagement-open-${i}`}
+                    onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
+                                             client_email: r.client_email, meta: `last completed ${_fmtRelDays(r.completed_at)}` })} />
                 </div>
               </li>
             ))}

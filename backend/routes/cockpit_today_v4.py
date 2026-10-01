@@ -251,6 +251,7 @@ async def cockpit_scheduled_qc(
     }).sort("scheduled_for", 1).limit(200):
         scheduled.append({
             "batch_id":     b.get("id"),
+            "client_token": b.get("client_token"),
             "company_id":   b.get("company_id"),
             "company_name": co_names.get(b.get("company_id") or "", "—"),
             "client_email": b.get("client_email"),
@@ -278,6 +279,7 @@ async def cockpit_scheduled_qc(
         total = len(b.get("items") or [])
         sent_awaiting.append({
             "batch_id":     b.get("id"),
+            "client_token": b.get("client_token"),
             "company_id":   b.get("company_id"),
             "company_name": co_names.get(b.get("company_id") or "", "—"),
             "client_email": b.get("client_email"),
@@ -303,6 +305,7 @@ async def cockpit_scheduled_qc(
             "_id": {"cid": "$company_id", "email": "$client_email"},
             "completed_at": {"$first": "$completed_at"},
             "batch_id":     {"$first": "$id"},
+            "client_token": {"$first": "$client_token"},
             "item_count":   {"$first": {"$size": {"$ifNull": ["$items", []]}}},
         }},
     ]):
@@ -313,6 +316,7 @@ async def cockpit_scheduled_qc(
             "client_email": row["_id"]["email"],
             "completed_at": row.get("completed_at"),
             "batch_id":     row.get("batch_id"),
+            "client_token": row.get("client_token"),
             "item_count":   row.get("item_count") or 0,
             "never":        False,
         }
@@ -541,6 +545,7 @@ async def today_v4(
         current = next((it for it in items if it.get("status") not in ("answered", "deferred")), None)
         in_progress.append({
             "id": b.get("id"),
+            "client_token": b.get("client_token"),
             "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "answered": answered,
@@ -569,6 +574,7 @@ async def today_v4(
             days_silent = 0
         waiting.append({
             "id": b.get("id"),
+            "client_token": b.get("client_token"),
             "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "count": len(b.get("items") or []),

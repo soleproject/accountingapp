@@ -620,3 +620,7 @@ need to type into the chat box to invoke the matching help flow.
 - Added multi-select company filter (search, select all, clear, removable chips) to the Cockpit In Progress panel; filters all 6 tabs + badge counts.
 - Backend `today-v4` now returns `company_id`/`company` on in_progress, blocking and judgment_needed items.
 - P0 Theme Coloring bug still OPEN (13 sessions).
+
+## 2026-10-01 — Inline QC viewer in In Progress
+- Every QC-backed row (Messages, AI Email Questions, Scheduled / Awaiting / Engagement) has an "Open QC" button that loads the client Quick Check-in inline (iframe to /client-review/{token}) under the tab strip; tabs stay clickable and switching tabs returns to the list. "Open in new tab" link included.
+- Backend scheduled-qc + today-v4 now return client_token on batch rows.
