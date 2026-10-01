@@ -657,3 +657,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Email log under Audit log
 - Full sidebar: Email log moved into the Accounting group directly after Audit log (removed standalone entry). Card-mode All list reordered to match.
+
+## 2026-10-01 — Email Notifications Settings tab
+- Extracted Communications Settings tab → components/EmailNotificationSettings.jsx; added as "Email Notifications Settings" tab on /accounting/settings (also supports ?tab= deep link). Removed Settings tab from /communications-audit; header links to the new tab.

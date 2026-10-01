@@ -16,6 +16,7 @@ import {
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import QboEnvToggle from "@/components/QboEnvToggle";
+import { EmailNotificationSettings } from "@/components/EmailNotificationSettings";
 import { NoteTakersPanel, BookingPanel } from "@/pages/CrmSettings";
 
 /**
@@ -122,7 +123,9 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   const _defaultTab = (allowedTabs && allowedTabs[0]) || (hasCrm ? "user" : "bookkeeping");
   const [tab, setTab] = useState(() => {
     try {
-      const saved = localStorage.getItem("axiom_settings_tab") || _defaultTab;
+      const fromUrl = new URLSearchParams(window.location.search).get("tab");
+      const saved = (fromUrl && (!allowedTabs || allowedTabs.includes(fromUrl)) ? fromUrl : null)
+        || localStorage.getItem("axiom_settings_tab") || _defaultTab;
       if (allowedTabs && !allowedTabs.includes(saved)) return _defaultTab;
       // If the persisted tab is "user" but the user no longer has
       // CRM access, fall back to the default rather than rendering
@@ -247,6 +250,7 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
           ["report_style",  "Report Styling"],
           ["tours",         "Tours & Tips"],
           ["quickbooks",    "QuickBooks"],
+          ["email_notifications", "Email Notifications Settings"],
           ["danger",        "Danger Zone"],
         ].filter(([k]) => !allowedTabs || allowedTabs.includes(k))
          .filter(([k]) => k !== "user" || hasCrm)
@@ -570,6 +574,12 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
            immediately above Danger Zone per Feb 2026 rollout. --- */}
       {tab === "quickbooks" && (
         <QboEnvToggle companyId={currentId} />
+      )}
+
+      {/* --- Email notifications — firm-wide outbound email flow switches
+           (moved here from the Communications / Email log page). --- */}
+      {tab === "email_notifications" && (
+        <EmailNotificationSettings />
       )}
 
       {/* --- Danger zone --- */}

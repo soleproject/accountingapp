@@ -14,6 +14,7 @@ const ACCOUNTING_TABS = [
   "report_style",
   "tours",
   "quickbooks",
+  "email_notifications",
   "notifications",
   "danger",
 ];
