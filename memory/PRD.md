@@ -672,3 +672,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Removed duplicate Settings under More
 - STANDALONE_BOTTOM (Sidebar.jsx) and MORE_LINKS (Todo2CardList.jsx) no longer include /settings; Accounting settings link retained.
+
+## 2026-10-01 — AI Email Questions tab rebuilt
+- GET /api/cockpit/email-questions: db.communications rows (kinds ai_ask_client, ask_client, client_review_batch, client_welcome*, portal_invite, team_invite) joined to outcome (client_questions / client_review_batches / password_set_tokens / invites). Scope: superadmin=all; enterprise owner (enterprises.owner_user_id) = rollup_stats company_ids ∪ memberships; pro = memberships. Tab pills Quick Ones / Set-up & Invites / QC Emails, sections Waiting / Resolved / Not delivered (collapsed). Open → inline viewer (/q/{token} or /client-review/{token}). Live-refresh re-pulls it.
