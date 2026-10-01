@@ -216,6 +216,37 @@ async def cockpit_pending_reconciliations(
     }
 
 
+@router.post("/scheduled-qc/{batch_id}/nudge")
+async def cockpit_scheduled_qc_nudge(
+    batch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """One-click re-ping from the Missed / No Response rows. Sends the
+    three-CTA reminder (answer now / pick a time / talk to bookkeeper)
+    and stamps `manual_nudge_at` so the row can show it."""
+    import client_review as cr
+    accessible = await require_firm_or_pro(user)
+    batch = await db.client_review_batches.find_one({"id": batch_id})
+    if not batch or batch.get("company_id") not in (accessible or []):
+        raise HTTPException(404, "Check-in not found")
+    if batch.get("status") in ("completed", "expired"):
+        raise HTTPException(409, f"Check-in is {batch.get('status')} — a fresh one will be generated instead")
+    if not batch.get("client_email"):
+        raise HTTPException(400, "No client email on this check-in")
+    result = await cr._dispatch_reminder(batch, kind="passive_miss")
+    status = result.get("status")
+    now = datetime.now(timezone.utc).isoformat()
+    if status == "sent":
+        await db.client_review_batches.update_one(
+            {"id": batch_id},
+            {"$set": {"manual_nudge_at": now, "updated_at": now},
+             "$inc": {"manual_nudge_count": 1}},
+        )
+    return {"ok": status == "sent", "status": status,
+            "to": batch.get("client_email"), "manual_nudge_at": now if status == "sent" else None,
+            "error": result.get("error")}
+
+
 @router.get("/scheduled-qc")
 async def cockpit_scheduled_qc(
     user: dict = Depends(get_current_user),
@@ -295,6 +326,8 @@ async def cockpit_scheduled_qc(
             "note":          b.get("note") or "",
             "reminder_sent": bool(b.get("reminder_sent_at")),
             "nudge_sent":    bool(b.get("nudge_sent_at")),
+            "manual_nudge_at": b.get("manual_nudge_at"),
+            "manual_nudge_count": int(b.get("manual_nudge_count") or 0),
             "follow_up_at":  b.get("follow_up_at"),
             "snoozed_count": len(snoozed),
             "next_snooze_at": next_snooze,

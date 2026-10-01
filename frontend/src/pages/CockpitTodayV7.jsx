@@ -1544,7 +1544,13 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
         ) : (<>
         {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
         {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} onOpenQc={setOpenQc} />}
-        {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc}
+                                   onNudged={(batchId, at) => setScheduledQc(q => {
+                                     if (!q) return q;
+                                     const bump = (arr) => (arr || []).map(r => r.batch_id === batchId
+                                       ? { ...r, manual_nudge_at: at, manual_nudge_count: (r.manual_nudge_count || 0) + 1 } : r);
+                                     return { ...q, missed: bump(q.missed), sent_awaiting: bump(q.sent_awaiting) };
+                                   })} />}
         {tab === "autorecon" && <InProgressAutoRecon data={filtered.autoRecon} onNav={onNav} />}
         {tab === "sent_pro"  && <InProgressSentPro professional={filtered.professional}
                                                    priorUnclosed={filtered.priorUnclosed}
@@ -1692,7 +1698,57 @@ function ParkedChips({ parked, testid }) {
   );
 }
 
-function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children }) {
+function _fmtRelShort(iso) {
+  if (!iso) return "";
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+  return _fmtRelDays(iso);
+}
+
+// One-click re-ping for Missed / No Response rows.
+function NudgeButton({ r, testid, onNudged }) {
+  const [busy, setBusy] = useState(false);
+  const send = async (e) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/cockpit/scheduled-qc/${r.batch_id}/nudge`);
+      if (data.status === "sent") {
+        toast.success(`Reminder sent to ${data.to}`);
+        onNudged?.(r.batch_id, data.manual_nudge_at);
+      } else if (data.status === "skipped_test_recipient") {
+        toast.warning(`Not sent — ${data.to} is a test address`);
+      } else if (data.status === "skipped_pref_off") {
+        toast.warning("Not sent — client check-in emails are turned off in your settings");
+      } else {
+        toast.error(data.error || "Couldn't send the reminder");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't send the reminder");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-0.5 shrink-0">
+      <button type="button" onClick={send} disabled={busy} data-testid={`${testid}-nudge`}
+              className="text-[11px] font-medium px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1">
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+        Send reminder
+      </button>
+      {r.manual_nudge_at && (
+        <span className="text-[10px] text-slate-400" data-testid={`${testid}-nudged-at`}>
+          Reminded {_fmtRelShort(r.manual_nudge_at)}{r.manual_nudge_count > 1 ? ` · ×${r.manual_nudge_count}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children, extra }) {
   return (
     <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
       <div className="min-w-0">
@@ -1701,6 +1757,7 @@ function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children }
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <div className={`text-[11px] font-medium text-right ${statusClass}`}>{status}</div>
+        {extra}
         <OpenQcButton token={r.client_token} testid={`${testid}-open`}
           onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
                                    client_email: r.client_email, meta })} />
@@ -1725,7 +1782,7 @@ function QcSection({ title, count, empty, children }) {
 
 const _plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-function InProgressScheduledQc({ data, onNav, onOpenQc }) {
+function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged }) {
   const [pill, setPill] = useState("scheduled");
   if (!data) {
     return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
@@ -1813,7 +1870,8 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
                 b.nudge_sent ? " · nudged" : b.reminder_sent ? " · reminded" : ""}`}
               status={b.days_past === 0 ? "Missed today" : `Missed · ${b.days_past}d ago`}
               statusClass={b.days_past >= 3 ? "text-rose-600" : "text-amber-600"}
-              meta={`missed ${_fmtDateTime(b.scheduled_for)}`} />
+              meta={`missed ${_fmtDateTime(b.scheduled_for)}`}
+              extra={<NudgeButton r={b} testid={`v7-ip-missed-${b.batch_id}`} onNudged={onNudged} />} />
           ))}
         </QcSection>
       )}
@@ -1826,7 +1884,8 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
               sub={`${b.client_email || "—"} · 0/${b.item_count} answered`}
               status={`Sent ${_fmtRelDays(b.email_sent_at)}`}
               statusClass={b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"}
-              meta={`0/${b.item_count} answered`} />
+              meta={`0/${b.item_count} answered`}
+              extra={<NudgeButton r={b} testid={`v7-ip-noresp-${b.batch_id}`} onNudged={onNudged} />} />
           ))}
         </QcSection>
         <QcSection title="Link expired · never answered" count={expired_no_response.length}
