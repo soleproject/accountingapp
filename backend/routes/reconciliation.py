@@ -179,6 +179,138 @@ async def list_recs(cid: str, user: dict = Depends(get_current_user)):
     return {"reconciliations": out}
 
 
+@router.get("/companies/{cid}/reconciliations/month-roster")
+async def recon_month_roster(
+    cid: str,
+    month: str = Query(..., description="YYYY-MM"),
+    user: dict = Depends(get_current_user),
+):
+    """Per-account recon roster for a single month.
+
+    Returns one row per bank / credit-card account that is "relevant" to
+    the month — defined as:
+      a) having any posted transactions in [month_start, month_end], or
+      b) having a reconciliation session whose period overlaps the month.
+
+    Each row carries the txn/cleared counts and the status pros need to
+    decide whether to click "Reconcile" for that account. Powers the
+    one-click Reconcile roster surfaced from the Cockpit.
+    """
+    from calendar import monthrange
+    await require_company(user, cid)
+    try:
+        y, m = month.split("-")
+        yi, mi = int(y), int(m)
+        if not (1 <= mi <= 12) or yi < 1900 or yi > 2999:
+            raise ValueError
+    except Exception:
+        raise HTTPException(400, "month must be formatted YYYY-MM")
+    last = monthrange(yi, mi)[1]
+    month_start = f"{yi:04d}-{mi:02d}-01"
+    month_end = f"{yi:04d}-{mi:02d}-{last:02d}"
+
+    # (a) Transaction counts per bank account for the month.
+    txn_rows = {}
+    async for row in db.transactions.aggregate([
+        {"$match": {
+            "company_id": cid, "posted": True,
+            "bank_account_id": {"$exists": True, "$ne": None},
+            "date": {"$gte": month_start, "$lte": month_end},
+        }},
+        {"$group": {
+            "_id": "$bank_account_id",
+            "total": {"$sum": 1},
+            "cleared": {"$sum": {"$cond": [{"$ifNull": ["$cleared_at", False]}, 1, 0]}},
+            "last_date": {"$max": "$date"},
+        }},
+    ]):
+        txn_rows[row["_id"]] = {
+            "total": int(row.get("total") or 0),
+            "cleared": int(row.get("cleared") or 0),
+            "last_date": row.get("last_date"),
+        }
+
+    # (b) Reconciliation sessions that overlap the month, per account.
+    recon_by_acct: dict[str, dict] = {}
+    async for r in db.reconciliations.find({
+        "company_id": cid,
+        "period_start": {"$lte": month_end},
+        "period_end": {"$gte": month_start},
+    }):
+        aid = r.get("bank_account_id")
+        if not aid:
+            continue
+        # Keep the latest one for the account (by period_end).
+        existing = recon_by_acct.get(aid)
+        if not existing or (r.get("period_end") or "") > (existing.get("period_end") or ""):
+            recon_by_acct[aid] = r
+
+    # Union of accounts touched by either side; pull account metadata.
+    account_ids = set(txn_rows.keys()) | set(recon_by_acct.keys())
+    accts = {}
+    async for a in db.accounts.find(
+        {"company_id": cid, "id": {"$in": list(account_ids)}},
+        {"_id": 0, "id": 1, "code": 1, "name": 1, "type": 1,
+         "detail_type": 1, "mask": 1, "plaid_mask": 1},
+    ):
+        accts[a["id"]] = a
+
+    rows = []
+    for aid in account_ids:
+        a = accts.get(aid) or {"id": aid, "name": "Unknown account", "code": "", "type": ""}
+        tx = txn_rows.get(aid, {"total": 0, "cleared": 0, "last_date": None})
+        r = recon_by_acct.get(aid)
+        reconciled = bool(r) and r.get("status") in ("reconciled", "qbo_covered")
+        covers_full_month = bool(
+            r and (r.get("period_start") or "") <= month_start
+            and (r.get("period_end") or "") >= month_end
+        )
+        if reconciled and covers_full_month:
+            status = "reconciled" if tx["total"] else "reconciled_no_activity"
+        elif reconciled:
+            status = "partially_reconciled"
+        elif tx["total"] == 0:
+            # Account has a prior overlap session but no txns and no full-month recon.
+            status = "no_activity"
+        else:
+            status = "needs_reconciliation"
+        rows.append({
+            "account_id": aid,
+            "account_code": a.get("code") or "",
+            "account_name": a.get("name") or "—",
+            "account_type": a.get("type") or "",
+            "account_mask": a.get("mask") or a.get("plaid_mask") or "",
+            "txn_count": tx["total"],
+            "cleared_count": tx["cleared"],
+            "last_txn_date": tx["last_date"],
+            "reconciled": reconciled,
+            "reconciliation_covers_full_month": covers_full_month,
+            "reconciliation_period_start": r.get("period_start") if r else None,
+            "reconciliation_period_end": r.get("period_end") if r else None,
+            "reconciliation_id": r.get("id") if r else None,
+            "statement_balance": r.get("statement_balance") if r else None,
+            "status": status,
+        })
+    # Sort: needs_reconciliation first, then partial, then reconciled, then no activity.
+    order = {"needs_reconciliation": 0, "partially_reconciled": 1,
+             "reconciled": 2, "reconciled_no_activity": 3, "no_activity": 4}
+    rows.sort(key=lambda r: (order.get(r["status"], 9), -r["txn_count"], r["account_code"], r["account_name"]))
+    totals = {
+        "accounts": len(rows),
+        "needs_reconciliation": sum(1 for r in rows if r["status"] == "needs_reconciliation"),
+        "partially_reconciled": sum(1 for r in rows if r["status"] == "partially_reconciled"),
+        "reconciled": sum(1 for r in rows if r["status"] in ("reconciled", "reconciled_no_activity")),
+        "txn_total": sum(r["txn_count"] for r in rows),
+    }
+    return {
+        "month": month,
+        "period_start": month_start,
+        "period_end": month_end,
+        "rows": rows,
+        "totals": totals,
+    }
+
+
 @router.get("/companies/{cid}/reconciliations/preview")
 async def preview_reconciliation(
     cid: str,

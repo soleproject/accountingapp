@@ -5,7 +5,7 @@ import { useCompany, useMoneyFmt } from "@/lib/company";
 import { toast } from "sonner";
 import {
   CheckCircle2, Loader2, Upload, FileText, Sparkles, ArrowRight,
-  CalendarDays, Building2, Plus, ChevronRight, X,
+  CalendarDays, Building2, Plus, ChevronRight, X, AlertTriangle, CircleAlert,
 } from "lucide-react";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 
@@ -69,6 +69,46 @@ export default function Reconciliation() {
     setStartOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monthFilter]);
+
+  // Per-account roster for the month (powers the one-click "Reconcile"
+  // table that appears at the top when ?month= is in the URL). Only
+  // fetched when a month filter is active.
+  const [roster, setRoster] = useState(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const loadRoster = async () => {
+    if (!currentId || !monthFilter) { setRoster(null); return; }
+    setRosterLoading(true);
+    try {
+      const r = await api.get(
+        `/companies/${currentId}/reconciliations/month-roster`,
+        { params: { month: monthFilter } },
+      );
+      setRoster(r.data);
+    } catch (e) {
+      // Non-fatal — hide the roster if the endpoint errors.
+      setRoster(null);
+    } finally {
+      setRosterLoading(false);
+    }
+  };
+  useEffect(() => { loadRoster(); /* eslint-disable-next-line */ }, [currentId, monthFilter]);
+
+  // One-click: pre-fill the Start form for a specific account+month and
+  // scroll the form into view. Called from the roster's "Reconcile" button.
+  const startAccountReconcile = (accountId) => {
+    setAcctId(accountId);
+    if (monthBounds) {
+      setPeriodStart(monthBounds.start);
+      setPeriodEnd(monthBounds.end);
+    }
+    setOpenBal("");
+    setCloseBal("");
+    setStartOpen(true);
+    setTimeout(() => {
+      const el = document.querySelector('[data-testid="recon-start-new"]');
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 60);
+  };
 
   // Account filter for the history table. Populated dynamically from
   // the loaded reconciliations so the dropdown ONLY lists accounts that
@@ -149,7 +189,15 @@ export default function Reconciliation() {
       x => x.type === "asset" || x.type === "liability"
     );
     setBanks(asset);
-    if (asset.length && !acctId) setAcctId(asset[0].id);
+    // Deep-link ?bank_account_id=... wins over "first account" default.
+    const deepLink = urlParams.get("bank_account_id");
+    if (asset.length) {
+      if (deepLink && asset.some(b => b.id === deepLink)) {
+        setAcctId(deepLink);
+      } else if (!acctId) {
+        setAcctId(asset[0].id);
+      }
+    }
     setHistory(r.data.reconciliations || []);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId]);
@@ -438,6 +486,21 @@ export default function Reconciliation() {
           )}
         </div>
       </div>
+
+      {/* Per-account month roster — shown when the page is opened with
+          ?month=YYYY-MM (deep-link from Cockpit / Month Close). Lists
+          every bank/CC account with activity in the month or an overlapping
+          reconciliation session, with a one-click Reconcile button on the
+          rows that still need work. */}
+      {monthBounds && (
+        <MonthRosterPanel
+          month={monthFilter}
+          roster={roster}
+          loading={rosterLoading}
+          onReconcile={startAccountReconcile}
+          selectedAcctId={acctId}
+        />
+      )}
 
       {/* Collapsible: start-new interactive matcher */}
       {startOpen && (
@@ -1112,3 +1175,140 @@ function formatPeriodLabel(start, end, asOf) {
   }
   return `${s} → ${e}`;
 }
+
+
+// ---- Month roster: one row per bank / credit-card account with the
+// per-account status + a "Reconcile" button for anything still needing
+// work. Powers the one-click reconciliation entry from the Cockpit.
+function MonthRosterPanel({ month, roster, loading, onReconcile, selectedAcctId }) {
+  const monthLabel = (() => {
+    const m = /^(\d{4})-(\d{2})$/.exec(month || "");
+    if (!m) return month || "";
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+    return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+  })();
+  const totals = roster?.totals || {};
+  return (
+    <div className="rounded-xl border bg-white overflow-hidden" data-testid="recon-month-roster">
+      <div className="flex items-center justify-between gap-2 px-4 py-2 border-b bg-slate-50 flex-wrap">
+        <div>
+          <div className="font-heading font-semibold text-sm">Accounts for {monthLabel}</div>
+          <div className="text-[11px] text-slate-500 mt-0.5">
+            {loading ? "Loading…" : (
+              roster
+                ? <>
+                    {totals.accounts || 0} account{totals.accounts === 1 ? "" : "s"} ·{" "}
+                    <span className="text-emerald-700 font-medium">{totals.reconciled || 0} done</span>
+                    {totals.partially_reconciled ? <> · <span className="text-amber-700 font-medium">{totals.partially_reconciled} partial</span></> : null}
+                    {totals.needs_reconciliation ? <> · <span className="text-rose-700 font-medium">{totals.needs_reconciliation} to go</span></> : null}
+                    {" · "}{totals.txn_total || 0} txns total
+                  </>
+                : "—"
+            )}
+          </div>
+        </div>
+      </div>
+      {loading && (
+        <div className="p-6 text-center text-xs text-slate-500">
+          <Loader2 size={14} className="inline animate-spin mr-1" /> Loading month roster…
+        </div>
+      )}
+      {!loading && roster && (roster.rows || []).length === 0 && (
+        <div className="p-6 text-center text-sm text-slate-500">
+          No bank or credit-card accounts had activity in {monthLabel}.
+        </div>
+      )}
+      {!loading && roster && (roster.rows || []).length > 0 && (
+        <table className="w-full text-sm">
+          <thead className="bg-white text-xs uppercase text-slate-500 border-b">
+            <tr>
+              <th className="px-4 py-2 text-left">Account</th>
+              <th className="px-2 py-2 text-right whitespace-nowrap">Txns</th>
+              <th className="px-2 py-2 text-right whitespace-nowrap">Cleared</th>
+              <th className="px-2 py-2 text-left whitespace-nowrap">Status</th>
+              <th className="px-4 py-2 text-right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {(roster.rows || []).map(r => {
+              const needs = r.status === "needs_reconciliation" || r.status === "partially_reconciled";
+              return (
+                <tr
+                  key={r.account_id}
+                  data-testid={`recon-roster-row-${r.account_id}`}
+                  className={`border-b last:border-b-0 ${selectedAcctId === r.account_id ? "bg-cyan-50/40" : "hover:bg-slate-50"}`}
+                >
+                  <td className="px-4 py-2.5">
+                    <div className="font-medium text-slate-900">{r.account_name}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {r.account_code}{r.account_type ? ` · ${r.account_type === "liability" ? "credit card / liability" : "bank / asset"}` : ""}
+                    </div>
+                  </td>
+                  <td className="px-2 py-2.5 text-right font-mono text-xs text-slate-700">
+                    {r.txn_count}
+                  </td>
+                  <td className="px-2 py-2.5 text-right font-mono text-xs text-slate-700">
+                    {r.cleared_count}
+                    {r.txn_count > 0 && r.cleared_count < r.txn_count && (
+                      <span className="text-rose-600"> / {r.txn_count}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2.5">
+                    <StatusBadge status={r.status} r={r} />
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    {needs ? (
+                      <button
+                        onClick={() => onReconcile(r.account_id)}
+                        data-testid={`recon-roster-reconcile-${r.account_id}`}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                      >
+                        Reconcile <ArrowRight size={12} />
+                      </button>
+                    ) : r.status === "reconciled" || r.status === "reconciled_no_activity" ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                        <CheckCircle2 size={13} /> Done
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ status, r }) {
+  if (status === "reconciled") return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-emerald-50 border-emerald-200 text-emerald-700">
+      <CheckCircle2 size={11} /> Reconciled
+    </span>
+  );
+  if (status === "reconciled_no_activity") return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-slate-50 border-slate-200 text-slate-600">
+      <CheckCircle2 size={11} /> Reconciled · no activity
+    </span>
+  );
+  if (status === "partially_reconciled") return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-50 border-amber-200 text-amber-800"
+          title={r?.reconciliation_period_end ? `Reconciled through ${r.reconciliation_period_end} — month not fully covered` : ""}>
+      <CircleAlert size={11} /> Partial
+    </span>
+  );
+  if (status === "no_activity") return (
+    <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border bg-slate-50 border-slate-200 text-slate-500">
+      No activity
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-rose-50 border-rose-200 text-rose-700">
+      <AlertTriangle size={11} /> Needs reconciliation
+    </span>
+  );
+}
+

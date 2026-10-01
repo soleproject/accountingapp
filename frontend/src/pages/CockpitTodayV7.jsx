@@ -1558,7 +1558,7 @@ function ChecklistRows({ cid, ym, status, onNav, onCompleteClosing, signing }) {
         if (cp.signed_at) return `Signed off ${new Date(cp.signed_at).toLocaleDateString()}`;
         return `${cp.cleared || 0}/${cp.total || 0} cleared · sign off to complete`;
       },
-      route: `/accounting/month-close?ym=${ym}&company=${cid}#recon`,
+      route: `/accounting/reconciliation?month=${ym}&from=month-close&ym=${ym}`,
       ctaLabel: "Reconcile",
     },
     {
