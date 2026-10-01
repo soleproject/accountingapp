@@ -194,6 +194,7 @@ export default function CockpitTodayV7() {
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [clientsOpen, setClientsOpen] = useState(false);
+  const [inProgressOpen, setInProgressOpen] = useState(false);
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
   const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
@@ -217,6 +218,17 @@ export default function CockpitTodayV7() {
   }, []);
 
   const d = useMemo(() => derive(data), [data]);
+  // Live-work tally powering the "In Progress" clickable stat. Mirrors
+  // the tab counts rendered inside InProgressPanel so the number on
+  // the tile and inside the tabs always agree.
+  const inProgressTotal = useMemo(() => {
+    if (!d) return 0;
+    const msgs      = (d.active || []).length;
+    const emailQs   = (d.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
+    const sentPro   = (d.professional || []).length + (d.priorUnclosed || []).length;
+    const cockpit   = (d.assistantItems || []).length;
+    return msgs + emailQs + sentPro + cockpit;
+  }, [d]);
   const firstName = (user?.name || user?.email || "there").split(" ")[0].split("@")[0];
 
   // If the URL arrived with a #hash, wait for data to render then scroll.
@@ -290,7 +302,16 @@ export default function CockpitTodayV7() {
                 <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
                 <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
                 <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
-                <BigStat label="Need your expertise" value={d.counts.professional} tint="indigo" pulse={d.counts.professional > 0} />
+                <ClickableStat
+                  testid="v7-stat-in-progress"
+                  label="In Progress"
+                  sublabel={inProgressTotal > 0 ? "click to open live work" : "nothing moving right now"}
+                  value={inProgressTotal}
+                  tint="indigo"
+                  pulse={inProgressTotal > 0}
+                  active={inProgressOpen}
+                  onClick={() => { setInProgressOpen(o => !o); setClientsOpen(false); setClosingsOpen(false); }}
+                />
                 <ClickableStat
                   testid="v7-stat-closings"
                   label="Closings"
@@ -328,6 +349,13 @@ export default function CockpitTodayV7() {
                 counts={d.counts}
                 onNav={navigate}
                 onClose={() => setClientsOpen(false)}
+              />
+            ) : inProgressOpen ? (
+              <InProgressPanel
+                d={d}
+                onNav={navigate}
+                refetch={fetchData}
+                onClose={() => setInProgressOpen(false)}
               />
             ) : (
               <>
@@ -1190,6 +1218,428 @@ function KpiTile({ label, value, tint }) {
     </div>
   );
 }
+
+// ---- "In Progress" panel ------------------------------------------------
+// Collapsible roster of live firm work, modelled on ClientsPanel. Takes
+// over the lower half of the dashboard when the "In Progress" stat tile
+// is clicked. Six tabs:
+//   1. Client Messages      — active review conversations
+//   2. AI Email Questions   — questions AI is preparing / waiting to send
+//   3. Scheduled QC         — upcoming + emailed-not-responded + last done
+//   4. Auto Reconciliations — pending auto-recons across all clients
+//   5. Sent to Professional — matters escalated to the accountant
+//   6. Client Cockpit       — assistant/human follow-up work by client
+const IN_PROGRESS_TABS = [
+  { key: "messages",   label: "Client Messages",      tint: "sky",     icon: "💬" },
+  { key: "ai_emails",  label: "AI Email Questions",   tint: "emerald", icon: "✉" },
+  { key: "scheduled",  label: "Scheduled QC",         tint: "indigo",  icon: "📅" },
+  { key: "autorecon",  label: "Auto Reconciliations", tint: "cyan",    icon: "🔁" },
+  { key: "sent_pro",   label: "Sent to Professional", tint: "rose",    icon: "👤" },
+  { key: "cockpit",    label: "Client Cockpit",       tint: "violet",  icon: "📍" },
+];
+
+function InProgressPanel({ d, onNav, refetch, onClose }) {
+  const [tab, setTab] = useState("messages");
+
+  // Lazy-load tab data on first open of a given tab to keep the panel
+  // cheap when a pro only clicks one tab.
+  const [scheduledQc, setScheduledQc] = useState(null);
+  const [autoRecon, setAutoRecon]     = useState(null);
+
+  useEffect(() => {
+    if (tab === "scheduled" && scheduledQc === null) {
+      api.get("/cockpit/scheduled-qc")
+        .then(r => setScheduledQc(r.data || { scheduled: [], sent_awaiting: [], last_completed: [] }))
+        .catch(() => setScheduledQc({ scheduled: [], sent_awaiting: [], last_completed: [] }));
+    }
+    if (tab === "autorecon" && autoRecon === null) {
+      api.get("/cockpit/pending-reconciliations")
+        .then(r => setAutoRecon(r.data || { companies: [] }))
+        .catch(() => setAutoRecon({ companies: [] }));
+    }
+  }, [tab, scheduledQc, autoRecon]);
+
+  const counts = useMemo(() => {
+    const messages  = (d?.active || []).length;
+    const ai_emails = (d?.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
+    const sent_pro  = (d?.professional || []).length + (d?.priorUnclosed || []).length;
+    const cockpit   = (d?.assistantItems || []).length;
+    const scheduled = scheduledQc
+      ? (scheduledQc.scheduled.length + scheduledQc.sent_awaiting.length)
+      : null;
+    const autorecon = autoRecon
+      ? (autoRecon.companies || []).reduce(
+          (s, c) => s + (c.totals?.waiting || 0) + (c.totals?.ready || 0) + (c.totals?.manual || 0), 0)
+      : null;
+    return { messages, ai_emails, scheduled, autorecon, sent_pro, cockpit };
+  }, [d, scheduledQc, autoRecon]);
+
+  return (
+    <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 p-5"
+         data-testid="v7-in-progress-panel">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center">
+            <Clock size={15} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-slate-900">In Progress</div>
+            <div className="text-[11px] text-slate-500">
+              Everything the firm has moving right now — messages, scheduled touchpoints, running recons and open escalations.
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          data-testid="v7-in-progress-close"
+          className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+        >
+          Hide
+        </button>
+      </div>
+
+      {/* Tab strip */}
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
+        {IN_PROGRESS_TABS.map(t => {
+          const on = tab === t.key;
+          const n  = counts[t.key === "sent_pro" ? "sent_pro"
+                     : t.key === "messages"  ? "messages"
+                     : t.key === "ai_emails" ? "ai_emails"
+                     : t.key === "scheduled" ? "scheduled"
+                     : t.key === "autorecon" ? "autorecon"
+                     : "cockpit"];
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              data-testid={`v7-in-progress-tab-${t.key}`}
+              className={`text-[12px] font-medium px-3 py-2 -mb-px border-b-2 transition-colors ${
+                on
+                  ? "border-indigo-500 text-indigo-700 bg-white rounded-t-md"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <span className="mr-1.5" aria-hidden>{t.icon}</span>
+              {t.label}
+              {n !== null && n !== undefined && n > 0 && (
+                <span className={`ml-2 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
+                  on ? "bg-indigo-100 text-indigo-700" : "bg-slate-200 text-slate-600"
+                }`}>
+                  {n}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab bodies */}
+      <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
+        {tab === "messages"  && <InProgressMessages items={d?.active || []} onNav={onNav} />}
+        {tab === "ai_emails" && <InProgressAiEmails items={d?.waiting || []} onNav={onNav} />}
+        {tab === "scheduled" && <InProgressScheduledQc data={scheduledQc} onNav={onNav} />}
+        {tab === "autorecon" && <InProgressAutoRecon data={autoRecon} onNav={onNav} />}
+        {tab === "sent_pro"  && <InProgressSentPro professional={d?.professional || []}
+                                                   priorUnclosed={d?.priorUnclosed || []}
+                                                   onNav={onNav} />}
+        {tab === "cockpit"   && <InProgressCockpit items={d?.assistantItems || []} onNav={onNav} />}
+      </div>
+    </div>
+  );
+}
+
+function _EmptyTab({ text }) {
+  return (
+    <div className="text-center py-10 text-slate-400 text-sm">{text}</div>
+  );
+}
+
+function InProgressMessages({ items, onNav }) {
+  if (!items.length) return <_EmptyTab text="No live conversations right now." />;
+  return (
+    <ul className="divide-y divide-slate-100">
+      {items.map(b => (
+        <li key={b.id}
+            onClick={() => onNav(`/client-review/${b.client_token || b.id}`)}
+            className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
+            data-testid={`v7-ip-msg-${b.id}`}>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-slate-900 truncate">
+                {b.company_name || b.company || "—"}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">
+                {b.client_email || "client"} · {b.item_count || (b.items?.length) || 0} question{(b.item_count === 1) ? "" : "s"}
+              </div>
+            </div>
+            <div className="text-[11px] text-emerald-700 font-medium shrink-0">
+              {b.answered || 0}/{b.item_count || (b.items?.length) || 0} answered
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InProgressAiEmails({ items, onNav }) {
+  if (!items.length) return <_EmptyTab text="No AI email questions queued. The assistant is caught up." />;
+  return (
+    <ul className="divide-y divide-slate-100">
+      {items.map(w => (
+        <li key={w.id}
+            onClick={() => onNav(w.route)}
+            className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
+            data-testid={`v7-ip-ai-${w.id}`}>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-slate-900 truncate">{w.company}</div>
+              <div className="text-[11px] text-slate-500 truncate">
+                {w.count} question{w.count === 1 ? "" : "s"} queued for client
+              </div>
+            </div>
+            <div className={`text-[11px] shrink-0 ${w.days_silent >= 3 ? "text-rose-600" : "text-slate-500"}`}>
+              {w.days_silent}d silent
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function _fmtDate(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch { return "—"; }
+}
+function _fmtRelDays(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso).getTime();
+    const diff = Math.round((Date.now() - d) / 86400000);
+    if (diff === 0) return "today";
+    if (diff === 1) return "yesterday";
+    if (diff < 7)   return `${diff}d ago`;
+    if (diff < 30)  return `${Math.round(diff / 7)}w ago`;
+    return `${Math.round(diff / 30)}mo ago`;
+  } catch { return "—"; }
+}
+
+function InProgressScheduledQc({ data, onNav }) {
+  if (!data) {
+    return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  }
+  const { scheduled = [], sent_awaiting = [], last_completed = [] } = data;
+  const empty = !scheduled.length && !sent_awaiting.length && !last_completed.length;
+  if (empty) return <_EmptyTab text="No Quick Check-ins in flight." />;
+
+  return (
+    <div className="space-y-5">
+      {/* Upcoming scheduled */}
+      <div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
+          Scheduled · {scheduled.length}
+        </div>
+        {scheduled.length === 0 ? (
+          <div className="text-[12px] text-slate-400">Nothing scheduled.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
+            {scheduled.slice(0, 12).map(b => (
+              <li key={b.batch_id} className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
+                  data-testid={`v7-ip-sched-${b.batch_id}`}>
+                <div className="min-w-0">
+                  <div className="text-[13px] text-slate-900 truncate">{b.company_name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    {b.client_email || "—"} · {b.item_count} item{b.item_count === 1 ? "" : "s"}
+                    {b.note ? ` · ${b.note}` : ""}
+                  </div>
+                </div>
+                <div className="text-[11px] text-indigo-700 font-medium shrink-0">
+                  Sends {_fmtDate(b.scheduled_for)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Emailed · awaiting client response */}
+      <div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
+          Emailed · awaiting response · {sent_awaiting.length}
+        </div>
+        {sent_awaiting.length === 0 ? (
+          <div className="text-[12px] text-slate-400">Every emailed check-in has been answered.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
+            {sent_awaiting.slice(0, 12).map(b => (
+              <li key={b.batch_id} className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
+                  data-testid={`v7-ip-await-${b.batch_id}`}>
+                <div className="min-w-0">
+                  <div className="text-[13px] text-slate-900 truncate">{b.company_name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    {b.client_email || "—"} · {b.answered}/{b.item_count} answered
+                  </div>
+                </div>
+                <div className={`text-[11px] font-medium shrink-0 ${
+                  b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"
+                }`}>
+                  Sent {_fmtRelDays(b.email_sent_at)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Last completed roster */}
+      <div>
+        <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
+          Client engagement · {last_completed.length}
+        </div>
+        {last_completed.length === 0 ? (
+          <div className="text-[12px] text-slate-400">No check-ins completed yet.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">
+            {last_completed.slice(0, 20).map((r, i) => (
+              <li key={`${r.company_id}-${r.client_email}-${i}`}
+                  className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap"
+                  data-testid={`v7-ip-engagement-${i}`}>
+                <div className="min-w-0">
+                  <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">{r.client_email || "—"}</div>
+                </div>
+                <div className={`text-[11px] font-medium shrink-0 ${
+                  r.never ? "text-rose-600" : "text-emerald-700"
+                }`}>
+                  {r.never
+                    ? `Never completed · emailed ${_fmtRelDays(r.first_sent)}`
+                    : `Last done ${_fmtRelDays(r.completed_at)}`}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InProgressAutoRecon({ data, onNav }) {
+  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  const companies = data.companies || [];
+  if (!companies.length) return <_EmptyTab text="No auto-reconciliations in flight." />;
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] text-slate-500">
+        {data.waiting
+          ? <>Plaid 5-day settle · <b>{data.days_left} day{data.days_left === 1 ? "" : "s"} left</b> · eligible {data.eligible_at}.</>
+          : <>Settle period complete — next Plaid sync will auto-finalize eligible accounts.</>}
+      </div>
+      {companies.map(c => (
+        <div key={c.company_id} className="rounded-md border border-slate-100 p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+            <div className="text-sm font-medium text-slate-900">{c.company_name}</div>
+            <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+              {c.totals.done    > 0 && <span className="text-emerald-700 font-medium">{c.totals.done} done</span>}
+              {c.totals.waiting > 0 && <span className="text-cyan-700 font-medium">{c.totals.waiting} waiting</span>}
+              {c.totals.ready   > 0 && <span className="text-amber-700 font-medium">{c.totals.ready} ready</span>}
+              {c.totals.manual  > 0 && <span className="text-rose-700 font-medium">{c.totals.manual} manual</span>}
+            </div>
+          </div>
+          <ul className="space-y-1">
+            {c.rows.map(r => (
+              <li key={r.account_id}
+                  className="flex items-center gap-2 text-[12px] px-2 py-1 rounded border border-slate-100">
+                <ReconStatusIcon status={r.status} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-slate-800 truncate">{r.account_name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
+                  </div>
+                </div>
+                {r.status === "ineligible_non_plaid" && (
+                  <button
+                    onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
+                    className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
+                    data-testid={`v7-ip-autorecon-manual-${r.account_id}`}
+                  >
+                    Reconcile →
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function InProgressSentPro({ professional, priorUnclosed, onNav }) {
+  const combined = [
+    ...professional.map(p => ({ ...p, _kind: "pro" })),
+    ...priorUnclosed.map(p => ({ ...p, _kind: "closing" })),
+  ];
+  if (!combined.length) return <_EmptyTab text="Nothing has been escalated to a professional." />;
+  return (
+    <ul className="divide-y divide-slate-100">
+      {combined.map((p, i) => (
+        <li key={`${p._kind}-${p.id || i}`}
+            onClick={() => p.route && onNav(p.route)}
+            className={`py-3 ${p.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
+            data-testid={`v7-ip-pro-${i}`}>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-slate-900 truncate">
+                {p.company_name || p.company || p.title || "—"}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">
+                {p._kind === "closing"
+                  ? `Prior-month close still open · ${p.month || ""}`
+                  : (p.title || p.summary || p.kind || "Needs professional judgment")}
+              </div>
+            </div>
+            <div className="text-[11px] text-indigo-700 font-medium shrink-0">
+              {p._kind === "closing" ? "Closing" : "Judgment"}
+            </div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InProgressCockpit({ items, onNav }) {
+  if (!items.length) return <_EmptyTab text="No cockpit follow-ups outstanding." />;
+  return (
+    <ul className="divide-y divide-slate-100">
+      {items.map((it, i) => (
+        <li key={it.id || i}
+            onClick={() => it.route && onNav(it.route)}
+            className={`py-3 ${it.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
+            data-testid={`v7-ip-cockpit-${i}`}>
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium text-slate-900 truncate">
+                {it.company || it.title || "—"}
+              </div>
+              <div className="text-[11px] text-slate-500 truncate">
+                {it.summary || it.reason || it.kind || "Needs human follow-up"}
+              </div>
+            </div>
+            <div className="text-[11px] text-sky-700 font-medium shrink-0">Assistant</div>
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+
 
 // -------- Closings panel (collapsible, opened from hero tile) -----
 function ClosingsPanel({ grid, total, onNav, refetch, onClose }) {

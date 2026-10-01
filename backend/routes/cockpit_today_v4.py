@@ -216,6 +216,147 @@ async def cockpit_pending_reconciliations(
     }
 
 
+@router.get("/scheduled-qc")
+async def cockpit_scheduled_qc(
+    user: dict = Depends(get_current_user),
+):
+    """Scheduled Quick Check-in roster for the In Progress panel.
+
+    Three signals, cross-company:
+      * `scheduled`      — batches in `scheduled` state waiting to be
+                           sent on their `scheduled_for` date.
+      * `sent_awaiting`  — batches whose email was dispatched but the
+                           client has not answered or let it expire.
+      * `last_completed` — most recent completion per (company, client)
+                           so pros can see who's engaged and who's gone
+                           quiet. Includes "never completed" rows for
+                           clients we've emailed at least once but who
+                           never finished a batch.
+    """
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"scheduled": [], "sent_awaiting": [], "last_completed": []}
+    now = datetime.now(timezone.utc)
+
+    co_names: dict[str, str] = {}
+    async for c in db.companies.find(
+        {"id": {"$in": accessible}}, {"_id": 0, "id": 1, "name": 1},
+    ):
+        co_names[c["id"]] = c.get("name") or "Untitled"
+
+    scheduled: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id": {"$in": accessible},
+        "status": "scheduled",
+    }).sort("scheduled_for", 1).limit(200):
+        scheduled.append({
+            "batch_id":     b.get("id"),
+            "company_id":   b.get("company_id"),
+            "company_name": co_names.get(b.get("company_id") or "", "—"),
+            "client_email": b.get("client_email"),
+            "scheduled_for": b.get("scheduled_for"),
+            "item_count":   len(b.get("items") or []),
+            "note":         b.get("note") or "",
+        })
+
+    sent_awaiting: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id":    {"$in": accessible},
+        "status":        "open",
+        "email_sent_at": {"$ne": None},
+    }).sort("email_sent_at", -1).limit(300):
+        sent_at = b.get("email_sent_at")
+        try:
+            sent_dt = (sent_at if isinstance(sent_at, datetime)
+                       else datetime.fromisoformat(str(sent_at).replace("Z", "+00:00")))
+            if sent_dt.tzinfo is None:
+                sent_dt = sent_dt.replace(tzinfo=timezone.utc)
+            days_waiting = max(0, (now - sent_dt).days)
+        except Exception:  # noqa: BLE001
+            days_waiting = 0
+        answered = int(b.get("answer_count") or 0)
+        total = len(b.get("items") or [])
+        sent_awaiting.append({
+            "batch_id":     b.get("id"),
+            "company_id":   b.get("company_id"),
+            "company_name": co_names.get(b.get("company_id") or "", "—"),
+            "client_email": b.get("client_email"),
+            "email_sent_at": sent_at,
+            "expires_at":   b.get("expires_at"),
+            "days_waiting": days_waiting,
+            "answered":     answered,
+            "item_count":   total,
+            "progress_pct": int(100 * answered / total) if total else 0,
+        })
+
+    # Last completed per (company, client_email). Groups across all
+    # accessible companies in one aggregate pass. Also surface clients
+    # we've emailed at least once but have never completed anything.
+    last_completed_map: dict[tuple[str, str], dict] = {}
+    async for row in db.client_review_batches.aggregate([
+        {"$match": {
+            "company_id": {"$in": accessible},
+            "status":     "completed",
+        }},
+        {"$sort":  {"completed_at": -1}},
+        {"$group": {
+            "_id": {"cid": "$company_id", "email": "$client_email"},
+            "completed_at": {"$first": "$completed_at"},
+            "batch_id":     {"$first": "$id"},
+            "item_count":   {"$first": {"$size": {"$ifNull": ["$items", []]}}},
+        }},
+    ]):
+        k = (row["_id"]["cid"], row["_id"]["email"] or "")
+        last_completed_map[k] = {
+            "company_id":   row["_id"]["cid"],
+            "company_name": co_names.get(row["_id"]["cid"], "—"),
+            "client_email": row["_id"]["email"],
+            "completed_at": row.get("completed_at"),
+            "batch_id":     row.get("batch_id"),
+            "item_count":   row.get("item_count") or 0,
+            "never":        False,
+        }
+
+    # Any (company, client) we've emailed but never completed → surface
+    # too so the pro sees stale engagements.
+    seen_contacted: set[tuple[str, str]] = set()
+    async for row in db.client_review_batches.aggregate([
+        {"$match": {
+            "company_id":    {"$in": accessible},
+            "email_sent_at": {"$ne": None},
+        }},
+        {"$group": {
+            "_id": {"cid": "$company_id", "email": "$client_email"},
+            "first_sent":   {"$min": "$email_sent_at"},
+        }},
+    ]):
+        k = (row["_id"]["cid"], row["_id"]["email"] or "")
+        seen_contacted.add(k)
+        if k in last_completed_map:
+            continue
+        last_completed_map[k] = {
+            "company_id":   row["_id"]["cid"],
+            "company_name": co_names.get(row["_id"]["cid"], "—"),
+            "client_email": row["_id"]["email"],
+            "completed_at": None,
+            "first_sent":   row.get("first_sent"),
+            "never":        True,
+        }
+
+    last_completed = sorted(
+        last_completed_map.values(),
+        key=lambda r: (r["never"], -(1 if r.get("completed_at") else 0),
+                       str(r.get("completed_at") or r.get("first_sent") or "")),
+        reverse=False,
+    )
+
+    return {
+        "scheduled":      scheduled,
+        "sent_awaiting":  sent_awaiting,
+        "last_completed": last_completed,
+    }
+
+
 @router.get("/today-v4")
 async def today_v4(
     days: int = Query(7, ge=1, le=90),
