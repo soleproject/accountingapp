@@ -1429,6 +1429,8 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
     scheduledQc:   scheduledQc ? {
       ...scheduledQc,
       scheduled:      byCo(scheduledQc.scheduled),
+      in_progress:    byCo(scheduledQc.in_progress || []),
+      completed:      byCo(scheduledQc.completed || []),
       missed:         byCo(scheduledQc.missed || []),
       sent_awaiting:  byCo(scheduledQc.sent_awaiting),
       expired_no_response: byCo(scheduledQc.expired_no_response || []),
@@ -1443,8 +1445,9 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
     const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
     const cockpit   = filtered.assistant.length;
     const scheduled = filtered.scheduledQc
-      ? (filtered.scheduledQc.scheduled.length + (filtered.scheduledQc.missed || []).length
-         + filtered.scheduledQc.sent_awaiting.length + (filtered.scheduledQc.expired_no_response || []).length)
+      ? (filtered.scheduledQc.scheduled.length + (filtered.scheduledQc.in_progress || []).length
+         + (filtered.scheduledQc.missed || []).length + filtered.scheduledQc.sent_awaiting.length
+         + (filtered.scheduledQc.expired_no_response || []).length)
       : null;
     const autorecon = filtered.autoRecon
       ? (filtered.autoRecon.companies || []).reduce(
@@ -1645,12 +1648,23 @@ function _fmtRelDays(iso) {
 
 const QC_PILLS = [
   { key: "scheduled",   label: "Scheduled" },
+  { key: "in_progress", label: "In Progress" },
   { key: "missed",      label: "Missed" },
   { key: "no_response", label: "No Response" },
+  { key: "completed",   label: "Completed" },
 ];
 
-// One row shared by all three Scheduled QC pills: company / email line on
-// the left, a status string on the right, and the inline Open QC button.
+function _fmtDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-US", {
+      weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+  } catch { return "—"; }
+}
+
+// One row shared by all Scheduled QC pills: company / email line on the
+// left, a status string on the right, and the inline Open QC button.
 function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta }) {
   return (
     <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
@@ -1659,7 +1673,7 @@ function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta }) {
         <div className="text-[11px] text-slate-500 truncate">{sub}</div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        <div className={`text-[11px] font-medium ${statusClass}`}>{status}</div>
+        <div className={`text-[11px] font-medium text-right ${statusClass}`}>{status}</div>
         <OpenQcButton token={r.client_token} testid={`${testid}-open`}
           onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
                                    client_email: r.client_email, meta })} />
@@ -1681,24 +1695,33 @@ function QcSection({ title, count, empty, children }) {
   );
 }
 
+const _plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
 function InProgressScheduledQc({ data, onNav, onOpenQc }) {
   const [pill, setPill] = useState("scheduled");
   if (!data) {
     return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
   }
   const {
-    scheduled = [], missed = [], sent_awaiting = [],
-    expired_no_response = [], last_completed = [],
+    scheduled = [], in_progress = [], missed = [], sent_awaiting = [],
+    expired_no_response = [], completed = [], last_completed = [],
   } = data;
-  const inFlight   = sent_awaiting.filter(b => (b.answered || 0) > 0);
-  const noAnswer   = sent_awaiting.filter(b => !(b.answered || 0));
   const neverDone  = last_completed.filter(r => r.never);
   const pillCounts = {
-    scheduled:   scheduled.length + inFlight.length,
+    scheduled:   scheduled.length,
+    in_progress: in_progress.length,
     missed:      missed.length,
-    no_response: noAnswer.length + expired_no_response.length,
+    no_response: sent_awaiting.length + expired_no_response.length,
+    completed:   completed.length,
   };
-  const items = (arr) => arr.slice(0, 20);
+  const items = (arr) => arr.slice(0, 25);
+  const badgeTone = (key, n, on) => {
+    if (on) return "bg-white/20 text-white";
+    if (n === 0) return "bg-slate-100 text-slate-500";
+    return { scheduled: "bg-indigo-100 text-indigo-700", in_progress: "bg-sky-100 text-sky-700",
+             missed: "bg-amber-100 text-amber-700", no_response: "bg-rose-100 text-rose-700",
+             completed: "bg-emerald-100 text-emerald-700" }[key];
+  };
 
   return (
     <div className="space-y-4">
@@ -1714,53 +1737,61 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
                          : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
                     }`}>
               {p.label}
-              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
-                on ? "bg-white/20 text-white" : p.key === "scheduled" ? "bg-slate-100 text-slate-600"
-                   : n > 0 ? (p.key === "missed" ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-700")
-                   : "bg-slate-100 text-slate-500"
-              }`}>{n}</span>
+              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${badgeTone(p.key, n, on)}`}>{n}</span>
             </button>
           );
         })}
       </div>
 
-      {pill === "scheduled" && (<>
-        <QcSection title="Upcoming" count={scheduled.length} empty="Nothing scheduled.">
+      {pill === "scheduled" && (
+        <QcSection title="Client picked a time" count={scheduled.length}
+                   empty="No upcoming times — clients haven't scheduled a check-in yet.">
           {items(scheduled).map(b => (
             <QcRow key={b.batch_id} r={b} testid={`v7-ip-sched-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"}${b.note ? ` · ${b.note}` : ""}`}
-              status={`Sends ${_fmtDate(b.scheduled_for)}`} statusClass="text-indigo-700"
-              meta={`${b.item_count} items · sends ${_fmtDate(b.scheduled_for)}`} />
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")}${b.note ? ` · ${b.note}` : ""}`}
+              status={_fmtDateTime(b.scheduled_for)} statusClass="text-indigo-700"
+              meta={`${_plural(b.item_count, "question")} · ${_fmtDateTime(b.scheduled_for)}`} />
           ))}
         </QcSection>
-        <QcSection title="Emailed · in progress" count={inFlight.length} empty="No partially answered check-ins.">
-          {items(inFlight).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-await-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${b.answered}/${b.item_count} answered`}
-              status={`Sent ${_fmtRelDays(b.email_sent_at)}`} statusClass="text-emerald-700"
-              meta={`${b.answered}/${b.item_count} answered`} />
-          ))}
+      )}
+
+      {pill === "in_progress" && (
+        <QcSection title="Started · not finished" count={in_progress.length}
+                   empty="No check-ins are mid-flight right now.">
+          {items(in_progress).map(b => {
+            const done = (b.answered || 0) + (b.deferred || 0);
+            const bits = [`${b.client_email || "—"}`, `${done}/${b.item_count} done`];
+            if (b.snoozed_count) bits.push(`${_plural(b.snoozed_count, "question")} parked`);
+            const when = b.follow_up_at || b.next_snooze_at;
+            return (
+              <QcRow key={b.batch_id} r={b} testid={`v7-ip-inprog-${b.batch_id}`} onOpenQc={onOpenQc}
+                sub={bits.join(" · ")}
+                status={when ? `Follow-up ${_fmtDateTime(when)}` : `Last activity ${_fmtRelDays(b.updated_at)}`}
+                statusClass={when ? "text-sky-700" : "text-slate-500"}
+                meta={`${done}/${b.item_count} done`} />
+            );
+          })}
         </QcSection>
-      </>)}
+      )}
 
       {pill === "missed" && (
         <QcSection title="Scheduled time passed · no engagement" count={missed.length}
                    empty="No missed check-ins — every scheduled slot was kept.">
           {items(missed).map(b => (
             <QcRow key={b.batch_id} r={b} testid={`v7-ip-missed-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"} · was ${_fmtDate(b.scheduled_for)}${
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · was ${_fmtDateTime(b.scheduled_for)}${
                 b.nudge_sent ? " · nudged" : b.reminder_sent ? " · reminded" : ""}`}
               status={b.days_past === 0 ? "Missed today" : `Missed · ${b.days_past}d ago`}
               statusClass={b.days_past >= 3 ? "text-rose-600" : "text-amber-600"}
-              meta={`missed ${_fmtDate(b.scheduled_for)}`} />
+              meta={`missed ${_fmtDateTime(b.scheduled_for)}`} />
           ))}
         </QcSection>
       )}
 
       {pill === "no_response" && (<>
-        <QcSection title="Emailed · nothing answered" count={noAnswer.length}
-                   empty="Every emailed check-in has at least one answer.">
-          {items(noAnswer).map(b => (
+        <QcSection title="Emailed · never opened or answered" count={sent_awaiting.length}
+                   empty="Every emailed check-in has been engaged with.">
+          {items(sent_awaiting).map(b => (
             <QcRow key={b.batch_id} r={b} testid={`v7-ip-noresp-${b.batch_id}`} onOpenQc={onOpenQc}
               sub={`${b.client_email || "—"} · 0/${b.item_count} answered`}
               status={`Sent ${_fmtRelDays(b.email_sent_at)}`}
@@ -1768,11 +1799,11 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
               meta={`0/${b.item_count} answered`} />
           ))}
         </QcSection>
-        <QcSection title="Link expired · never opened" count={expired_no_response.length}
+        <QcSection title="Link expired · never answered" count={expired_no_response.length}
                    empty="No check-ins have lapsed unanswered in the last 60 days.">
           {items(expired_no_response).map(b => (
             <QcRow key={b.batch_id} r={b} testid={`v7-ip-expired-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${b.item_count} item${b.item_count === 1 ? "" : "s"} · sent ${_fmtDate(b.email_sent_at || b.scheduled_for)}`}
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · sent ${_fmtDate(b.email_sent_at || b.scheduled_for)}`}
               status={`Expired ${_fmtRelDays(b.expired_at)}`} statusClass="text-rose-600"
               meta={`expired ${_fmtRelDays(b.expired_at)}`} />
           ))}
@@ -1788,6 +1819,18 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
           </QcSection>
         )}
       </>)}
+
+      {pill === "completed" && (
+        <QcSection title="Finished · newest first" count={completed.length}
+                   empty="No completed check-ins yet.">
+          {items(completed).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-done-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${_plural(b.answered, "answer")}${b.deferred ? ` · ${b.deferred} to bookkeeper` : ""} · ${_plural(b.item_count, "question")}`}
+              status={`Completed ${_fmtDateTime(b.completed_at)}`} statusClass="text-emerald-700"
+              meta={`completed ${_fmtRelDays(b.completed_at)}`} />
+          ))}
+        </QcSection>
+      )}
     </div>
   );
 }

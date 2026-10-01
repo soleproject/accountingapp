@@ -628,3 +628,8 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-01 — Scheduled QC pills
 - Scheduled QC tab now has Scheduled / Missed / No Response pills. Scheduled = upcoming + emailed-in-progress; Missed = scheduled_for passed with zero engagement (shows reminded/nudged); No Response = emailed with 0 answers + expired-unanswered (60d) + never-completed clients.
 - Backend scheduled-qc returns `missed` and `expired_no_response` arrays.
+
+## 2026-10-01 — QC lifecycle pills + client reminders
+- Scheduled QC pills: Scheduled (client-picked date+time, future) / In Progress (engaged: answers, defers, follow-up or parked questions; shows follow-up time) / Missed / No Response / Completed.
+- Client QC footer: "Don't have it now — remind me" (per-question snooze → POST /{token}/items/{id}/snooze, item parked & skipped, ParkedScreen when all remaining are parked) and "I'll finish later" (POST /{token}/follow-up). ScheduleModal generalized with presets (Tomorrow 9 AM / In 3 days / Next Monday).
+- Cron send_follow_up_reminders() in client_review_tick sends one "follow_up" email when follow_up_at / snoozed_until arrives.

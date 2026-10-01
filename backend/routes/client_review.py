@@ -106,6 +106,7 @@ async def get_session(token: str):
         "answer_count":     batch.get("answer_count", 0),
         "defer_count":      batch.get("defer_count", 0),
         "scheduled_for":    batch.get("scheduled_for"),
+        "follow_up_at":     batch.get("follow_up_at"),
         "expires_at":       batch.get("expires_at"),
         "completed_at":     batch.get("completed_at"),
         "company_name":     meta["company_name"],
@@ -2707,6 +2708,64 @@ async def post_reschedule(token: str, body: ScheduleRequest):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return result
+
+
+class FollowUpRequest(BaseModel):
+    follow_up_at: str
+    note: Optional[str] = None
+
+
+@router.post("/{token}/follow-up")
+async def post_follow_up(token: str, body: FollowUpRequest):
+    """Client has started but can't finish now — 'I'll finish later,
+    remind me'. One reminder email fires at `follow_up_at`."""
+    batch = await _resolve_batch(token)
+    if batch.get("status") == "completed":
+        raise HTTPException(409, "Session already completed")
+    try:
+        dt = cr.parse_future_before_expiry(body.follow_up_at, batch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.client_review_batches.update_one(
+        {"id": batch["id"]},
+        {"$set": {"follow_up_at":      dt.isoformat(),
+                  "follow_up_note":    body.note or "",
+                  "follow_up_sent_at": None,
+                  "updated_at":        _now_iso()}},
+    )
+    return {"ok": True, "follow_up_at": dt.isoformat()}
+
+
+class SnoozeRequest(BaseModel):
+    remind_at: str
+    note: Optional[str] = None
+
+
+@router.post("/{token}/items/{item_id}/snooze")
+async def post_snooze(token: str, item_id: str, body: SnoozeRequest):
+    """Per-question 'I don't have it now — remind me on …'. The item is
+    parked (skipped in the flow) and resurfaces via one reminder email."""
+    batch = await _resolve_batch(token)
+    if batch.get("status") == "completed":
+        raise HTTPException(409, "Session already completed")
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    try:
+        dt = cr.parse_future_before_expiry(body.remind_at, batch)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.snoozed_until":       dt.isoformat(),
+                  "items.$.snooze_note":         body.note or "",
+                  "items.$.snooze_reminded_at":  None,
+                  "updated_at":                  _now_iso()}},
+    )
+    return {"ok": True, "snoozed_until": dt.isoformat()}
 
 
 # --------------------------------------------------------------------------

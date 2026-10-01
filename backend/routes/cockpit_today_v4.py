@@ -235,8 +235,8 @@ async def cockpit_scheduled_qc(
     """
     accessible = await require_firm_or_pro(user)
     if not accessible:
-        return {"scheduled": [], "missed": [], "sent_awaiting": [],
-                "expired_no_response": [], "last_completed": []}
+        return {"scheduled": [], "in_progress": [], "missed": [], "sent_awaiting": [],
+                "expired_no_response": [], "completed": [], "last_completed": []}
     now = datetime.now(timezone.utc)
 
     co_names: dict[str, str] = {}
@@ -245,40 +245,75 @@ async def cockpit_scheduled_qc(
     ):
         co_names[c["id"]] = c.get("name") or "Untitled"
 
+    def _dt(v):
+        try:
+            d = v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except Exception:  # noqa: BLE001
+            return None
+
+    # One pass over every live batch. Buckets:
+    #   scheduled   — client picked a time (status=scheduled) that is still ahead
+    #   in_progress — client has engaged (answers / defers / snoozes / follow-up)
+    #                 but hasn't finished
+    #   missed      — picked time has passed with zero engagement
+    #   no_response — emailed, never engaged, no time picked (or picked time
+    #                 not applicable)
     scheduled: list[dict] = []
+    in_progress: list[dict] = []
     missed: list[dict] = []
+    sent_awaiting: list[dict] = []
     async for b in db.client_review_batches.find({
         "company_id": {"$in": accessible},
-        "status": "scheduled",
-    }).sort("scheduled_for", 1).limit(200):
-        engaged = (int(b.get("answer_count") or 0) + int(b.get("defer_count") or 0)) > 0
-        sf = b.get("scheduled_for")
-        try:
-            sf_dt = datetime.fromisoformat(str(sf).replace("Z", "+00:00"))
-            if sf_dt.tzinfo is None:
-                sf_dt = sf_dt.replace(tzinfo=timezone.utc)
-            days_past = (now - sf_dt).days if sf_dt < now else -1
-        except Exception:  # noqa: BLE001
-            days_past = -1
+        "status": {"$in": ["scheduled", "open", "in_progress", "sent", "reminded"]},
+    }).sort("updated_at", -1).limit(400):
+        items = b.get("items") or []
+        total = len(items)
+        answered = int(b.get("answer_count") or 0)
+        deferred = int(b.get("defer_count") or 0)
+        snoozed = [it for it in items
+                   if it.get("snoozed_until") and not it.get("answered_at") and not it.get("deferred")]
+        engaged = (answered + deferred) > 0 or bool(b.get("follow_up_at")) or bool(snoozed)
+        sf_dt = _dt(b.get("scheduled_for"))
+        sent_dt = _dt(b.get("email_sent_at"))
+        days_waiting = max(0, (now - sent_dt).days) if sent_dt else 0
+        next_snooze = min((it["snoozed_until"] for it in snoozed), default=None)
         row = {
-            "batch_id":     b.get("id"),
-            "client_token": b.get("client_token"),
-            "company_id":   b.get("company_id"),
-            "company_name": co_names.get(b.get("company_id") or "", "—"),
-            "client_email": b.get("client_email"),
-            "scheduled_for": sf,
-            "item_count":   len(b.get("items") or []),
-            "note":         b.get("note") or "",
-            "answered":     int(b.get("answer_count") or 0),
-            "days_past":    max(0, days_past),
+            "batch_id":      b.get("id"),
+            "client_token":  b.get("client_token"),
+            "company_id":    b.get("company_id"),
+            "company_name":  co_names.get(b.get("company_id") or "", "—"),
+            "client_email":  b.get("client_email"),
+            "scheduled_for": b.get("scheduled_for"),
+            "email_sent_at": b.get("email_sent_at"),
+            "expires_at":    b.get("expires_at"),
+            "item_count":    total,
+            "answered":      answered,
+            "deferred":      deferred,
+            "progress_pct":  int(100 * (answered + deferred) / total) if total else 0,
+            "days_waiting":  days_waiting,
+            "note":          b.get("note") or "",
             "reminder_sent": bool(b.get("reminder_sent_at")),
             "nudge_sent":    bool(b.get("nudge_sent_at")),
+            "follow_up_at":  b.get("follow_up_at"),
+            "snoozed_count": len(snoozed),
+            "next_snooze_at": next_snooze,
+            "updated_at":    b.get("updated_at"),
         }
-        if days_past >= 0 and not engaged:
-            missed.append(row)
-        else:
-            scheduled.append(row)
+        if engaged:
+            in_progress.append(row)
+        elif b.get("status") == "scheduled" and sf_dt is not None:
+            if sf_dt >= now:
+                scheduled.append(row)
+            else:
+                row["days_past"] = (now - sf_dt).days
+                missed.append(row)
+        elif sent_dt is not None:
+            sent_awaiting.append(row)
+    scheduled.sort(key=lambda r: str(r["scheduled_for"]))
     missed.sort(key=lambda r: -r["days_past"])
+    in_progress.sort(key=lambda r: str(r.get("follow_up_at") or r.get("next_snooze_at") or "~") + str(r.get("updated_at") or ""))
+    sent_awaiting.sort(key=lambda r: -r["days_waiting"])
 
     # Ghosted — link lapsed with zero answers in the last 60 days.
     expired_no_response: list[dict] = []
@@ -286,7 +321,7 @@ async def cockpit_scheduled_qc(
         "company_id":   {"$in": accessible},
         "status":       "expired",
         "expired_at":   {"$gte": (now - timedelta(days=60)).isoformat()},
-        "$or": [{"answer_count": {"$in": [None, 0]}}],
+        "answer_count": {"$in": [None, 0]},
     }).sort("expired_at", -1).limit(100):
         expired_no_response.append({
             "batch_id":     b.get("id"),
@@ -300,35 +335,22 @@ async def cockpit_scheduled_qc(
             "item_count":   len(b.get("items") or []),
         })
 
-    sent_awaiting: list[dict] = []
+    completed: list[dict] = []
     async for b in db.client_review_batches.find({
-        "company_id":    {"$in": accessible},
-        "status":        "open",
-        "email_sent_at": {"$ne": None},
-    }).sort("email_sent_at", -1).limit(300):
-        sent_at = b.get("email_sent_at")
-        try:
-            sent_dt = (sent_at if isinstance(sent_at, datetime)
-                       else datetime.fromisoformat(str(sent_at).replace("Z", "+00:00")))
-            if sent_dt.tzinfo is None:
-                sent_dt = sent_dt.replace(tzinfo=timezone.utc)
-            days_waiting = max(0, (now - sent_dt).days)
-        except Exception:  # noqa: BLE001
-            days_waiting = 0
-        answered = int(b.get("answer_count") or 0)
-        total = len(b.get("items") or [])
-        sent_awaiting.append({
+        "company_id": {"$in": accessible},
+        "status":     "completed",
+    }).sort("completed_at", -1).limit(60):
+        completed.append({
             "batch_id":     b.get("id"),
             "client_token": b.get("client_token"),
             "company_id":   b.get("company_id"),
             "company_name": co_names.get(b.get("company_id") or "", "—"),
             "client_email": b.get("client_email"),
-            "email_sent_at": sent_at,
-            "expires_at":   b.get("expires_at"),
-            "days_waiting": days_waiting,
-            "answered":     answered,
-            "item_count":   total,
-            "progress_pct": int(100 * answered / total) if total else 0,
+            "completed_at": b.get("completed_at"),
+            "email_sent_at": b.get("email_sent_at"),
+            "item_count":   len(b.get("items") or []),
+            "answered":     int(b.get("answer_count") or 0),
+            "deferred":     int(b.get("defer_count") or 0),
         })
 
     # Last completed per (company, client_email). Groups across all
@@ -396,9 +418,11 @@ async def cockpit_scheduled_qc(
 
     return {
         "scheduled":      scheduled,
+        "in_progress":    in_progress,
         "missed":         missed,
         "sent_awaiting":  sent_awaiting,
         "expired_no_response": expired_no_response,
+        "completed":      completed,
         "last_completed": last_completed,
     }
 

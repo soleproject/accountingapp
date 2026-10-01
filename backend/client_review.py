@@ -1025,6 +1025,23 @@ async def schedule_batch(batch: dict, scheduled_for_iso: str) -> dict:
     return {"ok": True, "scheduled_for": dt.isoformat()}
 
 
+def parse_future_before_expiry(iso: str, batch: dict) -> datetime:
+    """Shared validator for follow-up / snooze times: must be in the
+    future and before the batch's own expiry."""
+    dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if dt <= now:
+        raise ValueError("Please pick a time in the future")
+    if batch.get("expires_at"):
+        expires_at = datetime.fromisoformat(
+            str(batch["expires_at"]).replace("Z", "+00:00"))
+        if dt >= expires_at:
+            raise ValueError("That's after this check-in expires — pick an earlier time")
+    return dt
+
+
 def _batch_has_engagement(batch: dict) -> bool:
     """True if the client has interacted with the batch in any way —
     answered an item, deferred one, or exchanged even one AI turn.
@@ -1032,8 +1049,10 @@ def _batch_has_engagement(batch: dict) -> bool:
     """
     if batch.get("answer_count", 0) or batch.get("defer_count", 0):
         return True
+    if batch.get("follow_up_at"):
+        return True
     for it in batch.get("items") or []:
-        if it.get("answered_at") or it.get("deferred"):
+        if it.get("answered_at") or it.get("deferred") or it.get("snoozed_until"):
             return True
         if it.get("messages"):
             return True
@@ -1089,6 +1108,21 @@ async def _dispatch_reminder(batch: dict, *, kind: str) -> dict:
   </div>"""
         text_ctas = (f"Answer now:      {review_url}\n"
                      f"Pick a new time: {schedule_url}\n")
+    elif kind == "follow_up":
+        subject = f"Picking up where you left off — {item_count} quick question{'s' if item_count != 1 else ''}"
+        opening = ("You asked us to remind you about the questions you "
+                   "didn't have handy last time. They're one tap away:")
+        cta_row = f"""
+  <div style="margin:24px 0;">
+    <a href="{review_url}"
+       target="_blank" rel="noopener noreferrer"
+       style="display:inline-block;padding:12px 20px;background:#0f172a;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;margin-right:12px;margin-bottom:8px;">Finish now →</a>
+    <a href="{schedule_url}"
+       target="_blank" rel="noopener noreferrer"
+       style="display:inline-block;padding:12px 20px;background:#ffffff;color:#0f172a;text-decoration:none;border-radius:8px;font-weight:600;font-size:14px;border:1px solid #cbd5e1;">Pick another time</a>
+  </div>"""
+        text_ctas = (f"Finish now:        {review_url}\n"
+                     f"Pick another time: {schedule_url}\n")
     else:  # passive_miss
         subject = f"Still here when you have a minute — {item_count} quick question{'s' if item_count != 1 else ''}"
         opening = ("We missed our scheduled time earlier. No worries — "
@@ -1206,6 +1240,48 @@ async def send_passive_miss_nudges() -> dict:
     return {"sent": sent, "errored": errored}
 
 
+async def send_follow_up_reminders() -> dict:
+    """Cron tick: fire the one-shot 'I'll finish later' batch reminder
+    and per-question snooze reminders whose time has arrived. One email
+    per batch per tick; stamps `follow_up_sent_at` / item
+    `snooze_reminded_at` so nothing fires twice."""
+    now = now_iso()
+    sent = errored = 0
+    cursor = db.client_review_batches.find({
+        "status": {"$nin": ["completed", "expired"]},
+        "$or": [
+            {"follow_up_at": {"$ne": None, "$lte": now}, "follow_up_sent_at": None},
+            {"items": {"$elemMatch": {
+                "snoozed_until": {"$ne": None, "$lte": now},
+                "snooze_reminded_at": None,
+                "answered_at": None,
+            }}},
+        ],
+    })
+    async for batch in cursor:
+        try:
+            result = await _dispatch_reminder(batch, kind="follow_up")
+            if result.get("status") != "sent":
+                continue
+            sent += 1
+            sets = {"updated_at": now}
+            if batch.get("follow_up_at") and batch["follow_up_at"] <= now \
+                    and not batch.get("follow_up_sent_at"):
+                sets["follow_up_sent_at"] = now
+            items = batch.get("items") or []
+            for idx, it in enumerate(items):
+                su = it.get("snoozed_until")
+                if su and su <= now and not it.get("snooze_reminded_at") \
+                        and not it.get("answered_at"):
+                    sets[f"items.{idx}.snooze_reminded_at"] = now
+            await db.client_review_batches.update_one(
+                {"id": batch["id"]}, {"$set": sets})
+        except Exception:  # noqa: BLE001
+            errored += 1
+            logger.exception("follow-up reminder failed for batch %s", batch.get("id"))
+    return {"sent": sent, "errored": errored}
+
+
 async def client_review_tick() -> dict:
     """One combined cron tick for the whole batch flow. The parent
     scheduler calls this every N minutes; internally we sequence:
@@ -1221,6 +1297,7 @@ async def client_review_tick() -> dict:
     """
     r = await send_scheduled_reminders()
     n = await send_passive_miss_nudges()
+    f = await send_follow_up_reminders()
     e = await expire_stale_batches()
     t = await trigger_and_dispatch_batches()
     # Vendor outreach follow-up sweep (Milestone G).
@@ -1230,8 +1307,8 @@ async def client_review_tick() -> dict:
     except Exception:  # noqa: BLE001
         v = {"error": "vendor_outreach_tick_failed"}
         logger.exception("vendor_outreach_tick failed")
-    return {"reminders": r, "nudges": n, "expired": e, "triggered": t,
-            "vendor_outreach": v}
+    return {"reminders": r, "nudges": n, "follow_ups": f, "expired": e,
+            "triggered": t, "vendor_outreach": v}
 
 
 # --------------------------------------------------------------------------
@@ -1258,6 +1335,7 @@ async def expire_stale_batches() -> dict:
                 {"nudge_sent_at": {"$ne": None, "$lt": nudge_cutoff}},
                 {"answer_count": 0},
                 {"defer_count": 0},
+                {"follow_up_at": None},
             ]},
         ],
     })
