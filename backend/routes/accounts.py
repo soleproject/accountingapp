@@ -1129,7 +1129,11 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
 
 
 @router.delete("/companies/{cid}/accounts/{aid}")
-async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_user)):
+async def delete_account(
+    cid: str, aid: str,
+    force: bool = Query(False, description="Delete even when references exist (admin override). Orphans refs."),
+    user: dict = Depends(get_current_user),
+):
     await require_company(user, cid)
     # Capture qbo_id BEFORE local delete for the auto-delete hook.
     doomed = await db.accounts.find_one(
@@ -1139,6 +1143,54 @@ async def delete_account(cid: str, aid: str, user: dict = Depends(get_current_us
     # Full doc snapshot for the audit trail (separate query so we
     # keep the lightweight projected read above for the QBO hook).
     before_acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if not before_acct:
+        raise HTTPException(404, "Account not found")
+    # Guardrail: refuse to delete an account that still has activity.
+    # Historically a plain delete here orphaned transaction category legs
+    # (invisible to the Balance Sheet → broke A = L + E). Mirror the
+    # same reference-check pattern used in ai_first_routes/_accounts_in_use
+    # and statements.py. Pass ?force=true to override (not exposed in UI).
+    if not force:
+        txn_cat = await db.transactions.count_documents(
+            {"company_id": cid, "category_account_id": aid},
+        )
+        txn_bank = await db.transactions.count_documents(
+            {"company_id": cid, "bank_account_id": aid},
+        )
+        je_lines = await db.journal_entries.count_documents(
+            {"company_id": cid, "lines.account_id": aid},
+        )
+        split_refs = await db.transactions.count_documents(
+            {"company_id": cid, "splits.category_account_id": aid},
+        )
+        rule_refs = await db.rules.count_documents(
+            {"company_id": cid, "category_account_id": aid},
+        )
+        total = txn_cat + txn_bank + je_lines + split_refs + rule_refs
+        if total:
+            raise HTTPException(
+                409,
+                {
+                    "message": (
+                        "This account is still in use. Merge it into another "
+                        "account or reclassify the activity first — deleting "
+                        "it would orphan ledger entries and unbalance the "
+                        "Balance Sheet."
+                    ),
+                    "references": {
+                        "transactions_category": txn_cat,
+                        "transactions_bank": txn_bank,
+                        "transaction_splits": split_refs,
+                        "journal_entries": je_lines,
+                        "rules": rule_refs,
+                    },
+                    "account": {
+                        "id": aid,
+                        "code": before_acct.get("code"),
+                        "name": before_acct.get("name"),
+                    },
+                },
+            )
     await db.accounts.delete_one({"id": aid, "company_id": cid})
     # Cascade: drop any auto-spawned Loan row that pointed at this account
     # so the Loans page and CoA never desync.
@@ -1769,18 +1821,27 @@ async def accounts_import_undo(
     created_ids = batch.get("created_ids") or []
     snapshots = batch.get("updated_snapshots") or []
 
-    # Refuse to delete accounts that already have JE activity — the
-    # import would leave stranded lines. Better to surface the conflict
-    # so the user picks a different fix (e.g. merge).
+    # Refuse to delete accounts that already have activity — orphaning
+    # them would strand transaction legs (invisible on BS) or JE lines.
+    # Checks mirror routes.delete_account's guardrail.
     if created_ids:
-        conflict = await db.journal_entries.count_documents({
+        conflict_je = await db.journal_entries.count_documents({
             "company_id": cid, "lines.account_id": {"$in": created_ids},
         })
-        if conflict:
+        conflict_txn_cat = await db.transactions.count_documents({
+            "company_id": cid, "category_account_id": {"$in": created_ids},
+        })
+        conflict_txn_bank = await db.transactions.count_documents({
+            "company_id": cid, "bank_account_id": {"$in": created_ids},
+        })
+        total_conflict = conflict_je + conflict_txn_cat + conflict_txn_bank
+        if total_conflict:
             raise HTTPException(400,
                 "One or more accounts created by this import already have "
-                f"journal-entry activity ({conflict} entries). Merge or "
-                "reclassify those entries first, then re-run undo.")
+                f"activity ({conflict_je} journal entries, "
+                f"{conflict_txn_cat} categorized transactions, "
+                f"{conflict_txn_bank} bank-side transactions). "
+                "Merge or reclassify first, then re-run undo.")
     deleted = 0
     if created_ids:
         r = await db.accounts.delete_many({"id": {"$in": created_ids}, "company_id": cid})
