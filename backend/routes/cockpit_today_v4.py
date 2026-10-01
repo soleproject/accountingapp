@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from db import db
 from auth import get_current_user
 from routes.cockpit import require_firm_or_pro
+from routes.month_close import _maybe_auto_lock
 
 
 router = APIRouter(prefix="/api/cockpit")
@@ -435,6 +436,28 @@ async def today_v4(
 
     # 🚨 Per-client 12-month close-grid. Each cell is "closed" (green),
     # "unclosed" (red — has txns but no signoff), or "no_activity" (gray).
+    # Before building the pills, trigger auto-lock evaluation for every
+    # (company × month) with activity that isn't already closed — this
+    # lazily stamps the auto-lock the moment the Cockpit loads, so the
+    # pro doesn't have to visit the Month-Close page to materialise it.
+    for c in companies:
+        cid = c["id"]
+        closed_set = closed_by_company.get(cid, set())
+        for (yy, mm) in window_pairs:
+            ym = f"{yy:04d}-{mm:02d}"
+            if ym in closed_set:
+                continue
+            if txn_counts.get((cid, ym), 0) == 0:
+                continue
+            try:
+                stamped = await _maybe_auto_lock(cid, yy, mm)
+                if stamped:
+                    closed_set.add(ym)
+                    closed_by_company.setdefault(cid, set()).add(ym)
+                    auto_locked_by_company.setdefault(cid, set()).add(ym)
+            except Exception:  # noqa: BLE001
+                pass
+
     close_grid = []
     prior_unclosed = []
     for c in companies:

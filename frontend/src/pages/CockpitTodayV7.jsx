@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -1299,7 +1299,7 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
     : null;
 
   const openMonth = async (m) => {
-    if (m.state !== "unclosed") return;
+    if (m.state === "no_activity") return;
     if (selected === m.period) {
       setSelected(null);
       setStatus(null);
@@ -1393,7 +1393,11 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
             cls = "bg-slate-100 text-slate-400 border-2 border-slate-200 cursor-not-allowed";
           }
           if (isSelected) cls += " ring-2 ring-offset-1 ring-rose-700 scale-105";
-          const clickable = m.state === "unclosed";
+          // Any month with activity is clickable — opens the inline detail
+          // panel so the pro can see gates + the Complete Closing button
+          // (works for red "unclosed" AND for already-auto-locked periods
+          // where the pro may want to promote to a manual lock).
+          const clickable = m.state !== "no_activity";
           return (
             <button
               key={m.period}
@@ -1483,6 +1487,8 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
               ym={selected}
               status={status}
               onNav={onNav}
+              onCompleteClosing={quickSignOff}
+              signing={signing}
             />
           )}
         </div>
@@ -1492,8 +1498,14 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
 }
 
 // -------- Renders the 5 month-close checkpoint rows --------------
-function ChecklistRows({ cid, ym, status, onNav }) {
+function ChecklistRows({ cid, ym, status, onNav, onCompleteClosing, signing }) {
   const cps = status.checkpoints || {};
+  // All four pre-conditions green? → "Complete Closing" button enabled.
+  const preGreen = ["txns_reviewed", "invoices", "bills", "recon"]
+    .every(k => Boolean(cps[k]?.green));
+  const closedCp = cps.closed || {};
+  const autoLocked = Boolean(closedCp.auto_locked);
+  const manuallyLocked = Boolean(closedCp.green) && !autoLocked;
   const rows = [
     {
       key: "txns_reviewed",
@@ -1555,7 +1567,9 @@ function ChecklistRows({ cid, ym, status, onNav }) {
       cp: cps.closed,
       detail: (cp) => {
         if (!cp) return "";
+        if (cp.signed_at && cp.auto_locked) return `Auto-closed ${new Date(cp.signed_at).toLocaleDateString()} · click Complete Closing to lock permanently`;
         if (cp.signed_at) return `Locked ${new Date(cp.signed_at).toLocaleDateString()}`;
+        if (preGreen) return "All gates green — ready to lock permanently";
         return "Gated — sign off after the four above are green";
       },
       route: null,
@@ -1567,26 +1581,52 @@ function ChecklistRows({ cid, ym, status, onNav }) {
     <ul className="space-y-1.5">
       {rows.map(r => {
         const green = r.cp?.green;
+        const isClosedRow = r.key === "closed";
+        // "Complete Closing" button — shows on the Period Locked row when
+        // the 4 preconditions are green (auto-locked or not), and converts
+        // either an auto-lock into a manual lock, or stamps the first lock.
+        const showComplete = isClosedRow && preGreen && !manuallyLocked;
         return (
           <li
             key={r.key}
             className="flex items-center gap-2 rounded-md bg-white border border-slate-100 px-2.5 py-1.5"
           >
             {green
-              ? <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+              ? (isClosedRow && autoLocked
+                  ? <CheckCircle2 size={14} className="text-emerald-500 shrink-0" style={{opacity:0.7}} />
+                  : <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />)
               : <AlertTriangle size={14} className="text-rose-500 shrink-0" />}
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-medium text-slate-800 truncate">{r.label}</div>
+              <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1.5">
+                {r.label}
+                {isClosedRow && autoLocked && (
+                  <span className="text-[9px] uppercase tracking-wider font-semibold text-emerald-700 border border-emerald-500 rounded px-1 py-[1px] bg-white">
+                    auto
+                  </span>
+                )}
+              </div>
               <div className="text-[11px] text-slate-500 truncate">{r.detail(r.cp)}</div>
             </div>
-            {!green && r.route && r.ctaLabel && (
+            {showComplete ? (
+              <button
+                onClick={onCompleteClosing}
+                disabled={Boolean(signing)}
+                data-testid={`v7-complete-closing-${cid}-${ym}`}
+                className="text-[11px] font-semibold px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 shrink-0 inline-flex items-center gap-1"
+                title={autoLocked
+                  ? "This period is auto-closed. Click to permanently lock it with your sign-off."
+                  : "Lock this period permanently with your sign-off."}
+              >
+                <Lock size={12} /> Complete Closing
+              </button>
+            ) : (!green && r.route && r.ctaLabel && (
               <button
                 onClick={() => onNav(r.route)}
                 className="text-[11px] px-2 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
               >
                 {r.ctaLabel} →
               </button>
-            )}
+            ))}
           </li>
         );
       })}
