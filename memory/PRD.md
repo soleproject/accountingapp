@@ -660,3 +660,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Email Notifications Settings tab
 - Extracted Communications Settings tab → components/EmailNotificationSettings.jsx; added as "Email Notifications Settings" tab on /accounting/settings (also supports ?tab= deep link). Removed Settings tab from /communications-audit; header links to the new tab.
+
+## 2026-10-01 — Sidebar Mode tab
+- Moved Sidebar Mode toggle out of Bookkeeping into its own "Sidebar Mode" tab (key "sidebar") on /accounting/settings.

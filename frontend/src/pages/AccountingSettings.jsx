@@ -9,6 +9,7 @@ import CompanySettings from "@/pages/CompanySettings";
  */
 const ACCOUNTING_TABS = [
   "bookkeeping",
+  "sidebar",
   "profile",
   "advanced",
   "report_style",

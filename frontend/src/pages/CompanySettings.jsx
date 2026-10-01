@@ -245,6 +245,7 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
         {[
           ["user",          "User Settings"],
           ["bookkeeping",   "Bookkeeping"],
+          ["sidebar",       "Sidebar Mode"],
           ["profile",       "Profile"],
           ["advanced",      "Advanced Features"],
           ["report_style",  "Report Styling"],
@@ -322,18 +323,20 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
             initialMode={current?.categorization_mode || "standard"}
           />
         </div>
-        <div className="border-t pt-4">
-          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
-            Sidebar mode
-          </div>
-          <p className="text-xs text-slate-500 mb-3">
-            Personal preference — controls how the left nav renders for
-            <em> you</em>. <b>To&nbsp;Do</b> = compact card feed only ·
-            <b> Both</b> = card feed plus the full menu (default) ·
-            <b> Full</b> = classic deep menu with no cards.
-          </p>
-          <SidebarModeSettingToggle />
-        </div>
+      </div>
+      )}
+
+      {/* --- Sidebar mode (per-user nav preference) --- */}
+      {tab === "sidebar" && (
+      <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="sidebar-mode-settings-card">
+        <h3 className="font-heading font-semibold text-lg">Sidebar Mode</h3>
+        <p className="text-xs text-slate-500">
+          Personal preference — controls how the left nav renders for
+          <em> you</em>. <b>To&nbsp;Do</b> = compact card feed only ·
+          <b> Both</b> = card feed plus the full menu (default) ·
+          <b> Full</b> = classic deep menu with no cards.
+        </p>
+        <SidebarModeSettingToggle />
       </div>
       )}
 
