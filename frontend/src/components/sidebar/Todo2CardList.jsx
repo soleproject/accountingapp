@@ -46,7 +46,6 @@ const MORE_LINKS = [
   { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/billing",       label: "Billing",       icon: CreditCard },
   { to: "/share",         label: "Refer & earn",  icon: Share2 },
-  { to: "/settings",      label: "Settings",      icon: Settings2 },
 ];
 
 // Sidebar-card label overrides — shorter, action-oriented names that
