@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock } from "lucide-react";
+
+// A parked ("I don't have it now") item is skipped until its reminder time.
+const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
+  && new Date(i.snoozed_until).getTime() > Date.now());
+const isOpenItem = (i) => !i.answered_at && !i.deferred && !isParked(i);
 import CheckinAnswerForm from "../components/CheckinAnswerForm";
 import { LinkModal } from "./Transactions";
 
@@ -65,6 +70,22 @@ export default function ClientReviewPage() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [reminderMode, setReminderMode] = useState(null); // "follow_up" | "item"
+  // Pro mode: opened from the Cockpit (?via=pro) with a logged-in pro
+  // session. Answers are attributed to the pro in the audit trail.
+  const proToken = searchParams.get("via") === "pro" ? localStorage.getItem("axiom_token") : null;
+  const attributeToPro = (itemId) => {
+    if (!proToken || !itemId) return;
+    axios.post(`${API}/${token}/items/${itemId}/attribute`, {}, {
+      headers: { Authorization: `Bearer ${proToken}` },
+    }).then((r) => {
+      setSession((s) => {
+        if (!s) return s;
+        const items = (s.items || []).map((i) => i.item_id === itemId ? { ...i, answered_by: r.data.answered_by } : i);
+        return { ...s, items };
+      });
+    }).catch(() => {});
+  };
   // Persistent "✓ Completed — Continue" gate. Set by every success
   // path (deposit booking, receipt upload, category pick, defer, chat
   // answer, etc.) INSTEAD of auto-advancing. The user must tap
@@ -168,9 +189,10 @@ export default function ClientReviewPage() {
         if (cancelled) return;
         setSession(r.data);
         // Pick the first not-yet-finalized item
-        const idx = (r.data.items || []).findIndex(
-          (i) => !i.answered_at && !i.deferred
-        );
+        // ?item=<id> (pro jumping in from the Cockpit) wins, even if parked.
+        const wanted = searchParams.get("item");
+        const wantedIdx = wanted ? (r.data.items || []).findIndex((i) => i.item_id === wanted) : -1;
+        const idx = wantedIdx !== -1 ? wantedIdx : (r.data.items || []).findIndex(isOpenItem);
         setActiveIdx(idx === -1 ? (r.data.items || []).length : idx);
         // Restore any prior message history AND rehydrate the vision
         // breakdown / upload bubbles so returning feels identical.
@@ -200,10 +222,28 @@ export default function ClientReviewPage() {
     }
   }, [messages, activeIdx, session]);
 
+  // When embedded in the pro Cockpit (iframe), tell the parent whenever
+  // the batch's progress changes so its row/chips refresh live.
+  const progressSig = JSON.stringify([
+    session?.status, session?.follow_up_at,
+    (session?.items || []).map((i) => [i.answered_at ? 1 : 0, i.deferred ? 1 : 0, i.snoozed_until || null]),
+  ]);
+  const lastSigRef = useRef(null);
+  useEffect(() => {
+    if (!session) return;
+    if (lastSigRef.current === null) { lastSigRef.current = progressSig; return; }
+    if (lastSigRef.current === progressSig) return;
+    lastSigRef.current = progressSig;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "qc:changed", batch_id: session.batch_id, token }, window.location.origin);
+    }
+  }, [progressSig, session, token]);
+
   const currentItem = session?.items?.[activeIdx];
   const finishedCount = (session?.items || []).filter(
     (i) => i.answered_at || i.deferred
   ).length;
+  const parkedItems = (session?.items || []).filter(isParked);
   const totalCount = session?.items?.length || 0;
 
   // Group items by item_type so the header can show a "3 of 4 Uncategorized"
@@ -250,6 +290,8 @@ export default function ClientReviewPage() {
     ) || null;
   }, [groups, activeIdx]);
   const allDone = totalCount > 0 && finishedCount === totalCount;
+  const doneForNow = totalCount > 0 && parkedItems.length > 0
+    && finishedCount + parkedItems.length === totalCount;
 
   // ------- interactions -------
   const sendTurn = async (text) => {
@@ -464,6 +506,7 @@ export default function ClientReviewPage() {
   // flag) and the header progress chip ticks over, but the wizard
   // stays on the current item until the user taps Continue.
   const markCompleted = (payload = {}) => {
+    attributeToPro(currentItem?.item_id);
     setSession((s) => {
       if (!s) return s;
       const items = [...(s.items || [])];
@@ -471,6 +514,7 @@ export default function ClientReviewPage() {
         items[activeIdx] = {
           ...items[activeIdx],
           answered_at: items[activeIdx]?.answered_at || new Date().toISOString(),
+          snoozed_until: null,
         };
       }
       return { ...s, items };
@@ -485,7 +529,7 @@ export default function ClientReviewPage() {
     // Clear the Continue gate — the user tapped through.
     setJustCompleted(null);
     const nextIdx = (session?.items || []).findIndex(
-      (i, k) => k > activeIdx && !i.answered_at && !i.deferred
+      (i, k) => k > activeIdx && isOpenItem(i)
     );
     const wasLast = nextIdx === -1;
 
@@ -494,7 +538,7 @@ export default function ClientReviewPage() {
     setSession((s) => {
       if (!s) return s;
       const items = [...(s.items || [])];
-      if (currentItem) {
+      if (currentItem && !isParked(items[activeIdx])) {
         items[activeIdx] = { ...items[activeIdx], answered_at: new Date().toISOString() };
       }
       return { ...s, items };
@@ -987,6 +1031,9 @@ export default function ClientReviewPage() {
   if (session?.status === "completed" || allDone) {
     return <SummaryScreen session={session} onComplete={complete} />;
   }
+  if (doneForNow && activeIdx >= totalCount) {
+    return <ParkedScreen session={session} parked={parkedItems} />;
+  }
 
   const firmLabel = session?.firm_name || "your bookkeeping team";
   const firmInitials = (session?.firm_name || "NG")
@@ -1034,7 +1081,15 @@ export default function ClientReviewPage() {
                   className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
                   data-testid="review-item-answered-chip"
                 >
-                  <Check size={9} /> answered
+                  <Check size={9} /> answered{currentItem?.answered_by ? ` by ${proToken ? currentItem.answered_by.name : "your bookkeeper"}` : ""}
+                </span>
+              )}
+              {proToken && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200"
+                  data-testid="review-pro-mode-chip"
+                >
+                  answering as pro
                 </span>
               )}
               {currentItem?.deferred && (
@@ -1043,6 +1098,14 @@ export default function ClientReviewPage() {
                   data-testid="review-item-deferred-chip"
                 >
                   sent to bookkeeper
+                </span>
+              )}
+              {isParked(currentItem) && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200"
+                  data-testid="review-item-parked-chip"
+                >
+                  <AlarmClock size={9} /> reminder set
                 </span>
               )}
             </div>
@@ -1767,8 +1830,8 @@ ${companyName}`;
               <Send size={16} />
             </button>
           </div>
-          <div className="mt-2 flex items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
               <button
                 onClick={() => deferItem()}
                 disabled={busy || !currentItem}
@@ -1776,6 +1839,27 @@ ${companyName}`;
                 data-testid="review-defer-btn"
               >
                 Not sure — send to my bookkeeper
+              </button>
+              <span className="text-slate-300">·</span>
+              <button
+                onClick={() => setReminderMode("item")}
+                disabled={busy || !currentItem}
+                className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50 inline-flex items-center gap-1"
+                data-testid="review-snooze-item-btn"
+              >
+                <AlarmClock size={11} />
+                Don't have it now — remind me
+              </button>
+              <span className="text-slate-300">·</span>
+              <button
+                onClick={() => setReminderMode("follow_up")}
+                disabled={busy}
+                className="text-xs text-slate-500 hover:text-slate-800 underline underline-offset-2 disabled:opacity-50 inline-flex items-center gap-1"
+                data-testid="review-follow-up-btn"
+              >
+                {session?.follow_up_at
+                  ? `Finishing ${new Date(session.follow_up_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} · Change`
+                  : "I'll finish later"}
               </button>
               <span className="text-slate-300">·</span>
               <button
@@ -1791,7 +1875,7 @@ ${companyName}`;
               </button>
             </div>
             {totalCount > 1 && (
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-400 shrink-0 whitespace-nowrap">
                 {finishedCount} of {totalCount} done
               </span>
             )}
@@ -1821,6 +1905,30 @@ ${companyName}`;
             const params = new URLSearchParams(searchParams);
             params.delete("action");
             setSearchParams(params, { replace: true });
+          }}
+        />
+      )}
+      {reminderMode && (
+        <ScheduleModal
+          token={token}
+          expiresAt={session?.expires_at}
+          mode={reminderMode}
+          itemId={reminderMode === "item" ? currentItem?.item_id : undefined}
+          onClose={() => setReminderMode(null)}
+          onScheduled={(iso) => {
+            const when = new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+            if (reminderMode === "follow_up") {
+              setSession((s) => ({ ...s, follow_up_at: iso }));
+            } else {
+              setSession((s) => {
+                if (!s) return s;
+                const items = [...(s.items || [])];
+                items[activeIdx] = { ...items[activeIdx], snoozed_until: iso };
+                return { ...s, items };
+              });
+              setJustCompleted({ label: "Parked for now", detail: `We'll remind you on ${when}.` });
+            }
+            setReminderMode(null);
           }}
         />
       )}
@@ -4523,11 +4631,42 @@ function AiCleanupTxnList({ item }) {
 }
 
 
-function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
+const REMINDER_COPY = {
+  schedule:  { title: "Pick a time",
+               sub: "We'll email you a reminder so the questions are one tap away.",
+               cta: "Set reminder" },
+  follow_up: { title: "I'll finish later",
+               sub: "We'll send one reminder at this time so you can pick up where you left off.",
+               cta: "Remind me" },
+  item:      { title: "Don't have it now?",
+               sub: "We'll skip this question for now and remind you about it at this time.",
+               cta: "Remind me about this one" },
+};
+
+function _presetDates() {
+  const at = (d, h) => { const x = new Date(d); x.setHours(h, 0, 0, 0); return x; };
+  const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+  const in3 = new Date(); in3.setDate(in3.getDate() + 3);
+  const nextMon = new Date(); nextMon.setDate(nextMon.getDate() + ((8 - nextMon.getDay()) % 7 || 7));
+  return [
+    { label: "Tomorrow 9 AM", d: at(tomorrow, 9) },
+    { label: "In 3 days",     d: at(in3, 9) },
+    { label: "Next Monday",   d: at(nextMon, 9) },
+  ];
+}
+
+function ScheduleModal({ token, expiresAt, onClose, onScheduled, mode = "schedule", itemId }) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const copy = REMINDER_COPY[mode] || REMINDER_COPY.schedule;
+  const presets = useMemo(_presetDates, []);
+  const pickPreset = (d) => {
+    const pad = (n) => String(n).padStart(2, "0");
+    setDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    setTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`);
+  };
 
   // Sensible default: tomorrow at 10:00 local.
   useEffect(() => {
@@ -4562,7 +4701,13 @@ function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
     const iso = local.toISOString();
     setSaving(true);
     try {
-      await axios.post(`${API}/${token}/schedule`, { scheduled_for: iso });
+      if (mode === "follow_up") {
+        await axios.post(`${API}/${token}/follow-up`, { follow_up_at: iso });
+      } else if (mode === "item") {
+        await axios.post(`${API}/${token}/items/${itemId}/snooze`, { remind_at: iso });
+      } else {
+        await axios.post(`${API}/${token}/schedule`, { scheduled_for: iso });
+      }
       onScheduled(iso);
     } catch (e) {
       setError(e.response?.data?.detail || "Couldn't save that time");
@@ -4577,17 +4722,24 @@ function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="font-heading text-lg text-slate-900">Pick a time</h2>
-            <p className="text-xs text-slate-500 mt-1">
-              We'll email you a reminder so the questions are one tap away.
-            </p>
+            <h2 className="font-heading text-lg text-slate-900">{copy.title}</h2>
+            <p className="text-xs text-slate-500 mt-1">{copy.sub}</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1"
                   data-testid="schedule-close">
             <X size={18} />
           </button>
         </div>
-        <div className="mt-5 space-y-3">
+        <div className="mt-4 flex flex-wrap gap-1.5" data-testid="schedule-presets">
+          {presets.map(p => (
+            <button key={p.label} type="button" onClick={() => pickPreset(p.d)}
+                    data-testid={`schedule-preset-${p.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    className="text-xs px-2.5 py-1 rounded-full border border-slate-300 text-slate-700 hover:bg-slate-50">
+              {p.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 space-y-3">
           <label className="block">
             <span className="text-xs font-semibold text-slate-700">Date</span>
             <input
@@ -4631,7 +4783,7 @@ function ScheduleModal({ token, expiresAt, onClose, onScheduled }) {
             data-testid="schedule-confirm"
           >
             {saving ? <Loader2 className="animate-spin" size={14} /> : <Calendar size={14} />}
-            Set reminder
+            {copy.cta}
           </button>
         </div>
       </div>
@@ -6195,6 +6347,34 @@ function SummaryScreen({ session, onComplete }) {
         <div className="mt-6 text-[11px] text-slate-400">
           You can close this window.
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ParkedScreen({ session, parked }) {
+  const fmt = (iso) => new Date(iso).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const answered = (session?.items || []).filter(i => i.answered_at).length;
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4" data-testid="review-parked-screen">
+      <div className="max-w-md w-full bg-white rounded-2xl border border-slate-200 p-6 text-center">
+        <div className="w-12 h-12 mx-auto rounded-full bg-sky-100 flex items-center justify-center">
+          <AlarmClock className="text-sky-700" size={22} />
+        </div>
+        <h1 className="mt-4 font-heading text-xl text-slate-900">That's everything for now.</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          {answered > 0 && <><strong>{answered}</strong> answer{answered === 1 ? "" : "s"} updated your books. </>}
+          <strong>{parked.length}</strong> question{parked.length === 1 ? "" : "s"} parked — we'll remind you:
+        </p>
+        <ul className="mt-3 text-left text-[13px] text-slate-700 divide-y divide-slate-100 border border-slate-100 rounded-lg">
+          {parked.map(i => (
+            <li key={i.item_id} className="px-3 py-2 flex items-center justify-between gap-2">
+              <span className="truncate">{i.prompt || ITEM_TYPE_LABELS[i.item_type] || "Question"}</span>
+              <span className="text-sky-700 text-[11px] shrink-0">{fmt(i.snoozed_until)}</span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-6 text-[11px] text-slate-400">You can close this window.</div>
       </div>
     </div>
   );

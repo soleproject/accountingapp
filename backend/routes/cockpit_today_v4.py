@@ -144,6 +144,11 @@ async def cockpit_pending_reconciliations(
                 "date": {"$gte": prior_start, "$lte": prior_end},
             })
             is_plaid_mapped = aid in mapped_ledger_ids
+            # This card is strictly about *auto*-reconciliations. Accounts
+            # without a Plaid connection can only be reconciled manually,
+            # so they belong on the Reconciliation Month Roster — not here.
+            if not is_plaid_mapped and not existing:
+                continue
             has_foreign = False
             if is_plaid_mapped:
                 fd = await db.transactions.find_one({
@@ -155,8 +160,6 @@ async def cockpit_pending_reconciliations(
             if existing:
                 status = "auto_reconciled" if existing.get("auto_generated") else "manually_reconciled"
                 reason = f"{existing.get('source','manual')} · {str(existing.get('completed_at',''))[:10]}"
-            elif not is_plaid_mapped:
-                status, reason = "manual_required", "No Plaid connection"
             elif has_foreign:
                 status, reason = "ineligible_non_plaid", "Non-Plaid txns on account"
             elif waiting:
@@ -175,11 +178,13 @@ async def cockpit_pending_reconciliations(
                 "verification_method": (existing or {}).get("verification_method"),
             })
         order = {
-            "manual_required": 0, "ineligible_non_plaid": 1,
-            "waiting_settle": 2, "ready_next_sync": 3,
-            "auto_reconciled": 4, "manually_reconciled": 5,
+            "ineligible_non_plaid": 0,
+            "waiting_settle": 1, "ready_next_sync": 2,
+            "auto_reconciled": 3, "manually_reconciled": 4,
         }
         rows.sort(key=lambda r: (order.get(r["status"], 9), r["account_code"]))
+        if not rows:
+            continue
         out.append({
             "company_id": cid,
             "company_name": c.get("name") or "Untitled",
@@ -189,7 +194,7 @@ async def cockpit_pending_reconciliations(
                 "done": sum(1 for r in rows if r["status"] in ("auto_reconciled", "manually_reconciled")),
                 "waiting": sum(1 for r in rows if r["status"] == "waiting_settle"),
                 "ready": sum(1 for r in rows if r["status"] == "ready_next_sync"),
-                "manual": sum(1 for r in rows if r["status"] in ("manual_required", "ineligible_non_plaid")),
+                "manual": sum(1 for r in rows if r["status"] == "ineligible_non_plaid"),
             },
         })
     # Sort companies: those with pending/manual work first, done-only last.
@@ -208,6 +213,268 @@ async def cockpit_pending_reconciliations(
         "waiting": waiting,
         "days_left": days_left,
         "companies": out,
+    }
+
+
+@router.post("/scheduled-qc/{batch_id}/nudge")
+async def cockpit_scheduled_qc_nudge(
+    batch_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """One-click re-ping from the Missed / No Response rows. Sends the
+    three-CTA reminder (answer now / pick a time / talk to bookkeeper)
+    and stamps `manual_nudge_at` so the row can show it."""
+    import client_review as cr
+    accessible = await require_firm_or_pro(user)
+    batch = await db.client_review_batches.find_one({"id": batch_id})
+    if not batch or batch.get("company_id") not in (accessible or []):
+        raise HTTPException(404, "Check-in not found")
+    if batch.get("status") in ("completed", "expired"):
+        raise HTTPException(409, f"Check-in is {batch.get('status')} — a fresh one will be generated instead")
+    if not batch.get("client_email"):
+        raise HTTPException(400, "No client email on this check-in")
+    result = await cr._dispatch_reminder(batch, kind="passive_miss")
+    status = result.get("status")
+    now = datetime.now(timezone.utc).isoformat()
+    if status == "sent":
+        await db.client_review_batches.update_one(
+            {"id": batch_id},
+            {"$set": {"manual_nudge_at": now, "updated_at": now},
+             "$inc": {"manual_nudge_count": 1}},
+        )
+    return {"ok": status == "sent", "status": status,
+            "to": batch.get("client_email"), "manual_nudge_at": now if status == "sent" else None,
+            "error": result.get("error")}
+
+
+@router.get("/scheduled-qc")
+async def cockpit_scheduled_qc(
+    user: dict = Depends(get_current_user),
+):
+    """Scheduled Quick Check-in roster for the In Progress panel.
+
+    Three signals, cross-company:
+      * `scheduled`      — batches in `scheduled` state waiting to be
+                           sent on their `scheduled_for` date.
+      * `sent_awaiting`  — batches whose email was dispatched but the
+                           client has not answered or let it expire.
+      * `last_completed` — most recent completion per (company, client)
+                           so pros can see who's engaged and who's gone
+                           quiet. Includes "never completed" rows for
+                           clients we've emailed at least once but who
+                           never finished a batch.
+    """
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"scheduled": [], "in_progress": [], "missed": [], "sent_awaiting": [],
+                "expired_no_response": [], "completed": [], "last_completed": []}
+    now = datetime.now(timezone.utc)
+
+    co_names: dict[str, str] = {}
+    async for c in db.companies.find(
+        {"id": {"$in": accessible}}, {"_id": 0, "id": 1, "name": 1},
+    ):
+        co_names[c["id"]] = c.get("name") or "Untitled"
+
+    def _dt(v):
+        try:
+            d = v if isinstance(v, datetime) else datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+            return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _pro_answered(items: list) -> dict:
+        stamped = [it for it in items if it.get("answered_by")]
+        names = []
+        for it in stamped:
+            n = (it["answered_by"].get("name") or "").split(",")[0].strip()
+            if n and n not in names:
+                names.append(n)
+        return {"pro_answered": len(stamped), "pro_names": names}
+
+    # One pass over every live batch. Buckets:
+    #   scheduled   — client picked a time (status=scheduled) that is still ahead
+    #   in_progress — client has engaged (answers / defers / snoozes / follow-up)
+    #                 but hasn't finished
+    #   missed      — picked time has passed with zero engagement
+    #   no_response — emailed, never engaged, no time picked (or picked time
+    #                 not applicable)
+    scheduled: list[dict] = []
+    in_progress: list[dict] = []
+    missed: list[dict] = []
+    sent_awaiting: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id": {"$in": accessible},
+        "status": {"$in": ["scheduled", "open", "in_progress", "sent", "reminded"]},
+    }).sort("updated_at", -1).limit(400):
+        items = b.get("items") or []
+        total = len(items)
+        answered = int(b.get("answer_count") or 0)
+        deferred = int(b.get("defer_count") or 0)
+        snoozed = [it for it in items
+                   if it.get("snoozed_until") and not it.get("answered_at") and not it.get("deferred")]
+        engaged = (answered + deferred) > 0 or bool(b.get("follow_up_at")) or bool(snoozed)
+        sf_dt = _dt(b.get("scheduled_for"))
+        sent_dt = _dt(b.get("email_sent_at"))
+        days_waiting = max(0, (now - sent_dt).days) if sent_dt else 0
+        next_snooze = min((it["snoozed_until"] for it in snoozed), default=None)
+        row = {
+            "batch_id":      b.get("id"),
+            "client_token":  b.get("client_token"),
+            "company_id":    b.get("company_id"),
+            "company_name":  co_names.get(b.get("company_id") or "", "—"),
+            "client_email":  b.get("client_email"),
+            "scheduled_for": b.get("scheduled_for"),
+            "email_sent_at": b.get("email_sent_at"),
+            "expires_at":    b.get("expires_at"),
+            "item_count":    total,
+            "answered":      answered,
+            "deferred":      deferred,
+            "progress_pct":  int(100 * (answered + deferred) / total) if total else 0,
+            "days_waiting":  days_waiting,
+            "note":          b.get("note") or "",
+            "reminder_sent": bool(b.get("reminder_sent_at")),
+            "nudge_sent":    bool(b.get("nudge_sent_at")),
+            "manual_nudge_at": b.get("manual_nudge_at"),
+            "manual_nudge_count": int(b.get("manual_nudge_count") or 0),
+            "follow_up_at":  b.get("follow_up_at"),
+            "snoozed_count": len(snoozed),
+            "next_snooze_at": next_snooze,
+            **_pro_answered(items),
+            "parked": [{
+                "item_id":   it.get("item_id"),
+                "prompt":    it.get("prompt") or "",
+                "item_type": it.get("item_type"),
+                "remind_at": it.get("snoozed_until"),
+                "reminded":  bool(it.get("snooze_reminded_at")),
+            } for it in sorted(snoozed, key=lambda x: str(x.get("snoozed_until")))],
+            "updated_at":    b.get("updated_at"),
+        }
+        if engaged:
+            in_progress.append(row)
+        elif b.get("status") == "scheduled" and sf_dt is not None:
+            if sf_dt >= now:
+                scheduled.append(row)
+            else:
+                row["days_past"] = (now - sf_dt).days
+                missed.append(row)
+        elif sent_dt is not None:
+            sent_awaiting.append(row)
+    scheduled.sort(key=lambda r: str(r["scheduled_for"]))
+    missed.sort(key=lambda r: -r["days_past"])
+    in_progress.sort(key=lambda r: str(r.get("follow_up_at") or r.get("next_snooze_at") or "~") + str(r.get("updated_at") or ""))
+    sent_awaiting.sort(key=lambda r: -r["days_waiting"])
+
+    # Ghosted — link lapsed with zero answers in the last 60 days.
+    expired_no_response: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id":   {"$in": accessible},
+        "status":       "expired",
+        "expired_at":   {"$gte": (now - timedelta(days=60)).isoformat()},
+        "answer_count": {"$in": [None, 0]},
+    }).sort("expired_at", -1).limit(100):
+        expired_no_response.append({
+            "batch_id":     b.get("id"),
+            "client_token": b.get("client_token"),
+            "company_id":   b.get("company_id"),
+            "company_name": co_names.get(b.get("company_id") or "", "—"),
+            "client_email": b.get("client_email"),
+            "scheduled_for": b.get("scheduled_for"),
+            "email_sent_at": b.get("email_sent_at"),
+            "expired_at":   b.get("expired_at"),
+            "item_count":   len(b.get("items") or []),
+        })
+
+    completed: list[dict] = []
+    async for b in db.client_review_batches.find({
+        "company_id": {"$in": accessible},
+        "status":     "completed",
+    }).sort("completed_at", -1).limit(60):
+        completed.append({
+            "batch_id":     b.get("id"),
+            "client_token": b.get("client_token"),
+            "company_id":   b.get("company_id"),
+            "company_name": co_names.get(b.get("company_id") or "", "—"),
+            "client_email": b.get("client_email"),
+            "completed_at": b.get("completed_at"),
+            "email_sent_at": b.get("email_sent_at"),
+            "item_count":   len(b.get("items") or []),
+            "answered":     int(b.get("answer_count") or 0),
+            "deferred":     int(b.get("defer_count") or 0),
+            **_pro_answered(b.get("items") or []),
+        })
+
+    # Last completed per (company, client_email). Groups across all
+    # accessible companies in one aggregate pass. Also surface clients
+    # we've emailed at least once but have never completed anything.
+    last_completed_map: dict[tuple[str, str], dict] = {}
+    async for row in db.client_review_batches.aggregate([
+        {"$match": {
+            "company_id": {"$in": accessible},
+            "status":     "completed",
+        }},
+        {"$sort":  {"completed_at": -1}},
+        {"$group": {
+            "_id": {"cid": "$company_id", "email": "$client_email"},
+            "completed_at": {"$first": "$completed_at"},
+            "batch_id":     {"$first": "$id"},
+            "client_token": {"$first": "$client_token"},
+            "item_count":   {"$first": {"$size": {"$ifNull": ["$items", []]}}},
+        }},
+    ]):
+        k = (row["_id"]["cid"], row["_id"]["email"] or "")
+        last_completed_map[k] = {
+            "company_id":   row["_id"]["cid"],
+            "company_name": co_names.get(row["_id"]["cid"], "—"),
+            "client_email": row["_id"]["email"],
+            "completed_at": row.get("completed_at"),
+            "batch_id":     row.get("batch_id"),
+            "client_token": row.get("client_token"),
+            "item_count":   row.get("item_count") or 0,
+            "never":        False,
+        }
+
+    # Any (company, client) we've emailed but never completed → surface
+    # too so the pro sees stale engagements.
+    seen_contacted: set[tuple[str, str]] = set()
+    async for row in db.client_review_batches.aggregate([
+        {"$match": {
+            "company_id":    {"$in": accessible},
+            "email_sent_at": {"$ne": None},
+        }},
+        {"$group": {
+            "_id": {"cid": "$company_id", "email": "$client_email"},
+            "first_sent":   {"$min": "$email_sent_at"},
+        }},
+    ]):
+        k = (row["_id"]["cid"], row["_id"]["email"] or "")
+        seen_contacted.add(k)
+        if k in last_completed_map:
+            continue
+        last_completed_map[k] = {
+            "company_id":   row["_id"]["cid"],
+            "company_name": co_names.get(row["_id"]["cid"], "—"),
+            "client_email": row["_id"]["email"],
+            "completed_at": None,
+            "first_sent":   row.get("first_sent"),
+            "never":        True,
+        }
+
+    last_completed = sorted(
+        last_completed_map.values(),
+        key=lambda r: (r["never"], -(1 if r.get("completed_at") else 0),
+                       str(r.get("completed_at") or r.get("first_sent") or "")),
+        reverse=False,
+    )
+
+    return {
+        "scheduled":      scheduled,
+        "in_progress":    in_progress,
+        "missed":         missed,
+        "sent_awaiting":  sent_awaiting,
+        "expired_no_response": expired_no_response,
+        "completed":      completed,
+        "last_completed": last_completed,
     }
 
 
@@ -395,6 +662,8 @@ async def today_v4(
         current = next((it for it in items if it.get("status") not in ("answered", "deferred")), None)
         in_progress.append({
             "id": b.get("id"),
+            "client_token": b.get("client_token"),
+            "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "answered": answered,
             "total": len(items),
@@ -422,6 +691,7 @@ async def today_v4(
             days_silent = 0
         waiting.append({
             "id": b.get("id"),
+            "client_token": b.get("client_token"),
             "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "count": len(b.get("items") or []),
@@ -674,6 +944,8 @@ async def today_v4(
     }).limit(5):
         blocking.append({
             "id": f.get("id"),
+            "company_id": f.get("company_id"),
+            "company": name_by_id.get(f.get("company_id"), ""),
             "text": f"{name_by_id.get(f.get('company_id'), 'Client')} · "
                     f"vendor outreach escalated · {f.get('title') or 'W-9 chase stuck'}",
             "route": f"/company/{f.get('company_id')}/contacts",
@@ -690,6 +962,8 @@ async def today_v4(
     }).sort("date", -1).limit(8):
         judgment_needed.append({
             "id": t.get("id"),
+            "company_id": t.get("company_id"),
+            "company": name_by_id.get(t.get("company_id"), ""),
             "text": f"{name_by_id.get(t.get('company_id'), 'Client')} · "
                     f"{(t.get('description') or 'txn')[:56]} · ${abs(float(t.get('amount') or 0)):,.0f}",
             "reason": (t.get("review_reason") or "").replace("_", " "),
@@ -702,6 +976,8 @@ async def today_v4(
     }).sort("created_at", -1).limit(5):
         judgment_needed.append({
             "id": f.get("id"),
+            "company_id": f.get("company_id"),
+            "company": name_by_id.get(f.get("company_id"), ""),
             "text": f"{name_by_id.get(f.get('company_id'), 'Client')} · {f.get('title') or f.get('kind')}",
             "reason": (f.get("kind") or "").replace("_", " "),
             "route": f"/company/{f.get('company_id')}/dashboard",

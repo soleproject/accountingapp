@@ -614,3 +614,37 @@ need to type into the chat box to invoke the matching help flow.
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS
   vars on boot) — deferred by user preference
+
+
+## 2026-10-01 — In Progress company multi-select
+- Added multi-select company filter (search, select all, clear, removable chips) to the Cockpit In Progress panel; filters all 6 tabs + badge counts.
+- Backend `today-v4` now returns `company_id`/`company` on in_progress, blocking and judgment_needed items.
+- P0 Theme Coloring bug still OPEN (13 sessions).
+
+## 2026-10-01 — Inline QC viewer in In Progress
+- Every QC-backed row (Messages, AI Email Questions, Scheduled / Awaiting / Engagement) has an "Open QC" button that loads the client Quick Check-in inline (iframe to /client-review/{token}) under the tab strip; tabs stay clickable and switching tabs returns to the list. "Open in new tab" link included.
+- Backend scheduled-qc + today-v4 now return client_token on batch rows.
+
+## 2026-10-01 — Scheduled QC pills
+- Scheduled QC tab now has Scheduled / Missed / No Response pills. Scheduled = upcoming + emailed-in-progress; Missed = scheduled_for passed with zero engagement (shows reminded/nudged); No Response = emailed with 0 answers + expired-unanswered (60d) + never-completed clients.
+- Backend scheduled-qc returns `missed` and `expired_no_response` arrays.
+
+## 2026-10-01 — QC lifecycle pills + client reminders
+- Scheduled QC pills: Scheduled (client-picked date+time, future) / In Progress (engaged: answers, defers, follow-up or parked questions; shows follow-up time) / Missed / No Response / Completed.
+- Client QC footer: "Don't have it now — remind me" (per-question snooze → POST /{token}/items/{id}/snooze, item parked & skipped, ParkedScreen when all remaining are parked) and "I'll finish later" (POST /{token}/follow-up). ScheduleModal generalized with presets (Tomorrow 9 AM / In 3 days / Next Monday).
+- Cron send_follow_up_reminders() in client_review_tick sends one "follow_up" email when follow_up_at / snoozed_until arrives.
+
+## 2026-10-01 — Parked question chips
+- In Progress rows show one chip per parked question (prompt + "reminds <date time>", "reminded" once sent). Backend scheduled-qc in_progress rows carry `parked[]` {item_id,prompt,item_type,remind_at,reminded}.
+
+## 2026-10-01 — One-click nudge
+- "Send reminder" button on Missed + No Response (emailed, live) rows → POST /api/cockpit/scheduled-qc/{batch_id}/nudge sends the 3-CTA passive_miss reminder, stamps manual_nudge_at/count; row shows "Reminded Xm ago · ×N". Expired/completed batches are rejected (409). Test-domain recipients surface as "Not sent — test address".
+
+## 2026-10-01 — Jump to question
+- Parked chips are buttons → open inline QC viewer with ?item=<item_id>; ClientReviewPage honors ?item= on load (even if parked). Answering a parked item clears snoozed_until locally.
+
+## 2026-10-01 — Live row refresh
+- ClientReviewPage posts `qc:changed` (postMessage, same-origin) to parent on any progress change; InProgressPanel listens, debounces 600ms, re-pulls /cockpit/scheduled-qc + today-v4. QC pill selection lifted to InProgressPanel so it persists across the inline viewer.
+
+## 2026-10-01 — Answered by pro attribution
+- Inline viewer / Messages nav open QC with ?via=pro; ClientReviewPage then POSTs /{token}/items/{id}/attribute with the pro JWT after each markCompleted → items.$.answered_by {user_id,name,email,role,via,at}, batch.pro_participants, audit_events `client_review.item_answered_by_pro`. Header chips: "answering as pro", "answered by <name>" (client sees "by your bookkeeper"). Cockpit rows show "N by <Pro>".
