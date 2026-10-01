@@ -178,7 +178,7 @@ async def seed_company(company_name: str, client_email: str) -> int:
 
     # ------- 5 uncategorized txns (>7d old, within 14-day audit window) -----
     uncat_seeds = [
-        {"amount": -742.16,  "merchant": "The Home Depot",
+        {"amount": -483.29,  "merchant": "The Home Depot",
          "desc":   "HOME DEPOT #6234 RENO NV",         "days": 8},
         {"amount": -184.55,  "merchant": "Costco Wholesale",
          "desc":   "COSTCO WHSE #0472 SPARKS NV",      "days": 9},
