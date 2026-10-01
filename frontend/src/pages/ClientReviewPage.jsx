@@ -174,7 +174,10 @@ export default function ClientReviewPage() {
         if (cancelled) return;
         setSession(r.data);
         // Pick the first not-yet-finalized item
-        const idx = (r.data.items || []).findIndex(isOpenItem);
+        // ?item=<id> (pro jumping in from the Cockpit) wins, even if parked.
+        const wanted = searchParams.get("item");
+        const wantedIdx = wanted ? (r.data.items || []).findIndex((i) => i.item_id === wanted) : -1;
+        const idx = wantedIdx !== -1 ? wantedIdx : (r.data.items || []).findIndex(isOpenItem);
         setActiveIdx(idx === -1 ? (r.data.items || []).length : idx);
         // Restore any prior message history AND rehydrate the vision
         // breakdown / upload bubbles so returning feels identical.
@@ -474,10 +477,11 @@ export default function ClientReviewPage() {
     setSession((s) => {
       if (!s) return s;
       const items = [...(s.items || [])];
-      if (currentItem && !isParked(items[activeIdx])) {
+      if (currentItem) {
         items[activeIdx] = {
           ...items[activeIdx],
           answered_at: items[activeIdx]?.answered_at || new Date().toISOString(),
+          snoozed_until: null,
         };
       }
       return { ...s, items };

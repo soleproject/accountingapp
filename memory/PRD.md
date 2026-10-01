@@ -639,3 +639,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — One-click nudge
 - "Send reminder" button on Missed + No Response (emailed, live) rows → POST /api/cockpit/scheduled-qc/{batch_id}/nudge sends the 3-CTA passive_miss reminder, stamps manual_nudge_at/count; row shows "Reminded Xm ago · ×N". Expired/completed batches are rejected (409). Test-domain recipients surface as "Not sent — test address".
+
+## 2026-10-01 — Jump to question
+- Parked chips are buttons → open inline QC viewer with ?item=<item_id>; ClientReviewPage honors ?item= on load (even if parked). Answering a parked item clears snoozed_until locally.
