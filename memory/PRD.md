@@ -669,3 +669,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Company Settings page retired
 - BookingPanel + NoteTakersPanel now render at the bottom of /crm/settings. /settings → Navigate redirect to /accounting/settings (many pages link to /settings for company tabs). "user" tab removed from CompanySettings.
+
+## 2026-10-01 — Removed duplicate Settings under More
+- STANDALONE_BOTTOM (Sidebar.jsx) and MORE_LINKS (Todo2CardList.jsx) no longer include /settings; Accounting settings link retained.

@@ -357,7 +357,6 @@ const STANDALONE_BOTTOM = [
   { to: "/my-businesses", label: "My Businesses", icon: Briefcase },
   { to: "/billing", label: "Billing", icon: CreditCard },
   { to: "/share", label: "Refer & earn", icon: Share2 },
-  { to: "/settings", label: "Settings", icon: Settings2 },
 ];
 
 // Cockpit sub-items — used to be the "Practice" secondary rail inside
@@ -1654,11 +1653,7 @@ export default function Sidebar({ collapsed, onToggle }) {
              Auto-opens when the current path is one of the children,
              falling back to the persisted `moreOpen` preference. */}
         {(() => {
-          const bottomItems = STANDALONE_BOTTOM.map((it) =>
-            (it.to === "/settings" && product !== "accounting")
-              ? { ...it, to: `/settings?product=${product}` }
-              : it,
-          );
+          const bottomItems = STANDALONE_BOTTOM;
           const activeChild = bottomItems.some(it =>
             loc.pathname.startsWith(it.to.split("?")[0])
           );
