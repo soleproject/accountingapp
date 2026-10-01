@@ -1237,6 +1237,14 @@ export default function Transactions() {
   // (see the group above `bulkPreviewAcctId`) so the bulk-categorize
   // useEffect can safely reference them.
   const [txns, setTxns] = useState([]);
+  // Client-side column sort — null means "server/natural order".
+  // Clicking a header toggles asc→desc→asc and sets the active column.
+  const [sortBy,  setSortBy]  = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const toggleSort = (key) => {
+    if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortBy(key); setSortDir("asc"); }
+  };
   const [accts, setAccts] = useState([]);
   const [invoices, setInvoices] = useState([]);
   const [bills, setBills] = useState([]);
@@ -1710,6 +1718,30 @@ export default function Transactions() {
   }, [params, txns]);
 
   const acctById = useMemo(() => Object.fromEntries(accts.map(a => [a.id, a])), [accts]);
+
+  // Build the display-ordered list. When sortBy is null, keep the
+  // server's natural order (newest-first); otherwise apply client-side
+  // sort — numeric for date/amount, locale-compare for text columns.
+  const sortedTxns = useMemo(() => {
+    if (!sortBy) return txns;
+    const dir = sortDir === "desc" ? -1 : 1;
+    const txtAt = {
+      contact:  (t) => (t.contact_name || "").toLowerCase(),
+      merchant: (t) => (t.merchant || t.description || "").toLowerCase(),
+      category: (t) => (acctById[t.category_account_id]?.name || t.category_account_name || "").toLowerCase(),
+    };
+    return [...txns].sort((a, b) => {
+      if (sortBy === "date") {
+        return dir * (new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime());
+      }
+      if (sortBy === "amount") {
+        return dir * (Number(a.amount || 0) - Number(b.amount || 0));
+      }
+      const av = txtAt[sortBy]?.(a) ?? "";
+      const bv = txtAt[sortBy]?.(b) ?? "";
+      return dir * av.localeCompare(bv);
+    });
+  }, [txns, sortBy, sortDir, acctById]);
 
   const toggleSel = (id) => {
     const s = new Set(selected);
@@ -2982,7 +3014,7 @@ export default function Transactions() {
         <>
         {isMobile ? (
           <MobileTxnCards
-            txns={txns}
+            txns={sortedTxns}
             accts={accts}
             updateCategory={updateCategory}
             currentId={currentId}
@@ -3022,18 +3054,35 @@ export default function Transactions() {
                 <th className="px-3 py-2 w-8">
                   <input type="checkbox" data-testid={TID.txnBulkCheckbox}
                     checked={allChecked}
-                    onChange={(e) => setSelected(e.target.checked ? new Set(txns.map(t => t.id)) : new Set())} />
+                    onChange={(e) => setSelected(e.target.checked ? new Set(sortedTxns.map(t => t.id)) : new Set())} />
                 </th>
-                <th className="px-3 py-2 text-left">Date</th>
-                <th className="px-3 py-2 text-left">Contact</th>
-                <th className="px-3 py-2 text-left">Merchant / Description</th>
-                <th className="px-3 py-2 text-left">Category</th>
-                <th className="px-3 py-2 text-right">Amount</th>
+                {[
+                  { key: "date",     label: "Date",                   align: "left"  },
+                  { key: "contact",  label: "Contact",                align: "left"  },
+                  { key: "merchant", label: "Merchant / Description", align: "left"  },
+                  { key: "category", label: "Category",               align: "left"  },
+                  { key: "amount",   label: "Amount",                 align: "right" },
+                ].map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => toggleSort(col.key)}
+                    className={`px-3 py-2 cursor-pointer select-none hover:bg-slate-100 text-${col.align}`}
+                    data-testid={`txn-th-${col.key}`}
+                    aria-sort={sortBy === col.key ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+                  >
+                    <span className={`inline-flex items-center gap-1 ${col.align === "right" ? "justify-end" : ""}`}>
+                      {col.label}
+                      <span className={`text-[10px] ${sortBy === col.key ? "text-slate-700" : "text-slate-300"}`}>
+                        {sortBy === col.key ? (sortDir === "asc" ? "▲" : "▼") : "▲"}
+                      </span>
+                    </span>
+                  </th>
+                ))}
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
-              {txns.map(t => {
+              {sortedTxns.map(t => {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
                     <button

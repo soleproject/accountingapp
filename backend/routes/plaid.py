@@ -278,17 +278,28 @@ async def sync_status(cid: str, user: dict = Depends(get_current_user)):
 @router.get("/companies/{cid}/plaid/accounts")
 async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
     """List every Plaid-linked account for this company along with its connection
-    status. An account is *connected* if it has been mapped to a ledger account
-    (via /plaid/connect-account) OR has at least one transaction in the ledger.
+    status, across ALL linked institutions (one `plaid_items` doc per
+    institution). An account is *connected* if it has been mapped to a
+    ledger account OR has at least one transaction in the ledger.
     """
     await require_company(user, cid)
-    item = await db.plaid_items.find_one({"company_id": cid})
-    if not item:
+    items = [pi async for pi in db.plaid_items.find({"company_id": cid})]
+    if not items:
         return {"connected": [], "available": [], "linked": False}
 
-    accts = item.get("accounts") or []
-    mappings = item.get("account_mappings") or {}
-    plaid_account_ids = [a["account_id"] for a in accts if a.get("account_id")]
+    # Flatten accounts across every linked institution, carrying each
+    # item's institution_name + item_id onto its own rows so the UI can
+    # render multi-institution rows (previously only the first `item`
+    # was shown — Capital One / 2nd+ institutions disappeared).
+    all_accts: list[tuple[dict, dict]] = []     # (account, parent_item)
+    all_mappings: dict[str, dict] = {}
+    for it in items:
+        for a in (it.get("accounts") or []):
+            all_accts.append((a, it))
+        for aid, m in (it.get("account_mappings") or {}).items():
+            all_mappings[aid] = m
+
+    plaid_account_ids = [a["account_id"] for a, _ in all_accts if a.get("account_id")]
     # Aggregate ledger-side counts for each Plaid account_id
     counts: dict[str, dict] = {}
     if plaid_account_ids:
@@ -300,7 +311,7 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
         counts = {row["_id"]: row async for row in cur}
 
     connected, available = [], []
-    for a in accts:
+    for a, it in all_accts:
         aid = a.get("account_id")
         row = {
             "account_id": aid,
@@ -311,8 +322,14 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
             "mask": a.get("mask"),
             "balance_current": a.get("balance_current"),
             "currency": a.get("currency", "USD"),
+            # Per-row institution so the Linked Accounts table can show
+            # the correct bank next to each account instead of inheriting
+            # one shared institution name from the first item.
+            "institution_name": it.get("institution_name") or it.get("institution_id") or "—",
+            "item_id":          it.get("item_id"),
+            "item_last_sync_at": it.get("last_sync_at"),
         }
-        mapping = mappings.get(aid)
+        mapping = all_mappings.get(aid)
         c = counts.get(aid)
         if mapping or c:
             row.update({
@@ -333,8 +350,7 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
             available.append(row)
 
     # ---- Per-item coverage summary (proof of import completeness) ----
-    # Cheapest single-pass aggregate: earliest date, latest date, total count,
-    # unique-day count, and PFC-source breakdown across all connected accounts.
+    # Across all items — single pass aggregate.
     coverage = None
     if plaid_account_ids:
         cur = db.transactions.aggregate([
@@ -371,17 +387,20 @@ async def plaid_list_accounts(cid: str, user: dict = Depends(get_current_user)):
                 "needs_review":   r["needs_review"],
             }
 
+    # Pick the "primary" item (most recent last_sync_at) for the
+    # top-level item_id/institution/last_sync_at keys that the
+    # existing frontend already reads. Row-level `institution_name`
+    # overrides this when the UI renders per-account.
+    primary = max(items, key=lambda i: i.get("last_sync_at") or "")
     return {
         "linked": True,
-        "item_id": item.get("item_id"),
-        "institution_name": item.get("institution_name") or item.get("institution_id") or "—",
-        "last_sync_at": item.get("last_sync_at"),
+        "item_id": primary.get("item_id"),
+        "institution_name": primary.get("institution_name") or primary.get("institution_id") or "—",
+        "last_sync_at": primary.get("last_sync_at"),
         "connected": connected,
         "available": available,
         "coverage": coverage,
-        # When Plaid last shipped us a balance snapshot (free, bundled with
-        # each /transactions/sync call — no /accounts/balance/get charges).
-        "balance_snapshot_at": item.get("balance_snapshot_at"),
+        "balance_snapshot_at": primary.get("balance_snapshot_at"),
     }
 
 

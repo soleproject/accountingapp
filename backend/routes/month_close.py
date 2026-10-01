@@ -101,9 +101,68 @@ async def _signoffs(cid: str, year: int, month: int) -> dict:
     return {d["kind"]: coerce(d) for d in docs if d.get("kind") in CHECKPOINT_KINDS}
 
 
+async def _maybe_auto_lock(cid: str, year: int, month: int) -> Optional[dict]:
+    """If all four pre-close gates are green AND no close signoff exists,
+    silently stamp an auto-lock. Returns the new signoff doc or None.
+
+    Auto-locks are distinguishable from manual locks via `auto_locked: True`
+    and `signed_by: "system"`. The Balance Sheet / block-edits logic in
+    `is_period_closed()` treats auto-locks as "open" for new inserts —
+    i.e. a late-landing Plaid txn silently un-locks the period, so no CPA
+    intervention is required to accept it. See deps.is_period_closed."""
+    start, end = _month_bounds(year, month)
+    # Already closed?
+    existing = await db.month_close_signoffs.find_one({
+        "company_id": cid, "year": year, "month": month, "kind": "closed",
+    })
+    if existing:
+        return None
+    # Gate check — all four must be green.
+    txns = await _txns_reviewed(cid, start, end)
+    if not txns["green"]:
+        return None
+    inv_open = await _outstanding_count("invoices", cid, end)
+    bill_open = await _outstanding_count("bills", cid, end)
+    recon_state = await month_recon_state(cid, start, end)
+    signs = await _signoffs(cid, year, month)
+    inv_green = bool(signs.get("invoices")) or inv_open == 0
+    bill_green = bool(signs.get("bills")) or bill_open == 0
+    recon_green = bool(signs.get("recon")) or recon_state.get("green", False)
+    if not (inv_green and bill_green and recon_green):
+        return None
+    # Also require the period to have had SOME activity — never auto-lock
+    # an entirely empty month (confusing UX; nothing to attest to).
+    if txns["total"] == 0 and inv_open == 0 and bill_open == 0 and recon_state.get("total", 0) == 0:
+        return None
+    # Stamp the auto-lock.
+    stamp = now_iso()
+    signoff = {
+        "id": str(uuid.uuid4()),
+        "company_id": cid, "year": year, "month": month, "kind": "closed",
+        "signed_at": stamp, "signed_by": "system", "auto_locked": True,
+    }
+    await db.month_close_signoffs.update_one(
+        {"company_id": cid, "year": year, "month": month, "kind": "closed"},
+        {"$set": signoff}, upsert=True,
+    )
+    lock_q = {"company_id": cid, "period_start": start, "period_end": end, "kind": "month"}
+    await db.close_periods.update_one(lock_q, {"$set": {
+        "id": str(uuid.uuid4()), **lock_q, "status": "closed",
+        "closed_at": stamp, "closed_by": "system", "auto_locked": True,
+    }}, upsert=True)
+    return signoff
+
+
 async def _month_status(cid: str, year: int, month: int) -> dict:
     """One month's rollup — the shape both the list and detail views consume."""
     start, end = _month_bounds(year, month)
+    # Lazy auto-lock: whenever anyone reads the month status (Cockpit tiles,
+    # MonthClose grid, detail page), fire the auto-lock check so the pill
+    # materialises as green-outlined the moment the gates all turn green.
+    try:
+        await _maybe_auto_lock(cid, year, month)
+    except Exception:  # noqa: BLE001
+        pass
     signoffs = await _signoffs(cid, year, month)
     txns = await _txns_reviewed(cid, start, end)
     invoices_open = await _outstanding_count("invoices", cid, end)
@@ -165,6 +224,7 @@ async def _month_status(cid: str, year: int, month: int) -> dict:
             },
             "closed": {
                 "green": bool(closed_sign),
+                "auto_locked": bool(closed_sign.get("auto_locked")) if closed_sign else False,
                 "signed_at": closed_sign.get("signed_at") if closed_sign else None,
                 "signed_by": closed_sign.get("signed_by") if closed_sign else None,
             },
@@ -233,6 +293,11 @@ async def sign_checkpoint(
             "signed_at": now_iso(),
             "signed_by": user.get("email") or user.get("id"),
         }
+        # Explicit human sign-off → always a manual lock, never auto. This
+        # also "promotes" a prior auto-lock to a manual lock so new activity
+        # will BE BLOCKED (preserving CPA attestation semantics).
+        if inp.kind == "closed":
+            doc["auto_locked"] = False
         await db.month_close_signoffs.update_one(query, {"$set": doc}, upsert=True)
         # For 'closed', also insert a period_lock so the existing engine
         # honours it downstream (block edits to txns in that window).
@@ -244,6 +309,7 @@ async def sign_checkpoint(
                 "status": "closed",
                 "closed_at": now_iso(),
                 "closed_by": user.get("email") or user.get("id"),
+                "auto_locked": False,
             }}, upsert=True)
     else:
         # Un-sign: reverses the checkpoint. If un-signing 'closed', also

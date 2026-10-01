@@ -2779,32 +2779,45 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
         contacts_by_id[c["id"]] = c
 
     # "Uncategorized"-shaped accounts. A row pointing here counts as
-    # no-category even though technically the field is filled.
+    # no-category even though technically the field is filled. Captures
+    # both the legacy "Uncategorized …" naming scheme AND the three
+    # catch-all codes Month Close keys off (9999/6999/4999) so the two
+    # surfaces agree on what "uncategorized" means.
+    UNCAT_CODES = {"9999", "6999", "4999"}
     uncat_ids: set[str] = set()
-    async for a in db.accounts.find({"company_id": cid,
-            "name": {"$regex": "^Uncategorized", "$options": "i"}},
-            {"_id": 0, "id": 1}):
+    async for a in db.accounts.find({"company_id": cid, "$or": [
+            {"name": {"$regex": "^Uncategorized", "$options": "i"}},
+            {"code": {"$in": list(UNCAT_CODES)}},
+        ]}, {"_id": 0, "id": 1, "code": 1}):
         uncat_ids.add(a["id"])
 
     def _is_no_category(r: dict) -> bool:
         cat = r.get("category_account_id")
-        return (not cat) or (cat in uncat_ids)
+        if (not cat) or (cat in uncat_ids):
+            return True
+        # Belt-and-suspenders: a row carrying the catch-all code
+        # directly on itself (older imports stamp code without the id
+        # pointing at a canonical account) still counts.
+        return (r.get("category_account_code") or "") in UNCAT_CODES
 
-    # Every row that still needs review OR has an uncategorized/empty
-    # category target — the union of the Step 2/3 buckets.
+    # Pull "category_account_code" too — the catch-all codes
+    # (9999/6999/4999) directly stamped on legacy transactions count
+    # as uncategorized even when the uncat_ids resolver misses them.
     rows: list[dict] = []
     async for r in db.transactions.find({
         "company_id": cid,
         "$or": [
             {"needs_review": True},
             {"category_account_id": {"$in": [None, ""] + list(uncat_ids)}},
+            {"category_account_code": {"$in": list(UNCAT_CODES)}},
         ],
     }, {"_id": 0, "id": 1, "date": 1, "amount": 1, "description": 1,
          "merchant": 1, "contact_id": 1, "contact_name": 1,
-         "category_account_id": 1, "bank_account_id": 1, "bank_account_name": 1,
+         "category_account_id": 1, "category_account_code": 1,
+         "bank_account_id": 1, "bank_account_name": 1,
          "plaid_metadata": 1, "raw": 1, "txn_type": 1, "check_number": 1,
          "number": 1, "memo": 1, "not_a_check_reviewed": 1, "posted": 1,
-         "human_reviewed": 1, "needs_review": 1,
+         "human_reviewed": 1, "needs_review": 1, "linked_payment_ids": 1,
          "chat_review_pinned_group_id": 1}):
         rows.append(r)
 
@@ -2824,13 +2837,16 @@ async def chat_review_queue(cid: str, user: dict = Depends(get_current_user)):
     check_rows:    list[tuple[dict, str]] = []
 
     for r in rows:
-        # Fully-booked rows (human-reviewed with real category) → skip.
-        # A bill-payment assign has posted=True + human_reviewed=True
-        # but may carry no top-level category (the category lives on
-        # the bill's own default_account) — treat those as fully booked
-        # too so the card doesn't reappear after "Save" in Review Chat.
-        if r.get("human_reviewed") and not r.get("needs_review") and (
-            not _is_no_category(r) or r.get("posted")
+        # Skip fully-booked rows. A row is fully-booked when it's
+        # human-reviewed, not flagged for re-review, AND either:
+        #   • carries a real category (not Uncategorized/9999/…), OR
+        #   • is a bill-payment (linked_payment_ids present) — the
+        #     category lives on the bill, so top-level category_id
+        #     being null is expected and not "uncategorized" work.
+        if (
+            r.get("human_reviewed")
+            and not r.get("needs_review")
+            and (not _is_no_category(r) or r.get("linked_payment_ids"))
         ):
             continue
         is_check, signal = _is_check_txn(r)

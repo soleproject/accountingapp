@@ -746,6 +746,19 @@ async def sync_plaid_history_for_account(
         await auto_clear_settled_plaid_txns(cid)
     except Exception:  # noqa: BLE001 — never break sync on the auto-clear pass
         pass
+    # Auto-finalize any newly-eligible prior-month reconciliations now that
+    # (a) R1 just cleared whatever aged past the 5-day settle buffer, and
+    # (b) /transactions/sync just refreshed `plaid_items.accounts[].balance_current`
+    # (the independent attest point). `bootstrap_from_plaid` is idempotent —
+    # it skips months with existing recon docs via `_overlaps` and refuses
+    # any account that fails integrity check #1 (opening + Σtxns == plaid_current
+    # within 1¢) or #2 (no non-Plaid txns on the account). This is what makes
+    # the Oct-6-of-the-new-month auto-reconciliation of September actually fire.
+    try:
+        from reconciliation_engine import bootstrap_from_plaid
+        await bootstrap_from_plaid(cid, recent_only=True)
+    except Exception:  # noqa: BLE001 — never break sync on auto-finalize
+        pass
     return result
 
 

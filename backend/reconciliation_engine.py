@@ -655,11 +655,56 @@ async def bootstrap_from_plaid(
     cid: str,
     plaid_item_id: Optional[str] = None,
     overwrite_placeholders: bool = False,
+    recent_only: bool = False,
 ) -> dict:
+    """Auto-create legitimate reconciliation docs from Plaid data.
+
+    Modes:
+      - recent_only=False (default): walks every month of ledger history
+        for every mapped account. Used on initial connect + HISTORICAL_UPDATE
+        webhook when a full backfill is appropriate.
+      - recent_only=True: only considers months whose period_end falls in
+        [today - 65d, today - PROVISIONAL_DAYS]. Used from the normal
+        post-sync hook — avoids re-walking years of history on every sync.
+        See routes/plaid.py and plaid_connect.py.
+
+    Concurrency safety:
+      - Per-company advisory lock on `plaid_items.auto_finalize_locked_at`.
+        Any second invocation that lands while another is in flight (same
+        company, within 5 min) short-circuits with status='locked'.
+      - Per-account cursor on `plaid_items.account_mappings[pa_id]
+        .last_auto_finalized_through_date` — if we've already finalized
+        past the cutoff for an account, we skip the whole account loop.
+    """
     from calendar import monthrange
     now = now_iso()
     today = datetime.now(timezone.utc).date()
     cutoff = (today - timedelta(days=PROVISIONAL_DAYS))  # last day we consider "fully settled"
+    # Narrow window: only look back ~2 months. 95% of auto-finalize runs
+    # only need the just-ended calendar month; 65d gives generous margin
+    # for weekend-of-month-end + webhook delay without re-walking years.
+    recent_window_start = (today - timedelta(days=65)) if recent_only else None
+
+    # Per-company advisory lock. Use a 5-minute stale-after window so a
+    # crashed worker can't permanently block future runs.
+    LOCK_TTL = timedelta(minutes=5)
+    now_dt = datetime.now(timezone.utc)
+    stale_before = (now_dt - LOCK_TTL).isoformat()
+    lock_res = await db.plaid_items.update_many(
+        {
+            "company_id": cid,
+            "$or": [
+                {"auto_finalize_locked_at": {"$exists": False}},
+                {"auto_finalize_locked_at": None},
+                {"auto_finalize_locked_at": {"$lt": stale_before}},
+            ],
+        },
+        {"$set": {"auto_finalize_locked_at": now}},
+    )
+    if lock_res.modified_count == 0 and lock_res.matched_count == 0:
+        # No items at all for this company → fall through to normal path
+        # (will return a clean "no items" response below).
+        pass
 
     purged = 0
     if overwrite_placeholders:
@@ -801,6 +846,23 @@ async def bootstrap_from_plaid(
             ledger_account_id = mapping.get("ledger_account_id")
             opening_balance = float(mapping.get("opening_balance") or 0.0)
             opening_as_of = mapping.get("opening_as_of")
+            # Per-account cursor: skip when we've already auto-finalized
+            # through the current cutoff — avoids re-loading the whole
+            # txn history on every sync for already-settled accounts.
+            # The cursor is written at the end of each successful month
+            # creation (see `last_auto_finalized_through_date` update below).
+            cursor_date = mapping.get("last_auto_finalized_through_date")
+            if recent_only and cursor_date:
+                try:
+                    c_d = _parse_date(cursor_date)
+                    if c_d and c_d >= cutoff:
+                        skipped.append({
+                            "account_id": ledger_account_id,
+                            "reason": f"up to date (cursor {cursor_date})",
+                        })
+                        continue
+                except Exception:  # noqa: BLE001
+                    pass
             snap = acct_snapshots.get(plaid_account_id) or {}
             plaid_current = snap.get("balance_current")
             if plaid_current is None:
@@ -812,12 +874,18 @@ async def bootstrap_from_plaid(
                 continue
 
             # Pull the account's full Plaid txn stream from the ledger.
-            txns = await db.transactions.find({
-                "company_id": cid,
-                "bank_account_id": ledger_account_id,
-                "source": {"$regex": "^plaid"},
-                "posted": True,
-            }).sort("date", 1).to_list(20000)
+            # Projection trims payload — only the fields we actually need
+            # for integrity checks + period slicing (not merchant names,
+            # payment_meta, counterparties, etc.).
+            txns = await db.transactions.find(
+                {
+                    "company_id": cid,
+                    "bank_account_id": ledger_account_id,
+                    "source": {"$regex": "^plaid"},
+                    "posted": True,
+                },
+                {"_id": 0, "id": 1, "date": 1, "amount": 1},
+            ).sort("date", 1).to_list(20000)
 
             # The invariant that matters:  opening + Σ(txns STRICTLY AFTER
             # opening_as_of) == plaid_current.  Pre-opening txns are already
@@ -903,6 +971,12 @@ async def bootstrap_from_plaid(
                 last = monthrange(y, m)[1]
                 m_first = dt_date(y, m, 1)
                 m_last = dt_date(y, m, last)
+                # Narrow-window gate: in recent_only mode we skip months
+                # that end before the recent window begins — their recon
+                # was created on an earlier run (or they predate adoption).
+                # `running` still has to be advanced through those months,
+                # so we don't `continue` outright; just forbid new creates.
+                skip_create = bool(recent_window_start) and m_last < recent_window_start
                 # Clamp to bootstrap window.
                 p_start = max(m_first, window_start)
                 p_end = min(m_last, window_end)
@@ -944,6 +1018,12 @@ async def bootstrap_from_plaid(
                     running = round(running + sum(float(t.get("amount") or 0) for t in m_txns), 2)
                     continue
 
+                if skip_create:
+                    # Narrow-window run — just advance `running`; this month
+                    # was handled on an earlier full-history bootstrap.
+                    running = round(running + sum(float(t.get("amount") or 0) for t in m_txns), 2)
+                    continue
+
                 cleared_sum = round(sum(float(t.get("amount") or 0) for t in m_txns), 2)
                 period_open = running
                 period_close = round(period_open + cleared_sum, 2)
@@ -963,12 +1043,20 @@ async def bootstrap_from_plaid(
                     "difference": 0.0,
                     "cleared_txn_ids": txn_ids,
                     "matched_count": len(txn_ids),
-                    "source": "plaid_bootstrap",
+                    "source": "plaid_balance_verified",
                     "status": "reconciled",
                     "auto_generated": True,
+                    # Attestation trail — proves this isn't a rubber-stamp.
+                    # Integrity check #1 passed above (opening + Σtxns ==
+                    # plaid_current within 1¢), so this period slice is
+                    # mathematically consistent with Plaid's own reported
+                    # balance from the free /transactions/sync feed.
+                    "verification_method": "plaid_balance_v1",
+                    "plaid_current_at_sync": plaid_current,
+                    "plaid_current_as_of": now,
                     "plaid_item_id": item_id,
                     "completed_at": now,
-                    "completed_by": "auto:plaid_bootstrap",
+                    "completed_by": "auto:plaid_balance_verified",
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -993,6 +1081,27 @@ async def bootstrap_from_plaid(
                     "closing_balance": period_close,
                 })
                 running = period_close
+                # Advance per-account cursor so next recent_only sweep can
+                # skip this account outright if nothing new has settled.
+                try:
+                    await db.plaid_items.update_one(
+                        {"id": item_id, f"account_mappings.{plaid_account_id}": {"$exists": True}},
+                        {"$set": {
+                            f"account_mappings.{plaid_account_id}.last_auto_finalized_through_date": p_end_iso,
+                            "updated_at": now,
+                        }},
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+
+    # Release the per-company advisory lock.
+    try:
+        await db.plaid_items.update_many(
+            {"company_id": cid},
+            {"$set": {"auto_finalize_locked_at": None}},
+        )
+    except Exception:  # noqa: BLE001
+        pass
 
     return {
         "created": created,

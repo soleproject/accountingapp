@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight,
+  ChevronLeft, ChevronRight, Lock, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -312,13 +312,16 @@ export default function CockpitTodayV7() {
             {/* When Closings or Clients is expanded, hide the rest of
                 the dashboard and focus on that single panel. */}
             {closingsOpen ? (
-              <ClosingsPanel
-                grid={d.closeGrid}
-                total={d.priorUnclosedTotal}
-                onNav={navigate}
-                refetch={fetchData}
-                onClose={() => setClosingsOpen(false)}
-              />
+              <>
+                <ClosingsPanel
+                  grid={d.closeGrid}
+                  total={d.priorUnclosedTotal}
+                  onNav={navigate}
+                  refetch={fetchData}
+                  onClose={() => setClosingsOpen(false)}
+                />
+                <PendingReconciliationsCard onNav={navigate} />
+              </>
             ) : clientsOpen ? (
               <ClientsPanel
                 clients={d.clients}
@@ -1234,9 +1237,12 @@ function ClosingsPanel({ grid, total, onNav, refetch, onClose }) {
       ) : (
         <>
           {/* Legend */}
-          <div className="flex items-center gap-4 mb-3 text-[11px] text-slate-500">
+          <div className="flex items-center gap-4 mb-3 text-[11px] text-slate-500 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Reconciled
+              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Signed off
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-white border-2 border-emerald-500" /> Auto-closed
             </div>
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-sm bg-rose-500" /> Unreconciled
@@ -1296,7 +1302,7 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
     : null;
 
   const openMonth = async (m) => {
-    if (m.state !== "unclosed") return;
+    if (m.state === "no_activity") return;
     if (selected === m.period) {
       setSelected(null);
       setStatus(null);
@@ -1373,15 +1379,28 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
           const isSelected = selected === m.period;
           const base = "flex flex-col items-center justify-center rounded-md py-1.5 text-[10px] font-medium transition-all";
           let cls;
+          let titleSuffix = "";
           if (m.state === "closed") {
-            cls = "bg-emerald-500 text-white hover:bg-emerald-600";
+            if (m.auto_locked) {
+              // Auto-closed: green outlined / white fill — all gates
+              // reviewed but no human sign-off yet. New activity will
+              // silently reopen it. See routes/month_close.py.
+              cls = "bg-white text-emerald-700 border-2 border-emerald-500 hover:bg-emerald-50";
+              titleSuffix = " · auto-closed (new activity reopens automatically)";
+            } else {
+              cls = "bg-emerald-500 text-white hover:bg-emerald-600 border-2 border-emerald-500";
+            }
           } else if (m.state === "unclosed") {
-            cls = "bg-rose-500 text-white hover:bg-rose-600 cursor-pointer";
+            cls = "bg-rose-500 text-white hover:bg-rose-600 cursor-pointer border-2 border-rose-500";
           } else {
-            cls = "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed";
+            cls = "bg-slate-100 text-slate-400 border-2 border-slate-200 cursor-not-allowed";
           }
           if (isSelected) cls += " ring-2 ring-offset-1 ring-rose-700 scale-105";
-          const clickable = m.state === "unclosed";
+          // Any month with activity is clickable — opens the inline detail
+          // panel so the pro can see gates + the Complete Closing button
+          // (works for red "unclosed" AND for already-auto-locked periods
+          // where the pro may want to promote to a manual lock).
+          const clickable = m.state !== "no_activity";
           return (
             <button
               key={m.period}
@@ -1389,7 +1408,7 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
               onClick={() => openMonth(m)}
               disabled={!clickable}
               data-testid={`v7-close-cell-${client.company_id}-${m.period}`}
-              title={`${m.label} ${m.year} · ${m.state} · ${m.txn_count} txn${m.txn_count === 1 ? "" : "s"}`}
+              title={`${m.label} ${m.year} · ${m.state} · ${m.txn_count} txn${m.txn_count === 1 ? "" : "s"}${titleSuffix}`}
               className={`${base} ${cls}`}
             >
               <span className="leading-none">{m.label}</span>
@@ -1471,6 +1490,8 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
               ym={selected}
               status={status}
               onNav={onNav}
+              onCompleteClosing={quickSignOff}
+              signing={signing}
             />
           )}
         </div>
@@ -1480,8 +1501,14 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
 }
 
 // -------- Renders the 5 month-close checkpoint rows --------------
-function ChecklistRows({ cid, ym, status, onNav }) {
+function ChecklistRows({ cid, ym, status, onNav, onCompleteClosing, signing }) {
   const cps = status.checkpoints || {};
+  // All four pre-conditions green? → "Complete Closing" button enabled.
+  const preGreen = ["txns_reviewed", "invoices", "bills", "recon"]
+    .every(k => Boolean(cps[k]?.green));
+  const closedCp = cps.closed || {};
+  const autoLocked = Boolean(closedCp.auto_locked);
+  const manuallyLocked = Boolean(closedCp.green) && !autoLocked;
   const rows = [
     {
       key: "txns_reviewed",
@@ -1534,7 +1561,7 @@ function ChecklistRows({ cid, ym, status, onNav }) {
         if (cp.signed_at) return `Signed off ${new Date(cp.signed_at).toLocaleDateString()}`;
         return `${cp.cleared || 0}/${cp.total || 0} cleared · sign off to complete`;
       },
-      route: `/accounting/month-close?ym=${ym}&company=${cid}#recon`,
+      route: `/accounting/reconciliation?month=${ym}&from=month-close&ym=${ym}`,
       ctaLabel: "Reconcile",
     },
     {
@@ -1543,7 +1570,9 @@ function ChecklistRows({ cid, ym, status, onNav }) {
       cp: cps.closed,
       detail: (cp) => {
         if (!cp) return "";
+        if (cp.signed_at && cp.auto_locked) return `Auto-closed ${new Date(cp.signed_at).toLocaleDateString()} · click Complete Closing to lock permanently`;
         if (cp.signed_at) return `Locked ${new Date(cp.signed_at).toLocaleDateString()}`;
+        if (preGreen) return "All gates green — ready to lock permanently";
         return "Gated — sign off after the four above are green";
       },
       route: null,
@@ -1555,26 +1584,52 @@ function ChecklistRows({ cid, ym, status, onNav }) {
     <ul className="space-y-1.5">
       {rows.map(r => {
         const green = r.cp?.green;
+        const isClosedRow = r.key === "closed";
+        // "Complete Closing" button — shows on the Period Locked row when
+        // the 4 preconditions are green (auto-locked or not), and converts
+        // either an auto-lock into a manual lock, or stamps the first lock.
+        const showComplete = isClosedRow && preGreen && !manuallyLocked;
         return (
           <li
             key={r.key}
             className="flex items-center gap-2 rounded-md bg-white border border-slate-100 px-2.5 py-1.5"
           >
             {green
-              ? <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />
+              ? (isClosedRow && autoLocked
+                  ? <CheckCircle2 size={14} className="text-emerald-500 shrink-0" style={{opacity:0.7}} />
+                  : <CheckCircle2 size={14} className="text-emerald-500 shrink-0" />)
               : <AlertTriangle size={14} className="text-rose-500 shrink-0" />}
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-medium text-slate-800 truncate">{r.label}</div>
+              <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1.5">
+                {r.label}
+                {isClosedRow && autoLocked && (
+                  <span className="text-[9px] uppercase tracking-wider font-semibold text-emerald-700 border border-emerald-500 rounded px-1 py-[1px] bg-white">
+                    auto
+                  </span>
+                )}
+              </div>
               <div className="text-[11px] text-slate-500 truncate">{r.detail(r.cp)}</div>
             </div>
-            {!green && r.route && r.ctaLabel && (
+            {showComplete ? (
+              <button
+                onClick={onCompleteClosing}
+                disabled={Boolean(signing)}
+                data-testid={`v7-complete-closing-${cid}-${ym}`}
+                className="text-[11px] font-semibold px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 shrink-0 inline-flex items-center gap-1"
+                title={autoLocked
+                  ? "This period is auto-closed. Click to permanently lock it with your sign-off."
+                  : "Lock this period permanently with your sign-off."}
+              >
+                <Lock size={12} /> Complete Closing
+              </button>
+            ) : (!green && r.route && r.ctaLabel && (
               <button
                 onClick={() => onNav(r.route)}
                 className="text-[11px] px-2 py-1 rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50 shrink-0"
               >
                 {r.ctaLabel} →
               </button>
-            )}
+            ))}
           </li>
         );
       })}
@@ -1642,3 +1697,111 @@ function ClientHealthCard({ c, onNav }) {
     </div>
   );
 }
+
+
+// ---- Pending Reconciliations card (shown below Closings panel) ---------
+// Renders during the end-of-month → day-6 handoff when the prior month's
+// per-account reconciliations are auto-finalizing via Plaid's free balance
+// snapshot (reconciliation_engine.bootstrap_from_plaid → source:
+// "plaid_balance_verified"). The card simply surfaces what the backend
+// has already decided — no action required for Plaid-mapped accounts,
+// and a clear flag for anything that will need the pro's attention.
+function PendingReconciliationsCard({ onNav }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get("/cockpit/pending-reconciliations");
+        if (!cancelled) setData(r.data);
+      } catch {
+        if (!cancelled) setData(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (loading) return null;
+  if (!data || !(data.companies || []).length) return null;
+  const monthLabel = (() => {
+    const m = /^(\d{4})-(\d{2})$/.exec(data.month || "");
+    if (!m) return data.month || "";
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+    return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+  })();
+  return (
+    <div className="rounded-2xl border-2 border-cyan-200 bg-cyan-50/40 p-5"
+         data-testid="v7-pending-recons">
+      <div className="flex items-start justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center shrink-0">
+            <Clock size={14} className="text-cyan-700" />
+          </div>
+          <div>
+            <div className="font-heading text-lg font-semibold">
+              {monthLabel} auto-reconciliations
+            </div>
+            <div className="text-[12px] text-slate-600 mt-0.5">
+              {data.waiting
+                ? <>Plaid 5-day settle · <b>{data.days_left} day{data.days_left === 1 ? "" : "s"} left</b> · eligible {data.eligible_at}. Reconciliations will auto-finalize on the next Plaid sync after that.</>
+                : <>Settle period complete — next Plaid sync will auto-finalize any eligible accounts.</>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {(data.companies || []).map(c => (
+          <div key={c.company_id} className="rounded-lg bg-white border border-cyan-100 p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <div className="font-medium text-sm text-slate-900">{c.company_name}</div>
+              <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                {c.totals.done > 0 && <span className="text-emerald-700 font-medium">{c.totals.done} done</span>}
+                {c.totals.waiting > 0 && <span className="text-cyan-700 font-medium">{c.totals.waiting} waiting</span>}
+                {c.totals.ready > 0 && <span className="text-amber-700 font-medium">{c.totals.ready} ready</span>}
+                {c.totals.manual > 0 && <span className="text-rose-700 font-medium">{c.totals.manual} manual</span>}
+              </div>
+            </div>
+            <ul className="space-y-1">
+              {c.rows.map(r => (
+                <li key={r.account_id}
+                    className="flex items-center gap-2 text-[12px] px-2 py-1 rounded border border-slate-100 bg-white">
+                  <ReconStatusIcon status={r.status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-800 truncate">{r.account_name}</div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
+                    </div>
+                  </div>
+                  {(r.status === "manual_required" || r.status === "ineligible_non_plaid") && (
+                    <button
+                      onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
+                      className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
+                      data-testid={`v7-pending-recon-manual-${r.account_id}`}
+                    >
+                      Reconcile →
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReconStatusIcon({ status }) {
+  if (status === "auto_reconciled") return <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />;
+  if (status === "manually_reconciled") return <CheckCircle2 size={13} className="text-emerald-700 shrink-0" />;
+  // Static clock during the settle window — nothing is actively "spinning"
+  // on the backend, we're just waiting for the calendar to advance.
+  if (status === "waiting_settle") return <Clock size={13} className="text-cyan-600 shrink-0" />;
+  // Ready-to-finalize uses an hourglass vibe — still static.
+  if (status === "ready_next_sync") return <Clock size={13} className="text-amber-600 shrink-0" />;
+  return <AlertTriangle size={13} className="text-rose-600 shrink-0" />;
+}
+

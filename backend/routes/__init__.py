@@ -1,6 +1,7 @@
 """Axiom Ledger — route modules (Feb 2026 modularization)."""
 
 from routes.health_probes import router as health_probes_router  # noqa: F401
+from routes.cron_auto_finalize import router as cron_auto_finalize_router  # noqa: F401
 from routes.auth import router as auth_router  # noqa: F401
 from routes.admin import router as admin_router  # noqa: F401
 from routes.pro import router as pro_router  # noqa: F401
@@ -201,4 +202,5 @@ ALL_ROUTERS = [
     reviewv2_router,
     lab_compare_router,
     cleanup_router,
+    cron_auto_finalize_router,
 ]

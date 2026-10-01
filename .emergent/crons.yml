@@ -1,0 +1,8 @@
+crons:
+  - name: auto-finalize-recon
+    description: "Nightly 2:15 UTC sweep: finalizes prior-month Plaid reconciliations for dormant companies"
+    cron: "15 2 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/auto-finalize-reconciliations"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

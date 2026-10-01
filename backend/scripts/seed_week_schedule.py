@@ -89,7 +89,11 @@ async def main() -> int:
         return 2
 
     companies: list[dict] = []
-    async for c in db.companies.find({"primary_pro_id": pro["id"]}):
+    async for c in db.companies.find({"$or": [
+        {"primary_pro_id": pro["id"]},
+        {"pro_user_id":    pro["id"]},
+        {"owner_user_id":  pro["id"]},
+    ]}):
         companies.append(c)
     if not companies:
         print(f"FATAL: {PRO_EMAIL!r} has no companies.")

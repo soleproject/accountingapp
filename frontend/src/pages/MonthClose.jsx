@@ -238,6 +238,7 @@ function DetailView({ cursor, setCursor, data, onSign, busy, currentId, reload, 
 function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStart, periodEnd, reviewMode }) {
   const Icon = meta.icon;
   const green = Boolean(c?.green);
+  const autoLocked = meta.key === "closed" && Boolean(c?.auto_locked);
   // A row is auto-driven either statically (Txns Reviewed) or dynamically
   // when the server says nothing needs a signoff (e.g. 0 outstanding
   // invoices/bills for the month). Closed is always manual.
@@ -334,7 +335,9 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
   return (
     <div className={`px-4 py-4 flex items-start gap-4 ${divider ? "border-t" : ""}`} data-testid={`month-close-cp-${meta.key}`}>
       <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-        green ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"
+        autoLocked
+          ? "bg-white border-2 border-emerald-500 text-emerald-700"
+          : (green ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500")
       }`}>
         <Icon size={16} />
       </div>
@@ -346,18 +349,42 @@ function CheckpointRow({ meta, c, onSign, busy, divider, cursorMonth, periodStar
               auto
             </span>
           )}
+          {autoLocked && (
+            <span className="text-[10px] uppercase tracking-widest font-semibold text-emerald-700 border-2 border-emerald-500 rounded px-1.5 py-0.5 bg-white">
+              auto-closed
+            </span>
+          )}
         </div>
         <div className="mt-1 flex items-center gap-3 flex-wrap">
-          {statusEl}
-          {c?.signed_at && (
+          {autoLocked ? (
+            <span className="text-xs text-slate-600">
+              All gates reviewed · auto-closed by system. New activity will reopen automatically. Click <strong>Sign off to lock</strong> for permanent attestation.
+            </span>
+          ) : statusEl}
+          {c?.signed_at && !autoLocked && (
             <span className="text-[11px] text-slate-500">
               signed by {c.signed_by} · {new Date(c.signed_at).toLocaleDateString()}
+            </span>
+          )}
+          {autoLocked && c?.signed_at && (
+            <span className="text-[11px] text-slate-500">
+              auto-closed {new Date(c.signed_at).toLocaleDateString()}
             </span>
           )}
         </div>
       </div>
       <div className="shrink-0">
-        {green ? (
+        {autoLocked ? (
+          <button
+            onClick={() => onSign(meta.key, true)}
+            disabled={busy}
+            data-testid={`month-close-promote-${meta.key}`}
+            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+            title="Promote this auto-close to a manual sign-off. New activity will then be blocked."
+          >
+            <Lock size={13} /> Sign off to lock
+          </button>
+        ) : green ? (
           canToggle ? (
             <button
               onClick={() => onSign(meta.key, false)}
@@ -426,22 +453,35 @@ function ListView({ months, onPickMonth }) {
         <tbody>
           {months.map(m => {
             const closed = m.checkpoints.closed.green;
+            const autoLocked = Boolean(m.checkpoints.closed.auto_locked);
             return (
               <tr key={`${m.year}-${m.month}`} className={`border-b hover:bg-slate-50 cursor-pointer ${closed ? "" : ""}`}
                   onClick={() => onPickMonth(m.year, m.month)}
                   data-testid={`month-close-row-${m.year}-${m.month}`}>
                 <td className="px-4 py-2 font-medium">
                   {monthLabel(m.year, m.month)}
-                  {closed && <Lock size={11} className="inline ml-2 text-emerald-600" />}
+                  {closed && !autoLocked && <Lock size={11} className="inline ml-2 text-emerald-600" />}
+                  {closed && autoLocked && (
+                    <span className="inline-flex items-center ml-2 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 border border-emerald-500 rounded px-1 py-0.5 bg-white"
+                          title="Auto-closed — all gates reviewed. New activity will reopen automatically.">
+                      Auto
+                    </span>
+                  )}
                 </td>
                 {CHECKPOINTS.map(cp => {
                   const c = m.checkpoints[cp.key];
                   const g = Boolean(c?.green);
+                  const isClosedDot = cp.key === "closed";
+                  const dotCls = g
+                    ? (isClosedDot && autoLocked
+                        ? "bg-white border-2 border-emerald-500"
+                        : "bg-emerald-500")
+                    : "bg-red-500";
                   return (
                     <td key={cp.key} className="px-2 py-2 text-center">
                       <span
-                        className={`inline-block w-4 h-4 rounded-full ${g ? "bg-emerald-500" : "bg-red-500"}`}
-                        title={g ? "Signed" : "Open"}
+                        className={`inline-block w-4 h-4 rounded-full ${dotCls}`}
+                        title={isClosedDot && autoLocked ? "Auto-closed" : (g ? "Signed" : "Open")}
                       />
                     </td>
                   );
