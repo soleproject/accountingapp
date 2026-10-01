@@ -70,6 +70,147 @@ def _hour_str(iso) -> str:
         return ""
 
 
+@router.get("/pending-reconciliations")
+async def cockpit_pending_reconciliations(
+    user: dict = Depends(get_current_user),
+):
+    """Cross-company Pending Reconciliations roll-up.
+
+    One row per (company × prior-month account) with its auto-finalize
+    status. Powers the "Pending Reconciliations" card that appears below
+    Closings during the end-of-month → day-6 handoff window.
+    """
+    from reconciliation_engine import PROVISIONAL_DAYS
+    accessible = await require_firm_or_pro(user)
+    if not accessible:
+        return {"empty": True, "companies": []}
+    today = datetime.now(timezone.utc).date()
+    if today.month == 1:
+        py, pm = today.year - 1, 12
+    else:
+        py, pm = today.year, today.month - 1
+    last = monthrange(py, pm)[1]
+    prior_start = f"{py:04d}-{pm:02d}-01"
+    prior_end = f"{py:04d}-{pm:02d}-{last:02d}"
+    eligible_at = (datetime(py, pm, last) + timedelta(days=PROVISIONAL_DAYS)).date()
+    waiting = today < eligible_at
+    days_left = (eligible_at - today).days if waiting else 0
+
+    companies = await db.companies.find({"id": {"$in": accessible}}).to_list(2000)
+    out = []
+    for c in companies:
+        cid = c["id"]
+        # Reuse the per-company endpoint logic inline to keep one source
+        # of truth for status derivation. Pull all Plaid mappings, foreign-
+        # txn hints, and existing full-month recon docs in bulk.
+        mapped_ledger_ids: set[str] = set()
+        async for item in db.plaid_items.find({"company_id": cid}):
+            for pa_id, mp in (item.get("account_mappings") or {}).items():
+                lid = mp.get("ledger_account_id")
+                if lid:
+                    mapped_ledger_ids.add(lid)
+
+        # Candidate accounts: Plaid-mapped OR with prior-month txns.
+        candidate_ids: set[str] = set(mapped_ledger_ids)
+        async for row in db.transactions.aggregate([
+            {"$match": {
+                "company_id": cid, "posted": True,
+                "bank_account_id": {"$exists": True, "$ne": None},
+                "date": {"$gte": prior_start, "$lte": prior_end},
+            }},
+            {"$group": {"_id": "$bank_account_id"}},
+        ]):
+            candidate_ids.add(row["_id"])
+        if not candidate_ids:
+            continue
+        accts = {}
+        async for a in db.accounts.find(
+            {"company_id": cid, "id": {"$in": list(candidate_ids)}},
+            {"_id": 0, "id": 1, "code": 1, "name": 1, "type": 1},
+        ):
+            accts[a["id"]] = a
+
+        rows = []
+        for aid in candidate_ids:
+            a = accts.get(aid) or {"id": aid, "name": "—", "code": "", "type": ""}
+            existing = await db.reconciliations.find_one({
+                "company_id": cid, "bank_account_id": aid,
+                "status": {"$in": ["reconciled", "qbo_covered"]},
+                "period_start": {"$lte": prior_start},
+                "period_end": {"$gte": prior_end},
+            }, sort=[("period_end", -1)])
+            txn_count = await db.transactions.count_documents({
+                "company_id": cid, "bank_account_id": aid, "posted": True,
+                "date": {"$gte": prior_start, "$lte": prior_end},
+            })
+            is_plaid_mapped = aid in mapped_ledger_ids
+            has_foreign = False
+            if is_plaid_mapped:
+                fd = await db.transactions.find_one({
+                    "company_id": cid, "bank_account_id": aid,
+                    "source": {"$not": {"$regex": "^plaid"}},
+                    "posted": True,
+                })
+                has_foreign = bool(fd)
+            if existing:
+                status = "auto_reconciled" if existing.get("auto_generated") else "manually_reconciled"
+                reason = f"{existing.get('source','manual')} · {str(existing.get('completed_at',''))[:10]}"
+            elif not is_plaid_mapped:
+                status, reason = "manual_required", "No Plaid connection"
+            elif has_foreign:
+                status, reason = "ineligible_non_plaid", "Non-Plaid txns on account"
+            elif waiting:
+                status = "waiting_settle"
+                reason = f"Plaid settle · {days_left} day{'s' if days_left != 1 else ''} left"
+            else:
+                status, reason = "ready_next_sync", "Will auto-finalize on next sync"
+            rows.append({
+                "account_id": aid,
+                "account_code": a.get("code") or "",
+                "account_name": a.get("name") or "—",
+                "account_type": a.get("type") or "",
+                "txn_count": txn_count,
+                "plaid_mapped": is_plaid_mapped,
+                "status": status, "reason": reason,
+                "verification_method": (existing or {}).get("verification_method"),
+            })
+        order = {
+            "manual_required": 0, "ineligible_non_plaid": 1,
+            "waiting_settle": 2, "ready_next_sync": 3,
+            "auto_reconciled": 4, "manually_reconciled": 5,
+        }
+        rows.sort(key=lambda r: (order.get(r["status"], 9), r["account_code"]))
+        out.append({
+            "company_id": cid,
+            "company_name": c.get("name") or "Untitled",
+            "rows": rows,
+            "totals": {
+                "accounts": len(rows),
+                "done": sum(1 for r in rows if r["status"] in ("auto_reconciled", "manually_reconciled")),
+                "waiting": sum(1 for r in rows if r["status"] == "waiting_settle"),
+                "ready": sum(1 for r in rows if r["status"] == "ready_next_sync"),
+                "manual": sum(1 for r in rows if r["status"] in ("manual_required", "ineligible_non_plaid")),
+            },
+        })
+    # Sort companies: those with pending/manual work first, done-only last.
+    out.sort(key=lambda c: (
+        -c["totals"]["manual"],
+        -c["totals"]["waiting"],
+        -c["totals"]["ready"],
+    ))
+    return {
+        "month": f"{py:04d}-{pm:02d}",
+        "period_start": prior_start,
+        "period_end": prior_end,
+        "settle_days": PROVISIONAL_DAYS,
+        "eligible_at": eligible_at.isoformat(),
+        "today": today.isoformat(),
+        "waiting": waiting,
+        "days_left": days_left,
+        "companies": out,
+    }
+
+
 @router.get("/today-v4")
 async def today_v4(
     days: int = Query(7, ge=1, le=90),

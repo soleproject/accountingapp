@@ -312,13 +312,16 @@ export default function CockpitTodayV7() {
             {/* When Closings or Clients is expanded, hide the rest of
                 the dashboard and focus on that single panel. */}
             {closingsOpen ? (
-              <ClosingsPanel
-                grid={d.closeGrid}
-                total={d.priorUnclosedTotal}
-                onNav={navigate}
-                refetch={fetchData}
-                onClose={() => setClosingsOpen(false)}
-              />
+              <>
+                <ClosingsPanel
+                  grid={d.closeGrid}
+                  total={d.priorUnclosedTotal}
+                  onNav={navigate}
+                  refetch={fetchData}
+                  onClose={() => setClosingsOpen(false)}
+                />
+                <PendingReconciliationsCard onNav={navigate} />
+              </>
             ) : clientsOpen ? (
               <ClientsPanel
                 clients={d.clients}
@@ -1694,3 +1697,108 @@ function ClientHealthCard({ c, onNav }) {
     </div>
   );
 }
+
+
+// ---- Pending Reconciliations card (shown below Closings panel) ---------
+// Renders during the end-of-month → day-6 handoff when the prior month's
+// per-account reconciliations are auto-finalizing via Plaid's free balance
+// snapshot (reconciliation_engine.bootstrap_from_plaid → source:
+// "plaid_balance_verified"). The card simply surfaces what the backend
+// has already decided — no action required for Plaid-mapped accounts,
+// and a clear flag for anything that will need the pro's attention.
+function PendingReconciliationsCard({ onNav }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api.get("/cockpit/pending-reconciliations");
+        if (!cancelled) setData(r.data);
+      } catch {
+        if (!cancelled) setData(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (loading) return null;
+  if (!data || !(data.companies || []).length) return null;
+  const monthLabel = (() => {
+    const m = /^(\d{4})-(\d{2})$/.exec(data.month || "");
+    if (!m) return data.month || "";
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+    return d.toLocaleString("en-US", { month: "long", year: "numeric" });
+  })();
+  return (
+    <div className="rounded-2xl border-2 border-cyan-200 bg-cyan-50/40 p-5"
+         data-testid="v7-pending-recons">
+      <div className="flex items-start justify-between gap-2 mb-3 flex-wrap">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center shrink-0">
+            <Loader2 size={14} className="text-cyan-700" />
+          </div>
+          <div>
+            <div className="font-heading text-lg font-semibold">
+              {monthLabel} auto-reconciliations
+            </div>
+            <div className="text-[12px] text-slate-600 mt-0.5">
+              {data.waiting
+                ? <>Plaid 5-day settle · <b>{data.days_left} day{data.days_left === 1 ? "" : "s"} left</b> · eligible {data.eligible_at}. Reconciliations will auto-finalize on the next Plaid sync after that.</>
+                : <>Settle period complete — next Plaid sync will auto-finalize any eligible accounts.</>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {(data.companies || []).map(c => (
+          <div key={c.company_id} className="rounded-lg bg-white border border-cyan-100 p-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <div className="font-medium text-sm text-slate-900">{c.company_name}</div>
+              <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                {c.totals.done > 0 && <span className="text-emerald-700 font-medium">{c.totals.done} done</span>}
+                {c.totals.waiting > 0 && <span className="text-cyan-700 font-medium">{c.totals.waiting} waiting</span>}
+                {c.totals.ready > 0 && <span className="text-amber-700 font-medium">{c.totals.ready} ready</span>}
+                {c.totals.manual > 0 && <span className="text-rose-700 font-medium">{c.totals.manual} manual</span>}
+              </div>
+            </div>
+            <ul className="space-y-1">
+              {c.rows.map(r => (
+                <li key={r.account_id}
+                    className="flex items-center gap-2 text-[12px] px-2 py-1 rounded border border-slate-100 bg-white">
+                  <ReconStatusIcon status={r.status} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-slate-800 truncate">{r.account_name}</div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
+                    </div>
+                  </div>
+                  {(r.status === "manual_required" || r.status === "ineligible_non_plaid") && (
+                    <button
+                      onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
+                      className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
+                      data-testid={`v7-pending-recon-manual-${r.account_id}`}
+                    >
+                      Reconcile →
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ReconStatusIcon({ status }) {
+  if (status === "auto_reconciled") return <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />;
+  if (status === "manually_reconciled") return <CheckCircle2 size={13} className="text-emerald-700 shrink-0" />;
+  if (status === "waiting_settle") return <Loader2 size={13} className="text-cyan-600 shrink-0 animate-spin" />;
+  if (status === "ready_next_sync") return <Loader2 size={13} className="text-amber-600 shrink-0" />;
+  return <AlertTriangle size={13} className="text-rose-600 shrink-0" />;
+}
+

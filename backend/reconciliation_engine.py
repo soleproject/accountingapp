@@ -963,12 +963,20 @@ async def bootstrap_from_plaid(
                     "difference": 0.0,
                     "cleared_txn_ids": txn_ids,
                     "matched_count": len(txn_ids),
-                    "source": "plaid_bootstrap",
+                    "source": "plaid_balance_verified",
                     "status": "reconciled",
                     "auto_generated": True,
+                    # Attestation trail — proves this isn't a rubber-stamp.
+                    # Integrity check #1 passed above (opening + Σtxns ==
+                    # plaid_current within 1¢), so this period slice is
+                    # mathematically consistent with Plaid's own reported
+                    # balance from the free /transactions/sync feed.
+                    "verification_method": "plaid_balance_v1",
+                    "plaid_current_at_sync": plaid_current,
+                    "plaid_current_as_of": now,
                     "plaid_item_id": item_id,
                     "completed_at": now,
-                    "completed_by": "auto:plaid_bootstrap",
+                    "completed_by": "auto:plaid_balance_verified",
                     "created_at": now,
                     "updated_at": now,
                 }
