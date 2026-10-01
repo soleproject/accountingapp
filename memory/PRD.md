@@ -666,3 +666,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Navigation style moved
 - NavStyleCard moved from /settings User Settings tab to /accounting/settings Sidebar Mode tab (below Sidebar Mode card). /settings User Settings now = Booking + Note-takers only.
+
+## 2026-10-01 — Company Settings page retired
+- BookingPanel + NoteTakersPanel now render at the bottom of /crm/settings. /settings → Navigate redirect to /accounting/settings (many pages link to /settings for company tabs). "user" tab removed from CompanySettings.

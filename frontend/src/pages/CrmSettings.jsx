@@ -299,9 +299,6 @@ export default function CrmSettings() {
           </label>
         </div>
 
-        {/* Note-taker integrations & Booking Panel moved to
-            Company Settings → User Settings (Round 7.6, Feb 2026). */}
-
         <div className="flex justify-end">
           <button onClick={saveCustom}
                   disabled={saving}
@@ -311,6 +308,13 @@ export default function CrmSettings() {
             Save custom
           </button>
         </div>
+      </div>
+
+      {/* Per-user meeting / booking defaults and AI note-taker
+          connections — moved here from Company Settings. */}
+      <div className="space-y-4" data-testid="crm-user-settings">
+        <BookingPanel />
+        <NoteTakersPanel />
       </div>
     </div>
   );
