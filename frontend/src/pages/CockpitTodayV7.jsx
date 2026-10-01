@@ -1238,8 +1238,103 @@ const IN_PROGRESS_TABS = [
   { key: "cockpit",    label: "Client Cockpit",       tint: "violet",  icon: "📍" },
 ];
 
+// Matches an in-progress item to a set of selected company ids. Items
+// carry `company_id` when the backend knows it; otherwise fall back to
+// the display name so legacy rows still filter correctly.
+function _matchesCompany(item, selectedIds, nameById) {
+  if (!selectedIds.size) return true;
+  if (item.company_id && selectedIds.has(item.company_id)) return true;
+  const nm = item.company_name || item.company || "";
+  for (const id of selectedIds) {
+    if (nm && nameById[id] === nm) return true;
+  }
+  return false;
+}
+
+function InProgressCompanyFilter({ companies, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const list = companies.filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase()));
+  const toggle = (id) => {
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    onChange(next);
+  };
+  const label = selected.size === 0
+    ? "All companies"
+    : selected.size === 1
+      ? (companies.find(c => c.id === [...selected][0])?.name || "1 company")
+      : `${selected.size} companies`;
+
+  return (
+    <div className="relative" data-testid="v7-ip-company-filter">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        data-testid="v7-ip-company-filter-trigger"
+        className={`inline-flex items-center gap-1.5 text-[12px] font-medium px-3 py-1.5 rounded-md border bg-white transition-colors ${
+          selected.size ? "border-indigo-400 text-indigo-700" : "border-slate-200 text-slate-700 hover:bg-slate-50"
+        }`}
+      >
+        <Users size={13} />
+        <span className="max-w-[180px] truncate">{label}</span>
+        <span className="text-slate-400 text-[10px]">{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-1 z-20 w-72 rounded-lg border border-slate-200 bg-white shadow-lg p-2"
+               data-testid="v7-ip-company-filter-menu">
+            <input
+              autoFocus
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Search companies…"
+              data-testid="v7-ip-company-filter-search"
+              className="w-full text-[12px] px-2 py-1.5 rounded-md border border-slate-200 mb-2 outline-none focus:border-indigo-400"
+            />
+            <div className="max-h-56 overflow-y-auto">
+              {list.length === 0 && (
+                <div className="text-[12px] text-slate-400 px-2 py-3 text-center">No matches</div>
+              )}
+              {list.map(c => {
+                const on = selected.has(c.id);
+                return (
+                  <label key={c.id}
+                         className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-slate-50 cursor-pointer text-[13px] text-slate-800"
+                         data-testid={`v7-ip-company-option-${c.id}`}>
+                    <input type="checkbox" checked={on} onChange={() => toggle(c.id)}
+                           className="accent-indigo-600" />
+                    <span className="truncate">{c.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
+              <button type="button" onClick={() => onChange(new Set(companies.map(c => c.id)))}
+                      data-testid="v7-ip-company-select-all"
+                      className="text-[11px] text-indigo-700 hover:underline">Select all</button>
+              <button type="button" onClick={() => onChange(new Set())}
+                      data-testid="v7-ip-company-clear"
+                      className="text-[11px] text-slate-500 hover:underline">Clear</button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function InProgressPanel({ d, onNav, refetch, onClose }) {
   const [tab, setTab] = useState("messages");
+  const [selectedCos, setSelectedCos] = useState(() => new Set());
+
+  const companies = useMemo(
+    () => (d?.clients || []).map(c => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name)),
+    [d],
+  );
+  const nameById = useMemo(() => Object.fromEntries(companies.map(c => [c.id, c.name])), [companies]);
+  const byCo = (arr) => (arr || []).filter(it => _matchesCompany(it, selectedCos, nameById));
 
   // Lazy-load tab data on first open of a given tab to keep the panel
   // cheap when a pro only clicks one tab.
@@ -1259,20 +1354,35 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
     }
   }, [tab, scheduledQc, autoRecon]);
 
+  const filtered = useMemo(() => ({
+    active:        byCo(d?.active),
+    waiting:       byCo(d?.waiting),
+    professional:  byCo(d?.professional),
+    priorUnclosed: byCo(d?.priorUnclosed),
+    assistant:     byCo(d?.assistantItems),
+    scheduledQc:   scheduledQc ? {
+      ...scheduledQc,
+      scheduled:      byCo(scheduledQc.scheduled),
+      sent_awaiting:  byCo(scheduledQc.sent_awaiting),
+      last_completed: byCo(scheduledQc.last_completed),
+    } : null,
+    autoRecon: autoRecon ? { ...autoRecon, companies: byCo(autoRecon.companies) } : null,
+  }), [d, scheduledQc, autoRecon, selectedCos, nameById]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const counts = useMemo(() => {
-    const messages  = (d?.active || []).length;
-    const ai_emails = (d?.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
-    const sent_pro  = (d?.professional || []).length + (d?.priorUnclosed || []).length;
-    const cockpit   = (d?.assistantItems || []).length;
-    const scheduled = scheduledQc
-      ? (scheduledQc.scheduled.length + scheduledQc.sent_awaiting.length)
+    const messages  = filtered.active.length;
+    const ai_emails = filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
+    const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
+    const cockpit   = filtered.assistant.length;
+    const scheduled = filtered.scheduledQc
+      ? (filtered.scheduledQc.scheduled.length + filtered.scheduledQc.sent_awaiting.length)
       : null;
-    const autorecon = autoRecon
-      ? (autoRecon.companies || []).reduce(
+    const autorecon = filtered.autoRecon
+      ? (filtered.autoRecon.companies || []).reduce(
           (s, c) => s + (c.totals?.waiting || 0) + (c.totals?.ready || 0) + (c.totals?.manual || 0), 0)
       : null;
     return { messages, ai_emails, scheduled, autorecon, sent_pro, cockpit };
-  }, [d, scheduledQc, autoRecon]);
+  }, [filtered]);
 
   return (
     <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 p-5"
@@ -1289,14 +1399,32 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
             </div>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          data-testid="v7-in-progress-close"
-          className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-        >
-          Hide
-        </button>
+        <div className="flex items-center gap-2">
+          <InProgressCompanyFilter companies={companies} selected={selectedCos} onChange={setSelectedCos} />
+          <button
+            onClick={onClose}
+            data-testid="v7-in-progress-close"
+            className="text-[11px] px-2 py-0.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+          >
+            Hide
+          </button>
+        </div>
       </div>
+
+      {selectedCos.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 mb-3" data-testid="v7-ip-company-chips">
+          {[...selectedCos].map(id => (
+            <span key={id}
+                  className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700"
+                  data-testid={`v7-ip-company-chip-${id}`}>
+              {nameById[id] || "Company"}
+              <button type="button" aria-label="Remove"
+                      onClick={() => setSelectedCos(prev => { const n = new Set(prev); n.delete(id); return n; })}
+                      className="hover:text-indigo-900">×</button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Tab strip */}
       <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
@@ -1335,14 +1463,14 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
 
       {/* Tab bodies */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
-        {tab === "messages"  && <InProgressMessages items={d?.active || []} onNav={onNav} />}
-        {tab === "ai_emails" && <InProgressAiEmails items={d?.waiting || []} onNav={onNav} />}
-        {tab === "scheduled" && <InProgressScheduledQc data={scheduledQc} onNav={onNav} />}
-        {tab === "autorecon" && <InProgressAutoRecon data={autoRecon} onNav={onNav} />}
-        {tab === "sent_pro"  && <InProgressSentPro professional={d?.professional || []}
-                                                   priorUnclosed={d?.priorUnclosed || []}
+        {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} />}
+        {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} />}
+        {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} />}
+        {tab === "autorecon" && <InProgressAutoRecon data={filtered.autoRecon} onNav={onNav} />}
+        {tab === "sent_pro"  && <InProgressSentPro professional={filtered.professional}
+                                                   priorUnclosed={filtered.priorUnclosed}
                                                    onNav={onNav} />}
-        {tab === "cockpit"   && <InProgressCockpit items={d?.assistantItems || []} onNav={onNav} />}
+        {tab === "cockpit"   && <InProgressCockpit items={filtered.assistant} onNav={onNav} />}
       </div>
     </div>
   );

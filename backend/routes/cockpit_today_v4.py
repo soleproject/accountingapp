@@ -541,6 +541,7 @@ async def today_v4(
         current = next((it for it in items if it.get("status") not in ("answered", "deferred")), None)
         in_progress.append({
             "id": b.get("id"),
+            "company_id": b.get("company_id"),
             "company": name_by_id.get(b.get("company_id"), ""),
             "answered": answered,
             "total": len(items),
@@ -820,6 +821,8 @@ async def today_v4(
     }).limit(5):
         blocking.append({
             "id": f.get("id"),
+            "company_id": f.get("company_id"),
+            "company": name_by_id.get(f.get("company_id"), ""),
             "text": f"{name_by_id.get(f.get('company_id'), 'Client')} · "
                     f"vendor outreach escalated · {f.get('title') or 'W-9 chase stuck'}",
             "route": f"/company/{f.get('company_id')}/contacts",
@@ -836,6 +839,8 @@ async def today_v4(
     }).sort("date", -1).limit(8):
         judgment_needed.append({
             "id": t.get("id"),
+            "company_id": t.get("company_id"),
+            "company": name_by_id.get(t.get("company_id"), ""),
             "text": f"{name_by_id.get(t.get('company_id'), 'Client')} · "
                     f"{(t.get('description') or 'txn')[:56]} · ${abs(float(t.get('amount') or 0)):,.0f}",
             "reason": (t.get("review_reason") or "").replace("_", " "),
@@ -848,6 +853,8 @@ async def today_v4(
     }).sort("created_at", -1).limit(5):
         judgment_needed.append({
             "id": f.get("id"),
+            "company_id": f.get("company_id"),
+            "company": name_by_id.get(f.get("company_id"), ""),
             "text": f"{name_by_id.get(f.get('company_id'), 'Client')} · {f.get('title') or f.get('kind')}",
             "reason": (f.get("kind") or "").replace("_", " "),
             "route": f"/company/{f.get('company_id')}/dashboard",

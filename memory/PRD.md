@@ -614,3 +614,9 @@ need to type into the chat box to invoke the matching help flow.
 - Wells Fargo Plaid syncing 0 transactions (upstream, P3)
 - P0 Theme Coloring bug (saved brand colors never applied to live CSS
   vars on boot) — deferred by user preference
+
+
+## 2026-10-01 — In Progress company multi-select
+- Added multi-select company filter (search, select all, clear, removable chips) to the Cockpit In Progress panel; filters all 6 tabs + badge counts.
+- Backend `today-v4` now returns `company_id`/`company` on in_progress, blocking and judgment_needed items.
+- P0 Theme Coloring bug still OPEN (13 sessions).
