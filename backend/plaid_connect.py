@@ -756,7 +756,7 @@ async def sync_plaid_history_for_account(
     # the Oct-6-of-the-new-month auto-reconciliation of September actually fire.
     try:
         from reconciliation_engine import bootstrap_from_plaid
-        await bootstrap_from_plaid(cid)
+        await bootstrap_from_plaid(cid, recent_only=True)
     except Exception:  # noqa: BLE001 — never break sync on auto-finalize
         pass
     return result

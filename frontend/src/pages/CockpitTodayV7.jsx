@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight, Lock,
+  ChevronLeft, ChevronRight, Lock, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -1737,7 +1737,7 @@ function PendingReconciliationsCard({ onNav }) {
       <div className="flex items-start justify-between gap-2 mb-3 flex-wrap">
         <div className="flex items-start gap-3">
           <div className="w-8 h-8 rounded-full bg-cyan-100 flex items-center justify-center shrink-0">
-            <Loader2 size={14} className="text-cyan-700" />
+            <Clock size={14} className="text-cyan-700" />
           </div>
           <div>
             <div className="font-heading text-lg font-semibold">
@@ -1797,8 +1797,11 @@ function PendingReconciliationsCard({ onNav }) {
 function ReconStatusIcon({ status }) {
   if (status === "auto_reconciled") return <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />;
   if (status === "manually_reconciled") return <CheckCircle2 size={13} className="text-emerald-700 shrink-0" />;
-  if (status === "waiting_settle") return <Loader2 size={13} className="text-cyan-600 shrink-0 animate-spin" />;
-  if (status === "ready_next_sync") return <Loader2 size={13} className="text-amber-600 shrink-0" />;
+  // Static clock during the settle window — nothing is actively "spinning"
+  // on the backend, we're just waiting for the calendar to advance.
+  if (status === "waiting_settle") return <Clock size={13} className="text-cyan-600 shrink-0" />;
+  // Ready-to-finalize uses an hourglass vibe — still static.
+  if (status === "ready_next_sync") return <Clock size={13} className="text-amber-600 shrink-0" />;
   return <AlertTriangle size={13} className="text-rose-600 shrink-0" />;
 }
 
