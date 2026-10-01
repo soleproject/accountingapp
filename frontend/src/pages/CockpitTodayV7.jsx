@@ -1234,9 +1234,12 @@ function ClosingsPanel({ grid, total, onNav, refetch, onClose }) {
       ) : (
         <>
           {/* Legend */}
-          <div className="flex items-center gap-4 mb-3 text-[11px] text-slate-500">
+          <div className="flex items-center gap-4 mb-3 text-[11px] text-slate-500 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Reconciled
+              <span className="w-3 h-3 rounded-sm bg-emerald-500" /> Signed off
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm bg-white border-2 border-emerald-500" /> Auto-closed
             </div>
             <div className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded-sm bg-rose-500" /> Unreconciled
@@ -1373,12 +1376,21 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
           const isSelected = selected === m.period;
           const base = "flex flex-col items-center justify-center rounded-md py-1.5 text-[10px] font-medium transition-all";
           let cls;
+          let titleSuffix = "";
           if (m.state === "closed") {
-            cls = "bg-emerald-500 text-white hover:bg-emerald-600";
+            if (m.auto_locked) {
+              // Auto-closed: green outlined / white fill — all gates
+              // reviewed but no human sign-off yet. New activity will
+              // silently reopen it. See routes/month_close.py.
+              cls = "bg-white text-emerald-700 border-2 border-emerald-500 hover:bg-emerald-50";
+              titleSuffix = " · auto-closed (new activity reopens automatically)";
+            } else {
+              cls = "bg-emerald-500 text-white hover:bg-emerald-600 border-2 border-emerald-500";
+            }
           } else if (m.state === "unclosed") {
-            cls = "bg-rose-500 text-white hover:bg-rose-600 cursor-pointer";
+            cls = "bg-rose-500 text-white hover:bg-rose-600 cursor-pointer border-2 border-rose-500";
           } else {
-            cls = "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed";
+            cls = "bg-slate-100 text-slate-400 border-2 border-slate-200 cursor-not-allowed";
           }
           if (isSelected) cls += " ring-2 ring-offset-1 ring-rose-700 scale-105";
           const clickable = m.state === "unclosed";
@@ -1389,7 +1401,7 @@ function ClientCloseGridRow({ client, onNav, refetch }) {
               onClick={() => openMonth(m)}
               disabled={!clickable}
               data-testid={`v7-close-cell-${client.company_id}-${m.period}`}
-              title={`${m.label} ${m.year} · ${m.state} · ${m.txn_count} txn${m.txn_count === 1 ? "" : "s"}`}
+              title={`${m.label} ${m.year} · ${m.state} · ${m.txn_count} txn${m.txn_count === 1 ? "" : "s"}${titleSuffix}`}
               className={`${base} ${cls}`}
             >
               <span className="leading-none">{m.label}</span>

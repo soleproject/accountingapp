@@ -384,7 +384,10 @@ async def today_v4(
     # Load every "closed" signoff so we can identify prior months that
     # remain unsigned. `db.month_close_signoffs` (kind='closed') is the
     # authoritative "this month has been signed off" marker.
+    # Also track `auto_locked` so the UI can distinguish auto-closed
+    # (green outlined) from manually-closed (solid green) periods.
     closed_by_company: dict[str, set] = {}
+    auto_locked_by_company: dict[str, set] = {}
     async for so in db.month_close_signoffs.find({
         "company_id": {"$in": accessible},
         "kind": "closed",
@@ -393,7 +396,10 @@ async def today_v4(
             ym = f"{int(so['year']):04d}-{int(so['month']):02d}"
         except Exception:  # noqa: BLE001
             continue
-        closed_by_company.setdefault(so.get("company_id"), set()).add(ym)
+        cid = so.get("company_id")
+        closed_by_company.setdefault(cid, set()).add(ym)
+        if so.get("auto_locked"):
+            auto_locked_by_company.setdefault(cid, set()).add(ym)
 
     # Build the last-12-month window as (year, month) pairs, oldest first.
     LOOKBACK_MONTHS = 12
@@ -434,6 +440,7 @@ async def today_v4(
     for c in companies:
         cid = c["id"]
         closed_set = closed_by_company.get(cid, set())
+        auto_set = auto_locked_by_company.get(cid, set())
         months = []
         unclosed_count = 0
         for (yy, mm) in window_pairs:
@@ -465,6 +472,7 @@ async def today_v4(
                 "label": datetime(yy, mm, 1).strftime("%b"),
                 "year": yy,
                 "state": state,
+                "auto_locked": ym in auto_set,
                 "txn_count": n,
                 "months_ago": (now.year - yy) * 12 + (now.month - mm),
             })

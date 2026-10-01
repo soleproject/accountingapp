@@ -123,7 +123,16 @@ async def log_ai(company_id: str, kind: str, count: int = 1):
 
 
 async def is_period_closed(company_id: str, date_str: str) -> bool:
-    """True if the given ISO date falls within a closed period for the company."""
+    """True if the given ISO date falls within a *manually* closed period.
+
+    Auto-locked periods are treated as OPEN for the purposes of blocking
+    inserts — a late-landing Plaid txn, retroactive adjustment or new
+    bank-account backfill silently un-locks the auto-closed period and
+    is accepted. The month will re-auto-lock once the gates are all green
+    again (see routes.month_close._maybe_auto_lock).
+
+    Only manual, human-attested locks (`auto_locked` falsy) block edits.
+    """
     if not date_str:
         return False
     doc = await db.close_periods.find_one({
@@ -131,7 +140,33 @@ async def is_period_closed(company_id: str, date_str: str) -> bool:
         "period_start": {"$lte": date_str},
         "period_end": {"$gte": date_str},
     })
-    return doc is not None
+    if not doc:
+        return False
+    if doc.get("auto_locked"):
+        # Silently reopen the auto-lock so the pending insert can proceed.
+        # The matching month_close_signoffs row is also cleared so the UI
+        # pill flips back to amber/red until the new activity is reviewed.
+        try:
+            await db.close_periods.delete_many({
+                "company_id": company_id,
+                "period_start": doc.get("period_start"),
+                "period_end": doc.get("period_end"),
+                "kind": doc.get("kind", "month"),
+            })
+            # Derive year/month from period_start (YYYY-MM-DD).
+            ps = str(doc.get("period_start") or "")
+            if len(ps) >= 7:
+                try:
+                    y = int(ps[:4]); m = int(ps[5:7])
+                    await db.month_close_signoffs.delete_one({
+                        "company_id": company_id, "year": y, "month": m, "kind": "closed",
+                    })
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        return False
+    return True
 
 
 async def assert_open(company_id: str, date_str: str):
