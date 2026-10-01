@@ -298,6 +298,13 @@ async def cockpit_scheduled_qc(
             "follow_up_at":  b.get("follow_up_at"),
             "snoozed_count": len(snoozed),
             "next_snooze_at": next_snooze,
+            "parked": [{
+                "item_id":   it.get("item_id"),
+                "prompt":    it.get("prompt") or "",
+                "item_type": it.get("item_type"),
+                "remind_at": it.get("snoozed_until"),
+                "reminded":  bool(it.get("snooze_reminded_at")),
+            } for it in sorted(snoozed, key=lambda x: str(x.get("snoozed_until")))],
             "updated_at":    b.get("updated_at"),
         }
         if engaged:

@@ -1665,7 +1665,34 @@ function _fmtDateTime(iso) {
 
 // One row shared by all Scheduled QC pills: company / email line on the
 // left, a status string on the right, and the inline Open QC button.
-function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta }) {
+function _fmtShortWhen(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch { return "—"; }
+}
+
+// Chips listing the specific questions a client parked ("don't have it
+// now") and when each reminder fires.
+function ParkedChips({ parked, testid }) {
+  if (!parked?.length) return null;
+  return (
+    <div className="w-full flex flex-wrap gap-1.5 mt-1.5" data-testid={`${testid}-parked`}>
+      {parked.map(p => (
+        <span key={p.item_id}
+              title={p.prompt}
+              data-testid={`${testid}-parked-${p.item_id}`}
+              className="inline-flex items-center gap-1.5 max-w-full text-[11px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200">
+          <Clock size={10} className="shrink-0" />
+          <span className="truncate max-w-[380px]">{p.prompt || "Question"}</span>
+          <span className="text-sky-600 shrink-0">· {p.reminded ? "reminded" : "reminds"} {_fmtShortWhen(p.remind_at)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children }) {
   return (
     <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
       <div className="min-w-0">
@@ -1678,6 +1705,7 @@ function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta }) {
           onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
                                    client_email: r.client_email, meta })} />
       </div>
+      {children}
     </li>
   );
 }
@@ -1768,7 +1796,9 @@ function InProgressScheduledQc({ data, onNav, onOpenQc }) {
                 sub={bits.join(" · ")}
                 status={when ? `Follow-up ${_fmtDateTime(when)}` : `Last activity ${_fmtRelDays(b.updated_at)}`}
                 statusClass={when ? "text-sky-700" : "text-slate-500"}
-                meta={`${done}/${b.item_count} done`} />
+                meta={`${done}/${b.item_count} done`}>
+                <ParkedChips parked={b.parked} testid={`v7-ip-inprog-${b.batch_id}`} />
+              </QcRow>
             );
           })}
         </QcSection>
