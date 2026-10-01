@@ -1775,7 +1775,7 @@ function PendingReconciliationsCard({ onNav }) {
                       {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
                     </div>
                   </div>
-                  {(r.status === "manual_required" || r.status === "ineligible_non_plaid") && (
+                  {r.status === "ineligible_non_plaid" && (
                     <button
                       onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
                       className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"

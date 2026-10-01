@@ -144,6 +144,11 @@ async def cockpit_pending_reconciliations(
                 "date": {"$gte": prior_start, "$lte": prior_end},
             })
             is_plaid_mapped = aid in mapped_ledger_ids
+            # This card is strictly about *auto*-reconciliations. Accounts
+            # without a Plaid connection can only be reconciled manually,
+            # so they belong on the Reconciliation Month Roster — not here.
+            if not is_plaid_mapped and not existing:
+                continue
             has_foreign = False
             if is_plaid_mapped:
                 fd = await db.transactions.find_one({
@@ -155,8 +160,6 @@ async def cockpit_pending_reconciliations(
             if existing:
                 status = "auto_reconciled" if existing.get("auto_generated") else "manually_reconciled"
                 reason = f"{existing.get('source','manual')} · {str(existing.get('completed_at',''))[:10]}"
-            elif not is_plaid_mapped:
-                status, reason = "manual_required", "No Plaid connection"
             elif has_foreign:
                 status, reason = "ineligible_non_plaid", "Non-Plaid txns on account"
             elif waiting:
@@ -175,11 +178,13 @@ async def cockpit_pending_reconciliations(
                 "verification_method": (existing or {}).get("verification_method"),
             })
         order = {
-            "manual_required": 0, "ineligible_non_plaid": 1,
-            "waiting_settle": 2, "ready_next_sync": 3,
-            "auto_reconciled": 4, "manually_reconciled": 5,
+            "ineligible_non_plaid": 0,
+            "waiting_settle": 1, "ready_next_sync": 2,
+            "auto_reconciled": 3, "manually_reconciled": 4,
         }
         rows.sort(key=lambda r: (order.get(r["status"], 9), r["account_code"]))
+        if not rows:
+            continue
         out.append({
             "company_id": cid,
             "company_name": c.get("name") or "Untitled",
@@ -189,7 +194,7 @@ async def cockpit_pending_reconciliations(
                 "done": sum(1 for r in rows if r["status"] in ("auto_reconciled", "manually_reconciled")),
                 "waiting": sum(1 for r in rows if r["status"] == "waiting_settle"),
                 "ready": sum(1 for r in rows if r["status"] == "ready_next_sync"),
-                "manual": sum(1 for r in rows if r["status"] in ("manual_required", "ineligible_non_plaid")),
+                "manual": sum(1 for r in rows if r["status"] == "ineligible_non_plaid"),
             },
         })
     # Sort companies: those with pending/manual work first, done-only last.
