@@ -642,3 +642,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Jump to question
 - Parked chips are buttons → open inline QC viewer with ?item=<item_id>; ClientReviewPage honors ?item= on load (even if parked). Answering a parked item clears snoozed_until locally.
+
+## 2026-10-01 — Live row refresh
+- ClientReviewPage posts `qc:changed` (postMessage, same-origin) to parent on any progress change; InProgressPanel listens, debounces 600ms, re-pulls /cockpit/scheduled-qc + today-v4. QC pill selection lifted to InProgressPanel so it persists across the inline viewer.

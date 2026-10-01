@@ -207,6 +207,23 @@ export default function ClientReviewPage() {
     }
   }, [messages, activeIdx, session]);
 
+  // When embedded in the pro Cockpit (iframe), tell the parent whenever
+  // the batch's progress changes so its row/chips refresh live.
+  const progressSig = JSON.stringify([
+    session?.status, session?.follow_up_at,
+    (session?.items || []).map((i) => [i.answered_at ? 1 : 0, i.deferred ? 1 : 0, i.snoozed_until || null]),
+  ]);
+  const lastSigRef = useRef(null);
+  useEffect(() => {
+    if (!session) return;
+    if (lastSigRef.current === null) { lastSigRef.current = progressSig; return; }
+    if (lastSigRef.current === progressSig) return;
+    lastSigRef.current = progressSig;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "qc:changed", batch_id: session.batch_id, token }, window.location.origin);
+    }
+  }, [progressSig, session, token]);
+
   const currentItem = session?.items?.[activeIdx];
   const finishedCount = (session?.items || []).filter(
     (i) => i.answered_at || i.deferred

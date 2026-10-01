@@ -1393,6 +1393,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   const [selectedCos, setSelectedCos] = useState(() => new Set());
   // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
   const [openQc, setOpenQc] = useState(null);
+  const [qcPill, setQcPill] = useState("scheduled"); // lifted so it survives the inline QC viewer
   const switchTab = (k) => { setTab(k); setOpenQc(null); };
 
   const companies = useMemo(
@@ -1419,6 +1420,24 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
         .catch(() => setAutoRecon({ companies: [] }));
     }
   }, [tab, scheduledQc, autoRecon]);
+
+  // Live refresh: the inline QC iframe posts `qc:changed` after every
+  // answer / defer / park. Debounce and re-pull the roster + today data.
+  useEffect(() => {
+    let timer = null;
+    const onMsg = (e) => {
+      if (e.origin !== window.location.origin || e.data?.type !== "qc:changed") return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        api.get("/cockpit/scheduled-qc")
+          .then(r => setScheduledQc(r.data))
+          .catch(() => {});
+        refetch?.();
+      }, 600);
+    };
+    window.addEventListener("message", onMsg);
+    return () => { window.removeEventListener("message", onMsg); clearTimeout(timer); };
+  }, [refetch]);
 
   const filtered = useMemo(() => ({
     active:        byCo(d?.active),
@@ -1545,6 +1564,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
         {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
         {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} onOpenQc={setOpenQc} />}
         {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc}
+                                   pill={qcPill} setPill={setQcPill}
                                    onNudged={(batchId, at) => setScheduledQc(q => {
                                      if (!q) return q;
                                      const bump = (arr) => (arr || []).map(r => r.batch_id === batchId
@@ -1784,8 +1804,7 @@ function QcSection({ title, count, empty, children }) {
 
 const _plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
-function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged }) {
-  const [pill, setPill] = useState("scheduled");
+function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged, pill, setPill }) {
   if (!data) {
     return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
   }
