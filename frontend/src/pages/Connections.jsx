@@ -550,8 +550,8 @@ function PlaidAccountsDropdown({ expanded, onToggle, status, loading, onRefresh,
                     <AccountTableRow
                       key={a.account_id}
                       a={a}
-                      institution={status.institution_name || "—"}
-                      lastSyncAt={status.last_sync_at}
+                      institution={a.institution_name || status.institution_name || "—"}
+                      lastSyncAt={a.item_last_sync_at || status.last_sync_at}
                       onConnect={a._connected ? null : () => onConnectOne(a.account_id, a.name)}
                       onResync={onRefresh}
                       connecting={connecting === a.account_id}
