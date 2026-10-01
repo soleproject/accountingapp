@@ -71,6 +71,21 @@ export default function ClientReviewPage() {
   const [uploading, setUploading] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [reminderMode, setReminderMode] = useState(null); // "follow_up" | "item"
+  // Pro mode: opened from the Cockpit (?via=pro) with a logged-in pro
+  // session. Answers are attributed to the pro in the audit trail.
+  const proToken = searchParams.get("via") === "pro" ? localStorage.getItem("axiom_token") : null;
+  const attributeToPro = (itemId) => {
+    if (!proToken || !itemId) return;
+    axios.post(`${API}/${token}/items/${itemId}/attribute`, {}, {
+      headers: { Authorization: `Bearer ${proToken}` },
+    }).then((r) => {
+      setSession((s) => {
+        if (!s) return s;
+        const items = (s.items || []).map((i) => i.item_id === itemId ? { ...i, answered_by: r.data.answered_by } : i);
+        return { ...s, items };
+      });
+    }).catch(() => {});
+  };
   // Persistent "✓ Completed — Continue" gate. Set by every success
   // path (deposit booking, receipt upload, category pick, defer, chat
   // answer, etc.) INSTEAD of auto-advancing. The user must tap
@@ -491,6 +506,7 @@ export default function ClientReviewPage() {
   // flag) and the header progress chip ticks over, but the wizard
   // stays on the current item until the user taps Continue.
   const markCompleted = (payload = {}) => {
+    attributeToPro(currentItem?.item_id);
     setSession((s) => {
       if (!s) return s;
       const items = [...(s.items || [])];
@@ -1065,7 +1081,15 @@ export default function ClientReviewPage() {
                   className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"
                   data-testid="review-item-answered-chip"
                 >
-                  <Check size={9} /> answered
+                  <Check size={9} /> answered{currentItem?.answered_by ? ` by ${proToken ? currentItem.answered_by.name : "your bookkeeper"}` : ""}
+                </span>
+              )}
+              {proToken && (
+                <span
+                  className="ml-2 inline-flex items-center gap-1 text-[10px] font-mono-num uppercase tracking-wider px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200"
+                  data-testid="review-pro-mode-chip"
+                >
+                  answering as pro
                 </span>
               )}
               {currentItem?.deferred && (

@@ -283,6 +283,15 @@ async def cockpit_scheduled_qc(
         except Exception:  # noqa: BLE001
             return None
 
+    def _pro_answered(items: list) -> dict:
+        stamped = [it for it in items if it.get("answered_by")]
+        names = []
+        for it in stamped:
+            n = (it["answered_by"].get("name") or "").split(",")[0].strip()
+            if n and n not in names:
+                names.append(n)
+        return {"pro_answered": len(stamped), "pro_names": names}
+
     # One pass over every live batch. Buckets:
     #   scheduled   — client picked a time (status=scheduled) that is still ahead
     #   in_progress — client has engaged (answers / defers / snoozes / follow-up)
@@ -331,6 +340,7 @@ async def cockpit_scheduled_qc(
             "follow_up_at":  b.get("follow_up_at"),
             "snoozed_count": len(snoozed),
             "next_snooze_at": next_snooze,
+            **_pro_answered(items),
             "parked": [{
                 "item_id":   it.get("item_id"),
                 "prompt":    it.get("prompt") or "",
@@ -391,6 +401,7 @@ async def cockpit_scheduled_qc(
             "item_count":   len(b.get("items") or []),
             "answered":     int(b.get("answer_count") or 0),
             "deferred":     int(b.get("defer_count") or 0),
+            **_pro_answered(b.get("items") or []),
         })
 
     # Last completed per (company, client_email). Groups across all

@@ -1257,7 +1257,7 @@ function OpenQcButton({ token, onOpen, testid }) {
 }
 
 function InProgressQcViewer({ qc, onBack, backLabel }) {
-  const url = `/client-review/${qc.token}${qc.item_id ? `?item=${encodeURIComponent(qc.item_id)}` : ""}`;
+  const url = `/client-review/${qc.token}?via=pro${qc.item_id ? `&item=${encodeURIComponent(qc.item_id)}` : ""}`;
   return (
     <div data-testid="v7-ip-qc-viewer" className="-m-4">
       <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-slate-200 bg-slate-50 rounded-t-lg">
@@ -1594,7 +1594,7 @@ function InProgressMessages({ items, onNav, onOpenQc }) {
     <ul className="divide-y divide-slate-100">
       {items.map(b => (
         <li key={b.id}
-            onClick={() => onNav(`/client-review/${b.client_token || b.id}`)}
+            onClick={() => onNav(`/client-review/${b.client_token || b.id}?via=pro`)}
             className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
             data-testid={`v7-ip-msg-${b.id}`}>
           <div className="flex items-start justify-between gap-2 flex-wrap">
@@ -1868,6 +1868,7 @@ function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged, pill, setPill 
             const done = (b.answered || 0) + (b.deferred || 0);
             const bits = [`${b.client_email || "—"}`, `${done}/${b.item_count} done`];
             if (b.snoozed_count) bits.push(`${_plural(b.snoozed_count, "question")} parked`);
+            if (b.pro_answered) bits.push(`${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}`);
             const when = b.follow_up_at || b.next_snooze_at;
             return (
               <QcRow key={b.batch_id} r={b} testid={`v7-ip-inprog-${b.batch_id}`} onOpenQc={onOpenQc}
@@ -1938,7 +1939,7 @@ function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged, pill, setPill 
                    empty="No completed check-ins yet.">
           {items(completed).map(b => (
             <QcRow key={b.batch_id} r={b} testid={`v7-ip-done-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${_plural(b.answered, "answer")}${b.deferred ? ` · ${b.deferred} to bookkeeper` : ""} · ${_plural(b.item_count, "question")}`}
+              sub={`${b.client_email || "—"} · ${_plural(b.answered, "answer")}${b.deferred ? ` · ${b.deferred} to bookkeeper` : ""}${b.pro_answered ? ` · ${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}` : ""} · ${_plural(b.item_count, "question")}`}
               status={`Completed ${_fmtDateTime(b.completed_at)}`} statusClass="text-emerald-700"
               meta={`completed ${_fmtRelDays(b.completed_at)}`} />
           ))}

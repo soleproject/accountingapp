@@ -645,3 +645,6 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Live row refresh
 - ClientReviewPage posts `qc:changed` (postMessage, same-origin) to parent on any progress change; InProgressPanel listens, debounces 600ms, re-pulls /cockpit/scheduled-qc + today-v4. QC pill selection lifted to InProgressPanel so it persists across the inline viewer.
+
+## 2026-10-01 — Answered by pro attribution
+- Inline viewer / Messages nav open QC with ?via=pro; ClientReviewPage then POSTs /{token}/items/{id}/attribute with the pro JWT after each markCompleted → items.$.answered_by {user_id,name,email,role,via,at}, batch.pro_participants, audit_events `client_review.item_answered_by_pro`. Header chips: "answering as pro", "answered by <name>" (client sees "by your bookkeeper"). Cockpit rows show "N by <Pro>".

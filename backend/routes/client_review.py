@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Body
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Body, Request
 from pydantic import BaseModel
 
 from deps import db
@@ -2713,6 +2713,55 @@ async def post_reschedule(token: str, body: ScheduleRequest):
 class FollowUpRequest(BaseModel):
     follow_up_at: str
     note: Optional[str] = None
+
+
+@router.post("/{token}/items/{item_id}/attribute")
+async def post_attribute_pro(
+    token: str, item_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user),
+):
+    """Audit attribution: the pro answered this item from the Cockpit
+    (inline QC viewer, on a call with the client). Stamps `answered_by`
+    on the item and writes an audit event. JWT-authenticated — the
+    client's token alone can't call this."""
+    from routes.cockpit import require_firm_or_pro
+    from audit import log_event
+    batch = await _resolve_batch(token)
+    accessible = await require_firm_or_pro(user)
+    if batch.get("company_id") not in (accessible or []):
+        raise HTTPException(403, "Not your client")
+    item = next((i for i in (batch.get("items") or [])
+                 if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    stamp = {
+        "user_id": user["id"],
+        "name":    user.get("name") or user.get("email"),
+        "email":   user.get("email"),
+        "role":    user.get("role"),
+        "via":     "cockpit",
+        "at":      _now_iso(),
+    }
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.answered_by": stamp, "updated_at": _now_iso()},
+         "$addToSet": {"pro_participants": user["id"]}},
+    )
+    log_event(
+        event_type="client_review.item_answered_by_pro",
+        actor=user,
+        company_id=batch.get("company_id"),
+        entity_type="client_review_item",
+        entity_id=item_id,
+        summary=f"{stamp['name']} answered “{(item.get('prompt') or 'question')[:80]}” "
+                f"on the client's behalf from the Cockpit",
+        metadata={"batch_id": batch["id"], "client_email": batch.get("client_email"),
+                  "item_type": item.get("item_type"),
+                  "action_taken": item.get("action_taken"), "deferred": bool(item.get("deferred"))},
+        request=request,
+    )
+    return {"ok": True, "answered_by": stamp}
 
 
 @router.post("/{token}/follow-up")
