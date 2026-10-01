@@ -1,27 +1,19 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { EMAIL_KIND_LABELS as KIND_LABELS } from "@/components/EmailNotificationSettings";
 import {
-  Inbox, Settings as SettingsIcon, Mail, CheckCircle2, XCircle,
+  Inbox, Mail, CheckCircle2, XCircle,
   MinusCircle, Send, RefreshCw, ExternalLink, Sparkles, Wand2, Loader2,
   MessageSquare, Bot, User as UserIcon, ChevronDown, ChevronRight, Search,
   Archive, ArchiveRestore,
 } from "lucide-react";
 
-const KIND_LABELS = {
-  ai_ask_client:         { label: "AI Ask Client",      hint: "AI autonomously emails clients about unrecognized transactions (max 3/day per client, one txn per email)" },
-  ask_client:            { label: "Pro Ask Client",     hint: "Pro manually asks the client about flagged transactions" },
-  daily_pro_digest:      { label: "Daily digest",       hint: "Morning summary of your firm's Needs Attention" },
-  dunning:               { label: "A/R dunning",        hint: "Reminders to customers about overdue invoices" },
-  overdue_bill_client:   { label: "Overdue A/P",        hint: "Reminders to the client about overdue bills" },
-  plaid_reauth:          { label: "Plaid re-auth",      hint: "Alert client when a bank connection expires" },
-  onboarding_followup:   { label: "Onboarding nudge",   hint: "Reminder to finish onboarding" },
-  month_close_signoff:   { label: "Month-close signoff",hint: "Ask client to sign off on a closed month" },
-};
-
 export default function Communications() {
   const { currentId } = useCompany();
+  const nav = useNavigate();
   const [tab, setTab] = useState("inbox");
 
   return (
@@ -30,7 +22,10 @@ export default function Communications() {
         <div>
           <h1 className="font-heading text-3xl font-bold tracking-tight">Communications</h1>
           <p className="text-sm text-slate-600 mt-1">
-            Every email the platform sends is auditable here, and the switches on <b>Settings</b> control which flows are live.
+            Every email the platform sends is auditable here. Which flows are live is controlled in{" "}
+            <button type="button" onClick={() => nav("/accounting/settings?tab=email_notifications")}
+                    className="underline underline-offset-2 text-cyan-700 hover:text-cyan-900"
+                    data-testid="comms-email-settings-link">Accounting Settings → Email Notifications Settings</button>.
           </p>
         </div>
       </div>
@@ -48,16 +43,12 @@ export default function Communications() {
         <TabBtn active={tab === "ailogs"} onClick={() => setTab("ailogs")} testid="tab-ailogs">
           <MessageSquare size={14} /> AI Logs
         </TabBtn>
-        <TabBtn active={tab === "settings"} onClick={() => setTab("settings")} testid="tab-settings">
-          <SettingsIcon size={14} /> Settings
-        </TabBtn>
       </div>
 
       {tab === "inbox"       && <InboxTab cid={currentId} />}
       {tab === "aiaskclient" && <AiAskClientTab cid={currentId} />}
       {tab === "suggested"   && <SuggestedTab cid={currentId} />}
       {tab === "ailogs"      && <AiLogsTab cid={currentId} />}
-      {tab === "settings"    && <SettingsTab />}
     </div>
   );
 }
@@ -196,78 +187,6 @@ function StatusPill({ status }) {
 // ---------------------------------------------------------------------------
 // Settings — per-user toggles for every email kind (all default TRUE)
 // ---------------------------------------------------------------------------
-function SettingsTab() {
-  const [prefs, setPrefs] = useState(null);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    api.get("/settings/communications").then(r => setPrefs(r.data)).catch(() => setPrefs({}));
-  }, []);
-
-  const patch = async (delta) => {
-    setSaving(true);
-    try {
-      const r = await api.put("/settings/communications", delta);
-      setPrefs(r.data);
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Failed to save");
-    } finally { setSaving(false); }
-  };
-
-  if (!prefs) return <div className="text-sm text-slate-500 py-8">Loading preferences…</div>;
-  return (
-    <div className="space-y-3 max-w-2xl">
-      <div className="rounded-xl border bg-white p-5 space-y-4">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">Email flows</div>
-          <div className="text-xs text-slate-500 mt-1">
-            Turn any flow off to stop the platform from sending it. Attempts that
-            were pref-blocked still appear in the Inbox tagged "Skipped".
-          </div>
-        </div>
-        {Object.entries(KIND_LABELS).map(([kind, meta]) => (
-          <label
-            key={kind}
-            data-testid={`pref-row-${kind}`}
-            className="flex items-start justify-between gap-4 py-2 border-t first:border-t-0"
-          >
-            <div className="flex-1">
-              <div className="text-sm text-slate-900 font-medium">{meta.label}</div>
-              <div className="text-xs text-slate-500">{meta.hint}</div>
-            </div>
-            <Switch
-              on={Boolean(prefs[kind])}
-              disabled={saving}
-              onChange={(v) => patch({ [kind]: v })}
-              testid={`pref-toggle-${kind}`}
-            />
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function Switch({ on, onChange, disabled, testid }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      data-testid={testid}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition
-        ${on ? "bg-cyan-600" : "bg-slate-200"} ${disabled ? "opacity-50" : ""}`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition
-          ${on ? "translate-x-4" : "translate-x-0.5"}`}
-      />
-    </button>
-  );
-}
-
-
 // ---------------------------------------------------------------------------
 // AI Ask Client — dedicated view of every autonomous AI-initiated
 // conversation for this company, searchable and with a one-click "Run now"

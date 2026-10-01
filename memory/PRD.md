@@ -648,3 +648,24 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Answered by pro attribution
 - Inline viewer / Messages nav open QC with ?via=pro; ClientReviewPage then POSTs /{token}/items/{id}/attribute with the pro JWT after each markCompleted → items.$.answered_by {user_id,name,email,role,via,at}, batch.pro_participants, audit_events `client_review.item_answered_by_pro`. Header chips: "answering as pro", "answered by <name>" (client sees "by your bookkeeper"). Cockpit rows show "N by <Pro>".
+
+## 2026-10-01 — More dropdown under All (card-mode sidebar)
+- Todo2CardList: added MoreAccordion (My Businesses, Billing, Refer & earn, Settings) directly below the All accordion; shares sb_more_open key with Full-mode sidebar.
+
+## 2026-10-01 — Settings consolidation
+- Profile, Danger Zone, Notifications & Mobile App moved from /settings to /accounting/settings (AccountingSettings ACCOUNTING_TABS). /settings now shows only User Settings. Notifications button gated by allowedTabs "notifications" pseudo-key.
+
+## 2026-10-01 — Email log under Audit log
+- Full sidebar: Email log moved into the Accounting group directly after Audit log (removed standalone entry). Card-mode All list reordered to match.
+
+## 2026-10-01 — Email Notifications Settings tab
+- Extracted Communications Settings tab → components/EmailNotificationSettings.jsx; added as "Email Notifications Settings" tab on /accounting/settings (also supports ?tab= deep link). Removed Settings tab from /communications-audit; header links to the new tab.
+
+## 2026-10-01 — Sidebar Mode tab
+- Moved Sidebar Mode toggle out of Bookkeeping into its own "Sidebar Mode" tab (key "sidebar") on /accounting/settings.
+
+## 2026-10-01 — Navigation style moved
+- NavStyleCard moved from /settings User Settings tab to /accounting/settings Sidebar Mode tab (below Sidebar Mode card). /settings User Settings now = Booking + Note-takers only.
+
+## 2026-10-01 — Company Settings page retired
+- BookingPanel + NoteTakersPanel now render at the bottom of /crm/settings. /settings → Navigate redirect to /accounting/settings (many pages link to /settings for company tabs). "user" tab removed from CompanySettings.

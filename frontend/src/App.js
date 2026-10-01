@@ -112,7 +112,6 @@ import RefundReceipts from "@/pages/RefundReceipts";
 import SalesTax from "@/pages/SalesTax";
 import PfcCategoryMap from "@/pages/PfcCategoryMap";
 import StatementImportDetail from "@/pages/StatementImportDetail";
-import CompanySettings from "@/pages/CompanySettings";
 import AccountingSettings from "@/pages/AccountingSettings";
 import ProductGuard from "@/components/ProductGuard";
 import AdminProductLaunches from "@/pages/AdminProductLaunches";
@@ -293,7 +292,7 @@ function App() {
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/settings/notifications" element={<NotificationSettings />} />
               <Route path="/connections/imports/:importId" element={<StatementImportDetail />} />
-              <Route path="/settings" element={<CompanySettings allowedTabs={["user", "profile", "danger"]} />} />
+              <Route path="/settings" element={<Navigate to="/accounting/settings" replace />} />
               <Route path="/completed-actions" element={<CompletedActions />} />
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />

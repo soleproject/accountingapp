@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import React from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
-import { useAuth } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Settings2, Save, Trash2, AlertTriangle, Loader2, Play, Sparkles, Copy, X, LayoutGrid, Menu as MenuIcon, ChevronDown, Layers } from "lucide-react";
@@ -16,7 +15,7 @@ import {
 
 import { BUSINESS_TYPES } from "@/constants/businessTypes";
 import QboEnvToggle from "@/components/QboEnvToggle";
-import { NoteTakersPanel, BookingPanel } from "@/pages/CrmSettings";
+import { EmailNotificationSettings } from "@/components/EmailNotificationSettings";
 
 /**
  * Normalize a company-name string for comparison purposes.
@@ -96,13 +95,6 @@ function SidebarModeSettingToggle() {
 
 export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   const { currentId, current, refresh, companies } = useCompany();
-  const { user } = useAuth();
-  // "User Settings" tab is CRM-adjacent (Note Takers, Booking links,
-  // Nav style) — hide it entirely when the current user doesn't have
-  // access to the CRM product. Superadmins always have every product
-  // in `enabled_products` (backend enriches /auth/me), so this is a
-  // no-op for them.
-  const hasCrm = (user?.enabled_products || []).includes("crm");
   const nav = useNavigate();
   const [form, setForm] = useState({
     name: "", business_type: "", business_description: "", reporting_basis: "accrual",
@@ -119,15 +111,14 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
   // When `allowedTabs` is set (e.g. the Accounting Settings sub-page),
   // any localStorage-remembered tab that's NOT in the allowlist falls
   // back to the first allowed one so the page never renders empty.
-  const _defaultTab = (allowedTabs && allowedTabs[0]) || (hasCrm ? "user" : "bookkeeping");
+  const _defaultTab = (allowedTabs && allowedTabs[0]) || "bookkeeping";
   const [tab, setTab] = useState(() => {
     try {
-      const saved = localStorage.getItem("axiom_settings_tab") || _defaultTab;
+      const fromUrl = new URLSearchParams(window.location.search).get("tab");
+      const saved = (fromUrl && (!allowedTabs || allowedTabs.includes(fromUrl)) ? fromUrl : null)
+        || localStorage.getItem("axiom_settings_tab") || _defaultTab;
       if (allowedTabs && !allowedTabs.includes(saved)) return _defaultTab;
-      // If the persisted tab is "user" but the user no longer has
-      // CRM access, fall back to the default rather than rendering
-      // an empty page.
-      if (saved === "user" && !hasCrm) return _defaultTab;
+      if (saved === "user") return _defaultTab; // legacy tab, moved to CRM Settings
       return saved;
     } catch { return _defaultTab; }
   });
@@ -240,16 +231,16 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
         data-testid="settings-tabs"
       >
         {[
-          ["user",          "User Settings"],
           ["bookkeeping",   "Bookkeeping"],
+          ["sidebar",       "Sidebar Mode"],
           ["profile",       "Profile"],
           ["advanced",      "Advanced Features"],
           ["report_style",  "Report Styling"],
           ["tours",         "Tours & Tips"],
           ["quickbooks",    "QuickBooks"],
+          ["email_notifications", "Email Notifications Settings"],
           ["danger",        "Danger Zone"],
         ].filter(([k]) => !allowedTabs || allowedTabs.includes(k))
-         .filter(([k]) => k !== "user" || hasCrm)
          .map(([k, label]) => (
           <button
             key={k}
@@ -270,24 +261,18 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
         {/* Notifications & mobile app — separate page, deep-linked so
             it's discoverable from any tab without breaking the current
             tab-based data flow. */}
-        <button
-          type="button"
-          onClick={() => nav("/settings/notifications")}
-          data-testid="settings-tab-notifications"
-          className="px-4 py-2 -mb-px text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-cyan-700"
-        >
-          Notifications & Mobile App
-        </button>
+        {(!allowedTabs || allowedTabs.includes("notifications")) && (
+          <button
+            type="button"
+            onClick={() => nav("/settings/notifications")}
+            data-testid="settings-tab-notifications"
+            className="px-4 py-2 -mb-px text-sm font-medium border-b-2 border-transparent text-slate-500 hover:text-cyan-700"
+          >
+            Notifications & Mobile App
+          </button>
+        )}
       </div>
 
-      {/* --- User Settings (Round 7.6, Feb 2026) --- */}
-      {tab === "user" && hasCrm && (
-        <div className="space-y-4" data-testid="user-settings-tab">
-          <NavStyleCard />
-          <BookingPanel />
-          <NoteTakersPanel />
-        </div>
-      )}
 
       {/* --- Bookkeeping mode + industry template (AI-First Beta) --- */}
       {tab === "bookkeeping" && (
@@ -316,20 +301,23 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
             initialMode={current?.categorization_mode || "standard"}
           />
         </div>
-        <div className="border-t pt-4">
-          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">
-            Sidebar mode
-          </div>
-          <p className="text-xs text-slate-500 mb-3">
-            Personal preference — controls how the left nav renders for
-            <em> you</em>. <b>To&nbsp;Do</b> = compact card feed only ·
-            <b> Both</b> = card feed plus the full menu (default) ·
-            <b> Full</b> = classic deep menu with no cards.
-          </p>
-          <SidebarModeSettingToggle />
-        </div>
       </div>
       )}
+
+      {/* --- Sidebar mode (per-user nav preference) --- */}
+      {tab === "sidebar" && (
+      <div className="rounded-xl border bg-white p-5 space-y-4" data-testid="sidebar-mode-settings-card">
+        <h3 className="font-heading font-semibold text-lg">Sidebar Mode</h3>
+        <p className="text-xs text-slate-500">
+          Personal preference — controls how the left nav renders for
+          <em> you</em>. <b>To&nbsp;Do</b> = compact card feed only ·
+          <b> Both</b> = card feed plus the full menu (default) ·
+          <b> Full</b> = classic deep menu with no cards.
+        </p>
+        <SidebarModeSettingToggle />
+      </div>
+      )}
+      {tab === "sidebar" && <NavStyleCard />}
 
       {/* --- Profile card --- */}
       {tab === "profile" && (
@@ -568,6 +556,12 @@ export default function CompanySettings({ allowedTabs, title, subtitle } = {}) {
            immediately above Danger Zone per Feb 2026 rollout. --- */}
       {tab === "quickbooks" && (
         <QboEnvToggle companyId={currentId} />
+      )}
+
+      {/* --- Email notifications — firm-wide outbound email flow switches
+           (moved here from the Communications / Email log page). --- */}
+      {tab === "email_notifications" && (
+        <EmailNotificationSettings />
       )}
 
       {/* --- Danger zone --- */}
