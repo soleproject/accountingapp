@@ -714,7 +714,11 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         className={`fixed z-[10003] px-4 ${
           beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
-            : "left-4 right-4 bottom-6 md:left-auto md:right-6 md:max-w-md pointer-events-none"
+            : beat.dock === "left"
+              ? "left-4 right-4 bottom-6 md:right-auto md:left-72 md:max-w-md pointer-events-none"
+              : beat.dock === "top-left"
+                ? "left-4 right-4 top-20 md:right-auto md:left-72 md:max-w-md pointer-events-none"
+                : "left-4 right-4 bottom-6 md:left-auto md:right-6 md:max-w-md pointer-events-none"
         }`}
       >
         <div

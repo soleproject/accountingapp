@@ -3,7 +3,8 @@
 // only real click is the "To do" filter toggle; approving, the popup and
 // the AI hand-off are demonstrated with pointers + ghost previews.
 //
-// Beat shape: see tours/chatReviewBeats.js.
+// Beat shape: see tours/chatReviewBeats.js. Extra: `dock: "left" | "top-left"`
+// moves the narrator card away from an anchor that lives bottom-right.
 
 export const TXN_CHAPTERS = [
   { key: "find", title: "Find the work" },
@@ -70,6 +71,7 @@ export const TXN_BEATS = [
       "I focus on that one transaction over here. Now just tell me about it, in your own words — speak or type. Something like 'this was landscaping for one of my rental properties'. I'll pick the right account, offer to fix the similar ones, and you're done.",
     anchor: "ai-chat-input",
     emit: "ai-open",
+    dock: "left",
     ghost: { kind: "typing", text: "this was landscaping for one of my rental properties" },
     wait: HOLD_LONG,
   },
