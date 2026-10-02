@@ -51,3 +51,14 @@ async def _dedupe_mocked():
     with patch.object(acr, "_chat_json", side_effect=AssertionError("should not call LLM")):
         same = await acr._llm_dedupe({"name": "Legal and Professional Fees", "type": "expense"}, accounts, "money_out", "")
         assert same["id"] == "a2"
+
+
+def test_counterparty_subaccount_reuse_or_propose():
+    parent = {"id": "p", "code": "2500", "name": "Loans Payable", "type": "liability", "subtype": "loan", "detail_type": "loan"}
+    kids = [{"id": "k1", "code": "2530", "name": "SoFi", "type": "liability", "parent_account_id": "p"}]
+    accounts = [parent, *kids]
+    assert acr._counterparty_subaccount(parent, accounts, {"contact_name": "SoFi"})["account"]["id"] == "k1"
+    new = acr._counterparty_subaccount(parent, accounts, {"contact_name": "Larry D Brown"})
+    assert new["kind"] == "new" and new["account"]["name"] == "Larry D Brown" and new["account"]["parent_account_id"] == "p" and new["account"]["code"] == "2501"
+    assert acr._counterparty_subaccount(kids[0], accounts, {"contact_name": "X"}) is None  # never nest under a child
+    assert acr._counterparty_subaccount({**parent, "type": "expense"}, accounts, {"contact_name": "X"}) is None
