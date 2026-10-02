@@ -285,6 +285,46 @@ async def post_answer(token: str, item_id: str, body: AnswerRequest):
     return {"ok": True, **result}
 
 
+@router.post("/{token}/items/{item_id}/not-liability")
+async def post_not_liability(token: str, item_id: str):
+    """Client says this payment is NOT a loan / credit-card / mortgage
+    payment. Close the item and flag the transaction for the pro to
+    recategorize normally (no split booked)."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    meta = (item.get("context") or {}).get("meta", {}) or {}
+    txn_id = meta.get("txn_id") or (
+        item.get("source_id") if item.get("source_collection") == "transactions" else None)
+    if not txn_id and meta.get("txn_date") and meta.get("txn_amount") is not None:
+        # Seeded / finding-backed items carry date+amount+desc only.
+        t = await db.transactions.find_one({
+            "company_id": batch["company_id"], "date": {"$regex": f"^{meta['txn_date'][:10]}"},
+            "amount": meta["txn_amount"], "merchant": meta.get("txn_desc")})
+        txn_id = t["id"] if t else None
+    if txn_id:
+        await db.transactions.update_one(
+            {"id": txn_id, "company_id": batch["company_id"]},
+            {"$set": {"needs_review": True, "review_note": "Client: not a liability payment — recategorize",
+                      "updated_at": _now_iso()}})
+    if item.get("source_collection") == "agent_findings":
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$set": {"status": "resolved", "resolution": "not_liability", "updated_at": _now_iso()}})
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.answered_at": _now_iso(), "items.$.answer": "Not a liability statement",
+                  "items.$.action_taken": "not_liability",
+                  "items.$.action_detail": "Flagged for the bookkeeper to categorize as a regular expense.",
+                  "updated_at": _now_iso()},
+         "$inc": {"answer_count": 1}})
+    return {"ok": True, "action_taken": "not_liability"}
+
+
+
 # --------------------------------------------------------------------------
 # Phase-1 state model — /draft + /book + compliance-tab
 # --------------------------------------------------------------------------

@@ -1379,6 +1379,22 @@ ${companyName}`;
                     content: "No worries — what kind of liability is this (mortgage, credit card, auto loan, or business loan)? If you know the split — for example \"$812 principal, $1,104 interest\" — you can just type it and I'll book it." },
                 ]);
               }}
+              onNotLiability={async () => {
+                try {
+                  await axios.post(`${API}/${token}/items/${currentItem.item_id}/not-liability`);
+                } catch (e) {
+                  alert(e?.response?.data?.detail || "Couldn't update this item.");
+                  return;
+                }
+                setMessages([
+                  { role: "user", content: "Not a liability statement" },
+                  { role: "assistant", content: "Got it — I won't treat this as a loan or card payment. Your bookkeeper will categorize it as a regular expense." },
+                ]);
+                markCompleted({
+                  label:  "Marked as not a liability payment",
+                  detail: "Flagged for your bookkeeper to categorize normally.",
+                });
+              }}
             />
           )}
           {currentItem && currentItem.item_type === 12 && !currentItem.answered_at && !currentItem.deferred && (
@@ -2333,7 +2349,15 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDi
 // info-gathering step in Quick Check-in feels consistent. Functionally
 // identical to the previous "Upload the statement / I don't have the
 // statement" quick-reply pills — just visually promoted to full tiles.
-function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
+function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement, onNotLiability }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const meta = currentItem?.context?.meta || {};
+  const desc = currentItem?.context?.description ?? meta.txn_desc ?? meta.vendor ?? "this payment";
+  const confirmNotLiability = async () => {
+    setBusy(true);
+    try { await onNotLiability?.(); setConfirmOpen(false); } finally { setBusy(false); }
+  };
   const Tile = ({ onClick, testId, icon, iconCls, title, hint, primary }) => (
     <button
       type="button"
@@ -2352,13 +2376,43 @@ function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
     </button>
   );
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-3" data-testid="liability-shortcuts">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 py-3" data-testid="liability-shortcuts">
       <Tile primary onClick={onUploadStatement} testId="liability-upload-statement"
             icon={<Paperclip size={20} />} iconCls="bg-indigo-50 text-indigo-600 shadow-[inset_0_0_0_1px_rgba(99,102,241,0.12)]"
             title="Upload the statement" hint="Mortgage / credit card / auto — I'll pull the split." />
       <Tile onClick={onNoStatement} testId="liability-no-statement"
             icon={<Pencil size={19} />} iconCls="bg-slate-100 text-slate-600"
             title="I don't have the statement" hint="Type the split — I'll book each line." />
+      <Tile onClick={() => setConfirmOpen(true)} testId="liability-not-liability"
+            icon={<AlertTriangle size={19} />} iconCls="bg-amber-50 text-amber-600"
+            title="Not a liability statement" hint="This isn't a loan or card payment." />
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+             onClick={() => !busy && setConfirmOpen(false)} data-testid="not-liability-confirm">
+          <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 grid place-items-center shrink-0"><AlertTriangle size={18} /></div>
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold text-slate-900">Not a liability payment?</div>
+                <div className="text-[13px] text-slate-600 mt-1 leading-snug">
+                  We'll stop treating <b className="text-slate-800">{desc}</b> as a loan, mortgage or credit-card payment and
+                  flag it for your bookkeeper to categorize as a regular expense. No split will be booked.
+                </div>
+              </div>
+            </div>
+            <div className="mt-4 flex gap-2 justify-end">
+              <button type="button" disabled={busy} onClick={() => setConfirmOpen(false)} data-testid="not-liability-cancel"
+                      className="px-4 py-2 rounded-xl border border-slate-200 bg-white text-[13px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button type="button" disabled={busy} onClick={confirmNotLiability} data-testid="not-liability-confirm-btn"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 text-white text-[13px] font-semibold hover:bg-amber-700 disabled:opacity-50">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Yes, not a liability
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
