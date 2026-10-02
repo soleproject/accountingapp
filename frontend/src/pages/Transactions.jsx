@@ -23,6 +23,7 @@ import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
 import BulkUpdateModal from "@/components/BulkUpdateModal";
+import { SimilarApproveModal } from "@/components/SimilarApproveModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
@@ -1464,6 +1465,11 @@ export default function Transactions() {
   useEffect(() => { applySimilarRef.current = applySimilarView; clearSimilarRef.current = clearSimilarView; });
   useActionListener("show-similar-txns", (p) => applySimilarRef.current(p));
   useActionListener("similar-clear", () => clearSimilarRef.current());
+  // Voice "yes" on a focused row (AiPanel) approved it and found same-vendor
+  // siblings — show the same modal the checkmark click shows.
+  useActionListener("open-similar-approve-modal", (p) => {
+    if (p?.similar?.count) setSimilarApprove({ similar: p.similar, ruleExists: !!p.rule_exists });
+  });
   useEffect(() => {
     if (!similarView) return;
     emitAction("similar-selection-changed", { ids: [...selected] });
@@ -2206,8 +2212,14 @@ export default function Transactions() {
   };
 
   const approve = async (id) => {
-    await api.post(`/companies/${currentId}/transactions/${id}/approve`);
+    const r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
     load();
+    const { similar, rule_exists } = r.data || {};
+    if (similar?.count) {
+      setSimilarApprove({ similar, ruleExists: !!rule_exists });
+      emitAction("ai-bulk-approve-prompt", { similar, rule_exists: !!rule_exists, ids: (similar.items || []).map(i => i.id) });
+      emitAction("ai-open");
+    }
   };
   const unapprove = async (id) => {
     await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
@@ -2231,6 +2243,7 @@ export default function Transactions() {
 
   const [xferBusy, setXferBusy] = useState(false);
   const [xferPreview, setXferPreview] = useState(null);
+  const [similarApprove, setSimilarApprove] = useState(null); // { similar, ruleExists }
   const detectTransfers = async () => {
     if (xferBusy || !currentId) return;
     setXferBusy(true);
@@ -3345,6 +3358,10 @@ export default function Transactions() {
       {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} onOpenMultiLink={() => setLinking(editing)} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
+      {similarApprove && (
+        <SimilarApproveModal currentId={currentId} similar={similarApprove.similar} ruleExists={similarApprove.ruleExists}
+                             onClose={() => setSimilarApprove(null)} />
+      )}
       {xferPreview && (
         <Modal title={`Found ${xferPreview.length} internal-transfer pair${xferPreview.length === 1 ? "" : "s"}`}
                onClose={() => setXferPreview(null)}>

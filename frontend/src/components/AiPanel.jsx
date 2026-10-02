@@ -246,31 +246,30 @@ function SplitHintForm({ hint, onApply, onDismiss }) {
 // Interactive confirmation card shown in the chat stream after a user
 // approves a transaction that has other unapproved siblings from the same
 // contact. Yes → bulk-approve + rule; No → dismiss.
-function BulkApproveCard({ similar, createRule, currentId, onDone, onDismiss }) {
+function BulkApproveCard({ similar, createRule, ruleExists, ticked, currentId, onDone, onDismiss }) {
   const [busy, setBusy] = useState(false);
   const [handled, setHandled] = useState(false);
   const catName = similar.category_account_name || similar.category_account_code || "the same category";
+  const ids = ticked || null;
+  const n = ids ? ids.length : similar.count;
 
-  const applyBulk = async () => {
+  const applyBulk = async (withRule = createRule) => {
     if (busy || handled) return;
     setBusy(true);
     try {
-      // Fetch every unapproved txn for this contact — the sample in `similar`
-      // caps at 5 for chat display, so ask the server for the full list.
-      const r = await api.get(
-        `/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`
-      );
-      const ids = (r.data.transactions || [])
-        .filter((t) => !t.human_reviewed)
-        .map((t) => t.id);
+      let txnIds = ids;
+      if (!txnIds) {
+        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`);
+        txnIds = (r.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+      }
       const res = await api.post(
         `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
         {
-          txn_ids: ids,
+          txn_ids: txnIds,
           category_account_id: similar.category_account_id,
           contact_id: similar.contact_id,
           contact_name: similar.contact_name,
-          create_rule: !!createRule,
+          create_rule: !!withRule,
         }
       );
       const updated = res.data?.updated || 0;
@@ -300,21 +299,30 @@ function BulkApproveCard({ similar, createRule, currentId, onDone, onDismiss }) 
       className="mt-2 rounded-md border border-fuchsia-200 bg-fuchsia-50/60 px-3 py-2 text-[13px]"
     >
       <div className="text-fuchsia-900 mb-2">
-        <span className="font-semibold">{similar.count}</span> other{" "}
+        <span className="font-semibold">{n}</span>{ids && ids.length !== similar.count ? ` of ${similar.count}` : " other"}{" "}
         <span className="font-semibold">{similar.contact_name}</span>{" "}
-        transaction{similar.count === 1 ? "" : "s"} → categorize as{" "}
-        <span className="font-semibold">{catName}</span> and approve
-        {createRule ? " + create a rule" : ""}?
+        transaction{n === 1 ? "" : "s"} → categorize as{" "}
+        <span className="font-semibold">{catName}</span> and approve?
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           data-testid="bulk-approve-yes"
-          disabled={busy || handled}
-          onClick={applyBulk}
+          disabled={busy || handled || n === 0}
+          onClick={() => applyBulk(false)}
           className="px-3 py-1 text-xs font-medium rounded bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50"
         >
-          {busy ? "Applying…" : "Yes, do it"}
+          {busy ? "Applying…" : `Yes, approve ${n}`}
         </button>
+        {!ruleExists && (
+          <button
+            data-testid="bulk-approve-yes-rule"
+            disabled={busy || handled || n === 0}
+            onClick={() => applyBulk(true)}
+            className="px-3 py-1 text-xs font-medium rounded border border-fuchsia-300 bg-white text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50"
+          >
+            Approve {n} + create rule
+          </button>
+        )}
         <button
           data-testid="bulk-approve-no"
           disabled={busy || handled}
@@ -856,6 +864,32 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("similar-view-cleared", () => {
     setMessages(m => m.map(mm => mm.card?.similarMode?.active
       ? { ...mm, card: { ...mm.card, similarMode: null } } : mm));
+  });
+
+  // Row approve → same-vendor bulk prompt. Mirrors the SimilarApproveModal
+  // on the Transactions page: ticks sync both ways, either side applies.
+  useActionListener("ai-bulk-approve-prompt", (payload) => {
+    const { similar, rule_exists, ids } = payload || {};
+    if (!similar?.count) return;
+    const catName = similar.category_account_name || similar.category_account_code || "the same category";
+    const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} **${similar.count}** other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Categorize the ticked ones as **${catName}** and approve them? Say **yes**${rule_exists ? "" : ", or **yes, and make a rule** so future imports land there automatically"}.`;
+    pendingIntentRef.current = { kind: "bulk-approve-contact", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null };
+    setMessages(m => [...m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm),
+      { role: "assistant", content: prompt, card: { kind: "bulk-approve-confirm", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null } }]);
+    stopTtsNow();
+    if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
+  });
+  useActionListener("bulk-approve-selection-changed", (p) => {
+    if (p?.origin === "chat" || !Array.isArray(p?.ids)) return;
+    if (pendingIntentRef.current?.kind === "bulk-approve-contact") pendingIntentRef.current.ticked = p.ids;
+    setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: { ...mm.card, ticked: p.ids } } : mm));
+  });
+  useActionListener("bulk-approve-done", (p) => {
+    if (p?.origin === "chat") return;
+    if (pendingIntentRef.current?.kind === "bulk-approve-contact") pendingIntentRef.current = null;
+    const msg = p?.declined ? "OK — just the one approved." : (p?.msg || "Done.");
+    setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm).concat([{ role: "assistant", content: msg }]));
+    if (voiceOnRef.current) speakOne(msg);
   });
 
   // Same as `ai-chat-say` but attaches a clickable CTA to the bubble
@@ -1698,13 +1732,60 @@ export default function AiPanel({ collapsed, onToggle }) {
       setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
     }
   };
+  const runBulkApprove = async (i, card, withRule) => {
+    const sim = card.similar;
+    try {
+      let ids = card.ticked;
+      if (!ids) {
+        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`);
+        ids = (r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id);
+      }
+      const res = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
+        txn_ids: ids, category_account_id: sim.category_account_id, contact_id: sim.contact_id,
+        contact_name: sim.contact_name, create_rule: !!withRule,
+      });
+      const n = res.data?.updated || 0;
+      const msg = res.data?.rule_id ? `Approved ${n} transaction${n === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.` : `Approved ${n} transaction${n === 1 ? "" : "s"}.`;
+      pendingIntentRef.current = null;
+      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: msg }]));
+      if (voiceOnRef.current) speakOne(msg);
+      emitAction("bulk-approve-done", { msg, origin: "chat" });
+      emitAction("txns:changed");
+    } catch {
+      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — bulk approval failed." }]);
+    }
+  };
+  const declineBulkApprove = (i) => {
+    pendingIntentRef.current = null;
+    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: "OK — just the one approved." }]));
+    if (voiceOnRef.current) speakOne("OK, just the one approved.");
+    emitAction("bulk-approve-done", { origin: "chat", declined: true });
+  };
   // Voice/text → card button. The LLM picks which visible button the
   // utterance means (or none → normal chat flow). Returns true if handled.
   const routeToCategoryCard = async (userMsg) => {
     const msgs = messagesRef.current;
-    const i = msgs.map(mm => mm.card?.kind === "category-recommend").lastIndexOf(true);
+    const i = msgs.map(mm => ["category-recommend", "bulk-approve-confirm"].includes(mm.card?.kind)).lastIndexOf(true);
     if (i < 0) return false;
     const card = msgs[i].card;
+    if (card.kind === "bulk-approve-confirm") {
+      const n = card.ticked ? card.ticked.length : card.similar.count;
+      const actions = [
+        { id: "approve_ticked", label: `Yes, approve ${n}`, hint: `categorize the ${n} ticked ${card.similar.contact_name} rows the same way and approve them, no rule` },
+        ...(card.rule_exists ? [] : [{ id: "approve_ticked_rule", label: `Approve ${n} + create rule`, hint: "same, AND create a rule so future imports from this vendor land there automatically" }]),
+        { id: "decline", label: "No, thanks", hint: "leave the others alone, only the one already approved" },
+      ];
+      let pick = null;
+      try {
+        const { data } = await api.post(`/companies/${currentId}/ai/card-intent`, { message: userMsg, actions });
+        if (data?.action_id && (data.confidence ?? 0) >= 0.6) pick = actions.find(x => x.id === data.action_id) || null;
+      } catch { return false; }
+      if (!pick) return false;
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      if (pick.id === "decline") declineBulkApprove(i);
+      else await runBulkApprove(i, card, pick.id === "approve_ticked_rule");
+      return true;
+    }
     const a = card.rec.account;
     const isNew = card.rec.kind === "new";
     const ticked = card.similarMode?.active ? (card.similarMode.ticked || []) : null;
@@ -2338,12 +2419,13 @@ export default function AiPanel({ collapsed, onToggle }) {
         try {
           const sim = p.similar;
           // Fetch every unapproved txn for this contact — sample caps at 5.
-          const full = await api.get(
-            `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
-          );
-          const ids = (full.data.transactions || [])
-            .filter((t) => !t.human_reviewed)
-            .map((t) => t.id);
+          let ids = p.ticked || null;
+          if (!ids) {
+            const full = await api.get(
+              `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
+            );
+            ids = (full.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+          }
           const res = await api.post(
             `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
             {
@@ -2359,8 +2441,9 @@ export default function AiPanel({ collapsed, onToggle }) {
           const reply = ruleId
             ? `Approved ${updated} transaction${updated === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.`
             : `Approved ${updated} transaction${updated === 1 ? "" : "s"}.`;
-          setMessages(m => [...m, { role: "assistant", content: reply }]);
+          setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm).concat([{ role: "assistant", content: reply }]));
           if (voiceOnRef.current) speakOne(reply);
+          emitAction("bulk-approve-done", { msg: reply, origin: "chat" });
           emitAction("txns:changed");
         } catch (e) {
           setMessages(m => [...m, { role: "assistant", content: "Sorry — bulk approval failed." }]);
@@ -2753,16 +2836,20 @@ export default function AiPanel({ collapsed, onToggle }) {
           }
           const catName = similar.category_account_name || similar.category_account_code || "the same category";
           const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} ${similar.count} other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Would you like me to categorize them all as **${catName}** and approve them${rule_exists ? "" : ", and create a rule for this contact"}?`;
+          const tickedIds = (similar.items || []).map(x => x.id);
           pendingIntentRef.current = {
             kind: "bulk-approve-contact",
             similar,
-            create_rule: !rule_exists,
+            create_rule: false,
+            rule_exists: !!rule_exists,
+            ticked: tickedIds,
           };
           setMessages(m => [...m, {
             role: "assistant",
             content: prompt,
-            card: { kind: "bulk-approve-confirm", similar, create_rule: !rule_exists },
+            card: { kind: "bulk-approve-confirm", similar, create_rule: false, rule_exists: !!rule_exists, ticked: tickedIds },
           }]);
+          emitAction("open-similar-approve-modal", { similar, rule_exists: !!rule_exists });
           if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
           emitAction("txns:changed");
         } catch (e) {
@@ -3823,17 +3910,21 @@ export default function AiPanel({ collapsed, onToggle }) {
               <BulkApproveCard
                 similar={m.card.similar}
                 createRule={m.card.create_rule}
+                ruleExists={m.card.rule_exists}
+                ticked={m.card.ticked || null}
                 currentId={currentId}
                 onDone={(msg) => {
                   pendingIntentRef.current = null;
-                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: msg }]));
                   if (voiceOnRef.current) speakOne(msg);
+                  emitAction("bulk-approve-done", { msg, origin: "chat" });
                   emitAction("txns:changed");
                 }}
                 onDismiss={() => {
                   pendingIntentRef.current = null;
-                  setMessages(mm => [...mm, { role: "assistant", content: "OK — just the one approved." }]);
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: "OK — just the one approved." }]));
                   if (voiceOnRef.current) speakOne("OK, just the one approved.");
+                  emitAction("bulk-approve-done", { origin: "chat", declined: true });
                 }}
               />
             )}

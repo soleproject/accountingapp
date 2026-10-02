@@ -3395,6 +3395,15 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
                 "category_account_code": txn.get("category_account_code"),
                 "category_account_name": txn.get("category_account_name"),
                 "count": len(actionable),
+                "items": [
+                    {
+                        "id": c["id"], "date": c.get("date"),
+                        "merchant": c.get("merchant") or c.get("description"), "amount": c.get("amount"),
+                        "category_account_id": c.get("category_account_id"),
+                        "category_account_name": c.get("category_account_name"),
+                    }
+                    for c in actionable
+                ],
                 "sample": [
                     {
                         "id": c["id"], "date": c.get("date"),
