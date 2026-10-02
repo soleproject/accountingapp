@@ -17,8 +17,10 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb,
 } from "lucide-react";
+import ChatReviewTour from "@/components/tour/ChatReviewTour";
+import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
@@ -376,7 +378,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
       <button
         data-testid={TID.txnAddBtn}
         onClick={onQuick}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
       >
         <Plus size={13} /> Manual Transaction
       </button>
@@ -387,7 +389,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
       <button
         data-testid="txn-new-menu-btn"
         onClick={() => setOpen(v => !v)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
       >
         <Plus size={13} /> New transaction
       </button>
@@ -530,7 +532,7 @@ function NarrowTxnCardList({
                     },
                   });
                 }}
-                className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                className="p-1 rounded hover:bg-sky-100 text-sky-500"
               >
                 <Sparkles size={14} />
               </button>
@@ -1136,6 +1138,7 @@ export default function Transactions() {
     return () => clearTimeout(t);
   }, [tourParam, replayParam, isNoContactReview, user?.id, currentCompanyId]);
   const closeStep3BTour = () => setStep3bTourOpen(false);
+
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
@@ -1476,6 +1479,42 @@ export default function Transactions() {
   useActionListener("open-similar-approve-modal", (p) => {
     if (p?.similar?.count) setSimilarApprove({ similar: p.similar, ruleExists: !!p.rule_exists });
   });
+
+  // Transactions page tour (same engine as Review Chat). Auto-opens once
+  // per browser when real rows are on screen; replayable via the Tour
+  // button. Snapshots the filter so the "To do" click is undone on close.
+  const TXN_TOUR_SEEN_KEY = "transactions-tour-completed-v1";
+  const [txnTourOpen, setTxnTourOpen] = useState(false);
+  const fromOnboarding = params.get("from") === "onboarding";
+  const [tourInviteOpen, setTourInviteOpen] = useState(false);
+  const closeTourInvite = (startIt) => {
+    setTourInviteOpen(false);
+    try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
+    navigate("/accounting/transactions", { replace: true });
+    if (startIt) setTimeout(startTxnTour, 350);
+  };
+  useEffect(() => {
+    if (fromOnboarding && txns.length) setTourInviteOpen(true);
+  }, [fromOnboarding, txns.length]);
+  const txnTourSnapRef = useRef(null);
+  const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; setTxnTourOpen(true); };
+  const closeTxnTour = () => {
+    setTxnTourOpen(false);
+    try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
+    const snap = txnTourSnapRef.current; txnTourSnapRef.current = null;
+    if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
+  };
+  useEffect(() => {
+    if (txnTourOpen || tourInviteOpen || fromOnboarding || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
+    if (!txns.length) return;
+    let seen = false;
+    try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
+    if (seen) return;
+    const t = setTimeout(startTxnTour, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txns.length, isReviewMode, isLetsReview, isNoContactReview, tourParam]);
+  useActionListener("chat-cta:restart-transactions-tour", () => startTxnTour());
   useEffect(() => {
     if (!similarView) return;
     emitAction("similar-selection-changed", { ids: [...selected] });
@@ -2303,6 +2342,30 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
+      {txnTourOpen && (
+        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} />
+      )}
+      {tourInviteOpen && !txnTourOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="txn-tour-invite">
+          <div className="w-[min(460px,92vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-6">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-600 font-semibold"><Lightbulb size={13} /> Welcome to Transactions</div>
+            <h3 className="text-lg font-semibold text-slate-900 mt-1">Want a quick tour?</h3>
+            <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
+              About a minute: how to find what needs you, approve with one click, and hand anything confusing to the assistant. You can replay it anytime from the <b>Tour</b> button.
+            </p>
+            <div className="mt-5 flex items-center gap-2">
+              <button type="button" onClick={() => closeTourInvite(true)} data-testid="txn-tour-invite-yes"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md">
+                <Lightbulb size={14} /> Show me
+              </button>
+              <button type="button" onClick={() => closeTourInvite(false)} data-testid="txn-tour-invite-no"
+                      className="px-4 py-2 rounded-full border border-slate-200 bg-white text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300">
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />
       <MonthCloseBreadcrumb />
@@ -2577,7 +2640,7 @@ export default function Transactions() {
                   key={k}
                   data-testid={k === "review" ? TID.txnFilterReview : `txn-filter-${k}`}
                   onClick={() => { setFilter(k); setPage(1); }}
-                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
                 >
                   {label}
                   {filter === k && (
@@ -2593,10 +2656,21 @@ export default function Transactions() {
           {!isReviewMode && (
             <button
               type="button"
+              data-testid="txn-tour-btn"
+              onClick={startTxnTour}
+              title="Show me how this page works"
+              className="inline-flex items-center gap-1 px-2 h-7 rounded-full text-slate-600 hover:bg-amber-50 hover:text-amber-700 text-xs font-medium"
+            >
+              <Lightbulb size={14} /> Tour
+            </button>
+          )}
+          {!isReviewMode && (
+            <button
+              type="button"
               data-testid="uncat-sweep-btn"
               onClick={() => { emitAction("ai-open"); emitAction("uncat-sweep-start"); }}
               title="Walk through every uncategorized transaction with the assistant"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 text-xs font-medium hover:bg-fuchsia-100"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-300 bg-sky-50 text-sky-700 text-xs font-medium hover:bg-sky-100"
             >
               <Sparkles size={13} /> Sweep uncategorized
             </button>
@@ -2698,7 +2772,7 @@ export default function Transactions() {
             role="tab"
             aria-selected={view === "list"}
             onClick={() => setView("list")}
-            className={`px-2 py-1.5 flex items-center ${view === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`px-2 py-1.5 flex items-center ${view === "list" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
           >
             <ListIcon size={14} />
           </button>
@@ -2708,7 +2782,7 @@ export default function Transactions() {
             role="tab"
             aria-selected={view === "rollup"}
             onClick={() => setView("rollup")}
-            className={`px-2 py-1.5 flex items-center border-l border-slate-200 ${view === "rollup" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`px-2 py-1.5 flex items-center border-l border-slate-200 ${view === "rollup" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
           >
             <LayoutGrid size={14} />
           </button>
@@ -2762,7 +2836,7 @@ export default function Transactions() {
           onClick={() => setAdvancedOpen((v) => !v)}
           className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
             advancedOpen || advancedActive
-              ? "border-slate-900 bg-slate-900 text-white"
+              ? "border-blue-600 bg-blue-600 text-white"
               : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
           }`}
           title="Toggle advanced filters (accounts, categories, contacts, amount range)"
@@ -3240,7 +3314,7 @@ export default function Transactions() {
                           },
                         });
                       }}
-                      className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                      className="p-1 rounded hover:bg-sky-100 text-sky-500"
                     >
                       <Sparkles size={14} />
                     </button>
