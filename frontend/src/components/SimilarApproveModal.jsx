@@ -13,16 +13,31 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   const [ticked, setTicked] = useState(() => new Set(items.map(i => i.id)));
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
+  const [minAmt, setMinAmt] = useState("");
+  const [maxAmt, setMaxAmt] = useState("");
+  const [sign, setSign] = useState("all");
   const cat = similar.category_account_name || similar.category_account_code || "the same category";
   const isDesc = similar.match_kind === "description";
 
+  const hasAmtFilter = minAmt !== "" || maxAmt !== "" || sign !== "all";
   const visible = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter(it =>
-      [it.merchant, it.date, it.category_account_name, money(it.amount), String(it.amount ?? "")]
-        .some(v => (v || "").toString().toLowerCase().includes(s)));
-  }, [items, q]);
+    const lo = minAmt === "" ? null : Math.abs(Number(minAmt));
+    const hi = maxAmt === "" ? null : Math.abs(Number(maxAmt));
+    return items.filter(it => {
+      const a = Number(it.amount) || 0;
+      if (sign === "in" && a <= 0) return false;
+      if (sign === "out" && a >= 0) return false;
+      const abs = Math.abs(a);
+      if (lo !== null && !Number.isNaN(lo) && abs < lo) return false;
+      if (hi !== null && !Number.isNaN(hi) && abs > hi) return false;
+      if (!s) return true;
+      return [it.merchant, it.date, it.category_account_name, money(it.amount), String(it.amount ?? "")]
+        .some(v => (v || "").toString().toLowerCase().includes(s));
+    });
+  }, [items, q, minAmt, maxAmt, sign]);
+  const filtering = !!q || hasAmtFilter;
+  const clearFilters = () => { setQ(""); setMinAmt(""); setMaxAmt(""); setSign("all"); };
 
   useEffect(() => { emitAction("bulk-approve-selection-changed", { ids: [...ticked], origin: "modal" }); }, [ticked]);
   useActionListener("bulk-approve-selection-changed", (p) => {
@@ -94,23 +109,40 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
           </div>
           <button type="button" onClick={decline} className="text-slate-400 hover:text-slate-700" aria-label="Close" data-testid="similar-approve-close"><X size={16} /></button>
         </div>
-        <div className="px-5 py-2 border-b border-slate-100 flex items-center gap-2">
-          <div className="relative flex-1">
+        <div className="px-5 py-2 border-b border-slate-100 flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Search description, date, amount or category…"
                    className="w-full text-[13px] pl-8 pr-8 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-fuchsia-200 focus:border-fuchsia-300"
                    data-testid="similar-approve-search" />
             {q && <button type="button" onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" aria-label="Clear search" data-testid="similar-approve-search-clear"><X size={13} /></button>}
           </div>
-          <span className="text-[11px] text-slate-500 whitespace-nowrap" data-testid="similar-approve-search-count">
-            {q ? `${visible.length} of ${items.length}` : `${items.length} rows`} · {ticked.size} ticked
+          <div className="inline-flex rounded-md border border-slate-200 bg-white overflow-hidden text-[12px]" data-testid="similar-approve-sign">
+            {[["all", "All"], ["out", "Money out"], ["in", "Money in"]].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setSign(k)} data-testid={`similar-approve-sign-${k}`}
+                      className={`px-2.5 py-1.5 ${sign === k ? "bg-fuchsia-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+            ))}
+          </div>
+          <div className="inline-flex items-center gap-1 text-[12px] text-slate-500">
+            <span className="text-slate-400">$</span>
+            <input type="number" min="0" step="any" inputMode="decimal" value={minAmt} onChange={e => setMinAmt(e.target.value)} placeholder="Min"
+                   className="w-[72px] text-[13px] px-2 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-fuchsia-200 focus:border-fuchsia-300"
+                   data-testid="similar-approve-amount-min" />
+            <span>–</span>
+            <input type="number" min="0" step="any" inputMode="decimal" value={maxAmt} onChange={e => setMaxAmt(e.target.value)} placeholder="Max"
+                   className="w-[72px] text-[13px] px-2 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-fuchsia-200 focus:border-fuchsia-300"
+                   data-testid="similar-approve-amount-max" />
+          </div>
+          <span className="text-[11px] text-slate-500 whitespace-nowrap ml-auto" data-testid="similar-approve-search-count">
+            {filtering ? `${visible.length} of ${items.length}` : `${items.length} rows`} · {ticked.size} ticked
+            {filtering && <button type="button" onClick={clearFilters} className="ml-2 text-fuchsia-700 hover:underline" data-testid="similar-approve-clear-filters">Clear</button>}
           </span>
         </div>
         <div className="max-h-[46vh] overflow-auto">
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="px-4 py-2 text-left w-8"><input type="checkbox" checked={allOn} onChange={toggleAll} disabled={!visible.length} title={q ? "Tick all shown" : "Tick all"} data-testid="similar-approve-tick-all" /></th>
+                <th className="px-4 py-2 text-left w-8"><input type="checkbox" checked={allOn} onChange={toggleAll} disabled={!visible.length} title={filtering ? "Tick all shown" : "Tick all"} data-testid="similar-approve-tick-all" /></th>
                 <th className="px-2 py-2 text-left">Date</th>
                 <th className="px-2 py-2 text-left">Description</th>
                 <th className="px-2 py-2 text-left">Current category</th>
@@ -128,7 +160,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
                 </tr>
               ))}
               {!visible.length && (
-                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500" data-testid="similar-approve-empty">No rows match “{q}”.</td></tr>
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500" data-testid="similar-approve-empty">No rows match these filters.</td></tr>
               )}
             </tbody>
           </table>

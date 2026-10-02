@@ -724,3 +724,4 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-02 — Similar-approve popup search filter
 - Added live search box to `SimilarApproveModal.jsx` (filters by description/date/amount/category); header tick-all acts on visible rows only, hidden ticks preserved; button counts = total ticked; empty state.
 - P0 Theme Coloring bug still OPEN (deferred 15 sessions) — propose fixing next.
+- Added amount filters to the popup: All / Money out / Money in toggle + $Min–$Max range (absolute amount); 'Clear' resets all filters. Verified in-browser with mock data.
