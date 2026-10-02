@@ -1485,6 +1485,17 @@ export default function Transactions() {
   // button. Snapshots the filter so the "To do" click is undone on close.
   const TXN_TOUR_SEEN_KEY = "transactions-tour-completed-v1";
   const [txnTourOpen, setTxnTourOpen] = useState(false);
+  const fromOnboarding = params.get("from") === "onboarding";
+  const [tourInviteOpen, setTourInviteOpen] = useState(false);
+  const closeTourInvite = (startIt) => {
+    setTourInviteOpen(false);
+    try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
+    navigate("/accounting/transactions", { replace: true });
+    if (startIt) setTimeout(startTxnTour, 350);
+  };
+  useEffect(() => {
+    if (fromOnboarding && txns.length) setTourInviteOpen(true);
+  }, [fromOnboarding, txns.length]);
   const txnTourSnapRef = useRef(null);
   const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; setTxnTourOpen(true); };
   const closeTxnTour = () => {
@@ -1494,7 +1505,7 @@ export default function Transactions() {
     if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
   };
   useEffect(() => {
-    if (txnTourOpen || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
+    if (txnTourOpen || tourInviteOpen || fromOnboarding || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
     if (!txns.length) return;
     let seen = false;
     try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
@@ -2333,6 +2344,27 @@ export default function Transactions() {
     <div className="space-y-4">
       {txnTourOpen && (
         <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} />
+      )}
+      {tourInviteOpen && !txnTourOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="txn-tour-invite">
+          <div className="w-[min(460px,92vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-6">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-600 font-semibold"><Lightbulb size={13} /> Welcome to Transactions</div>
+            <h3 className="text-lg font-semibold text-slate-900 mt-1">Want a quick tour?</h3>
+            <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
+              About a minute: how to find what needs you, approve with one click, and hand anything confusing to the assistant. You can replay it anytime from the <b>Tour</b> button.
+            </p>
+            <div className="mt-5 flex items-center gap-2">
+              <button type="button" onClick={() => closeTourInvite(true)} data-testid="txn-tour-invite-yes"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md">
+                <Lightbulb size={14} /> Show me
+              </button>
+              <button type="button" onClick={() => closeTourInvite(false)} data-testid="txn-tour-invite-no"
+                      className="px-4 py-2 rounded-full border border-slate-200 bg-white text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300">
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />

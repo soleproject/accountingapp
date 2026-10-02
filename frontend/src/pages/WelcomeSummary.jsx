@@ -257,8 +257,7 @@ export default function WelcomeSummary() {
       {/* Fixed viewport-bottom Back / Next-step footer — matches the
           rhythm of `/welcome` and `/welcome/payments`. Back returns
           to the pricing step (previous in the flow); Next step drops
-          the user into the dashboard, which is the true landing
-          surface for their books. */}
+          the user onto Transactions, which offers the page tour. */}
       <div
         style={{
           position: "fixed",
@@ -281,7 +280,7 @@ export default function WelcomeSummary() {
           </button>
           <button
             type="button"
-            onClick={() => nav("/accounting/review-chat?from=onboarding")}
+            onClick={() => nav("/accounting/transactions?from=onboarding")}
             className="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md"
             data-testid="welcome-summary-continue"
           >
