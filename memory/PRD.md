@@ -672,3 +672,9 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Removed duplicate Settings under More
 - STANDALONE_BOTTOM (Sidebar.jsx) and MORE_LINKS (Todo2CardList.jsx) no longer include /settings; Accounting settings link retained.
+
+## 2026-10-01 — AI Email Questions tab rebuilt
+- GET /api/cockpit/email-questions: db.communications rows (kinds ai_ask_client, ask_client, client_review_batch, client_welcome*, portal_invite, team_invite) joined to outcome (client_questions / client_review_batches / password_set_tokens / invites). Scope: superadmin=all; enterprise owner (enterprises.owner_user_id) = rollup_stats company_ids ∪ memberships; pro = memberships. Tab pills Quick Ones / Set-up & Invites / QC Emails, sections Waiting / Resolved / Not delivered (collapsed). Open → inline viewer (/q/{token} or /client-review/{token}). Live-refresh re-pulls it.
+
+## 2026-10-01 — Duplicate "Quick one" fix
+- Root cause: in-process hourly sweep per pod + manual /communications/ai-ask-client/run, no lock, txn stamped AFTER LLM+insert (TOCTOU). Fix: atomic _claim_txn (update_one on client_question_id empty→token) BEFORE LLM, release on failure; _sent_recently_for_txn 24h guard on communications.related.txn_id; db.scheduler_locks lease (acquire_sweep_lock/release) around tick + manual run (409 if held); 30-150s startup jitter. Tests: tests/test_ai_ask_client_race.py (3 concurrent runners → 1 email).

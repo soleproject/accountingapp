@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight, Lock, Clock,
+  ChevronLeft, ChevronRight, ChevronDown, Lock, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -1257,7 +1257,9 @@ function OpenQcButton({ token, onOpen, testid }) {
 }
 
 function InProgressQcViewer({ qc, onBack, backLabel }) {
-  const url = `/client-review/${qc.token}?via=pro${qc.item_id ? `&item=${encodeURIComponent(qc.item_id)}` : ""}`;
+  const url = qc.url
+    ? `${qc.url}${qc.url.includes("?") ? "&" : "?"}via=pro`
+    : `/client-review/${qc.token}?via=pro${qc.item_id ? `&item=${encodeURIComponent(qc.item_id)}` : ""}`;
   return (
     <div data-testid="v7-ip-qc-viewer" className="-m-4">
       <div className="flex items-center justify-between gap-2 flex-wrap px-3 py-2 border-b border-slate-200 bg-slate-50 rounded-t-lg">
@@ -1275,7 +1277,7 @@ function InProgressQcViewer({ qc, onBack, backLabel }) {
               {qc.company_name || "Quick Check-in"}
             </div>
             <div className="text-[11px] text-slate-500 truncate">
-              {qc.client_email || "client"}{qc.meta ? ` · ${qc.meta}` : ""} · live client view — answers you enter here post exactly as if the client did
+              {qc.client_email || "client"}{qc.meta ? ` · ${qc.meta}` : ""} · live client view — anything you enter here posts exactly as if the client did
             </div>
           </div>
         </div>
@@ -1290,7 +1292,7 @@ function InProgressQcViewer({ qc, onBack, backLabel }) {
         </a>
       </div>
       <iframe
-        key={`${qc.token}:${qc.item_id || ""}`}
+        key={`${qc.url || qc.token}:${qc.item_id || ""}`}
         title="Client Quick Check-in"
         src={url}
         data-testid="v7-ip-qc-iframe"
@@ -1394,6 +1396,8 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
   const [openQc, setOpenQc] = useState(null);
   const [qcPill, setQcPill] = useState("scheduled"); // lifted so it survives the inline QC viewer
+  const [emailPill, setEmailPill] = useState("quick_ones");
+  const [emailQ, setEmailQ] = useState(null);
   const switchTab = (k) => { setTab(k); setOpenQc(null); };
 
   const companies = useMemo(
@@ -1409,6 +1413,11 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   const [autoRecon, setAutoRecon]     = useState(null);
 
   useEffect(() => {
+    if (tab === "ai_emails" && emailQ === null) {
+      api.get("/cockpit/email-questions")
+        .then(r => setEmailQ(r.data || { rows: [] }))
+        .catch(() => setEmailQ({ rows: [] }));
+    }
     if (tab === "scheduled" && scheduledQc === null) {
       api.get("/cockpit/scheduled-qc")
         .then(r => setScheduledQc(r.data || { scheduled: [], missed: [], sent_awaiting: [], expired_no_response: [], last_completed: [] }))
@@ -1419,7 +1428,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
         .then(r => setAutoRecon(r.data || { companies: [] }))
         .catch(() => setAutoRecon({ companies: [] }));
     }
-  }, [tab, scheduledQc, autoRecon]);
+  }, [tab, scheduledQc, autoRecon, emailQ]);
 
   // Live refresh: the inline QC iframe posts `qc:changed` after every
   // answer / defer / park. Debounce and re-pull the roster + today data.
@@ -1431,6 +1440,9 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
       timer = setTimeout(() => {
         api.get("/cockpit/scheduled-qc")
           .then(r => setScheduledQc(r.data))
+          .catch(() => {});
+        api.get("/cockpit/email-questions")
+          .then(r => setEmailQ(r.data))
           .catch(() => {});
         refetch?.();
       }, 600);
@@ -1456,11 +1468,14 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
       last_completed: byCo(scheduledQc.last_completed),
     } : null,
     autoRecon: autoRecon ? { ...autoRecon, companies: byCo(autoRecon.companies) } : null,
-  }), [d, scheduledQc, autoRecon, selectedCos, nameById]); // eslint-disable-line react-hooks/exhaustive-deps
+    emailQ:    emailQ ? { ...emailQ, rows: byCo(emailQ.rows) } : null,
+  }), [d, scheduledQc, autoRecon, emailQ, selectedCos, nameById]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
     const messages  = filtered.active.length;
-    const ai_emails = filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
+    const ai_emails = filtered.emailQ
+      ? filtered.emailQ.rows.filter(r => r.outcome === "waiting").length
+      : filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
     const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
     const cockpit   = filtered.assistant.length;
     const scheduled = filtered.scheduledQc
@@ -1562,7 +1577,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
           />
         ) : (<>
         {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
-        {tab === "ai_emails" && <InProgressAiEmails items={filtered.waiting} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "ai_emails" && <InProgressAiEmails data={filtered.emailQ} onOpenQc={setOpenQc} pill={emailPill} setPill={setEmailPill} />}
         {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc}
                                    pill={qcPill} setPill={setQcPill}
                                    onNudged={(batchId, at) => setScheduledQc(q => {
@@ -1621,37 +1636,6 @@ function InProgressMessages({ items, onNav, onOpenQc }) {
   );
 }
 
-function InProgressAiEmails({ items, onNav, onOpenQc }) {
-  if (!items.length) return <_EmptyTab text="No AI email questions queued. The assistant is caught up." />;
-  return (
-    <ul className="divide-y divide-slate-100">
-      {items.map(w => (
-        <li key={w.id}
-            onClick={() => onNav(w.route)}
-            className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
-            data-testid={`v7-ip-ai-${w.id}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">{w.company}</div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {w.count} question{w.count === 1 ? "" : "s"} queued for client
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className={`text-[11px] ${w.days_silent >= 3 ? "text-rose-600" : "text-slate-500"}`}>
-                {w.days_silent}d silent
-              </div>
-              <OpenQcButton token={w.client_token} testid={`v7-ip-ai-open-${w.id}`}
-                onOpen={() => onOpenQc({ token: w.client_token, company_name: w.company,
-                                         client_email: null, meta: `${w.count} question${w.count === 1 ? "" : "s"} · ${w.days_silent}d silent` })} />
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function _fmtDate(iso) {
   if (!iso) return "—";
   try {
@@ -1670,6 +1654,131 @@ function _fmtRelDays(iso) {
     if (diff < 30)  return `${Math.round(diff / 7)}w ago`;
     return `${Math.round(diff / 30)}mo ago`;
   } catch { return "—"; }
+}
+
+const EMAIL_Q_PILLS = [
+  { key: "quick_ones",    label: "Quick Ones" },
+  { key: "setup_invites", label: "Set-up & Invites" },
+  { key: "qc_emails",     label: "QC Emails" },
+];
+
+const EMAIL_KIND_LABEL = {
+  ai_ask_client: "AI quick one", ask_client: "Pro question", client_review_batch: "Quick Check-in",
+  client_welcome: "Set password & activate", client_welcome_returning: "Welcome back",
+  portal_invite: "Portal invite", team_invite: "Team invite",
+};
+
+const OUTCOME_STYLE = {
+  waiting:       ["Waiting",       "bg-amber-50 text-amber-700 border-amber-200"],
+  answered:      ["Answered",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  completed:     ["Completed",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  activated:     ["Activated",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  accepted:      ["Accepted",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  info:          ["Sent",          "bg-slate-50 text-slate-600 border-slate-200"],
+  expired:       ["Expired",       "bg-rose-50 text-rose-700 border-rose-200"],
+  revoked:       ["Revoked",       "bg-slate-50 text-slate-600 border-slate-200"],
+  superseded:    ["Re-sent",       "bg-slate-50 text-slate-600 border-slate-200"],
+  not_delivered: ["Not delivered", "bg-slate-50 text-slate-500 border-slate-200"],
+};
+
+const DELIVERY_LABEL = {
+  sent: null, failed: "send failed", skipped_pref_off: "flow turned off",
+  skipped_test_recipient: "test address — not sent",
+};
+
+function EmailQRow({ r, onOpen }) {
+  const [label, cls] = OUTCOME_STYLE[r.outcome] || OUTCOME_STYLE.waiting;
+  const dl = DELIVERY_LABEL[r.delivery];
+  const isQc = r.kind === "client_review_batch";
+  return (
+    <li className="px-3 py-2 flex items-start justify-between gap-3 flex-wrap" data-testid={`v7-ip-email-${r.id}`}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[13px] text-slate-900 truncate">{r.company_name}</span>
+          <span className="text-[10px] uppercase tracking-wider text-slate-400 shrink-0">{EMAIL_KIND_LABEL[r.kind] || r.kind}</span>
+        </div>
+        <div className="text-[12px] text-slate-700 truncate" title={r.subject}>{r.subject}</div>
+        <div className="text-[11px] text-slate-500 truncate">
+          to {r.to} · sent {_fmtRelDays(r.sent_at)}{r.detail ? ` · ${r.detail}` : ""}
+          {dl ? <span className="text-rose-500"> · {dl}</span> : null}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${cls}`} data-testid={`v7-ip-email-outcome-${r.id}`}>
+          {label}{r.outcome === "waiting" && r.days_since >= 1 ? ` · ${r.days_since}d` : ""}
+        </span>
+        {r.open_url && (
+          <button type="button" data-testid={`v7-ip-email-open-${r.id}`}
+                  onClick={(e) => { e.stopPropagation(); onOpen(r); }}
+                  className="text-[11px] font-medium px-2 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 inline-flex items-center gap-1">
+            {isQc ? "Open QC" : "Open"} <ArrowUpRight size={11} />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function InProgressAiEmails({ data, onOpenQc, pill, setPill }) {
+  const [showUndelivered, setShowUndelivered] = useState(false);
+  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  const rows = data.rows || [];
+  const inGroup = rows.filter(r => r.group === pill);
+  const waiting   = inGroup.filter(r => r.outcome === "waiting");
+  const resolved  = inGroup.filter(r => !["waiting", "not_delivered"].includes(r.outcome));
+  const undeliv   = inGroup.filter(r => r.outcome === "not_delivered");
+  const counts = Object.fromEntries(EMAIL_Q_PILLS.map(p => [p.key, rows.filter(r => r.group === p.key && r.outcome === "waiting").length]));
+  const open = (r) => onOpenQc({
+    url: r.open_url, token: null, company_name: r.company_name, client_email: r.to,
+    meta: `${EMAIL_KIND_LABEL[r.kind] || r.kind} · sent ${_fmtRelDays(r.sent_at)}`,
+  });
+  const scopeNote = data.scope === "enterprise"
+    ? `All companies under ${data.enterprise_name || "your enterprise"}`
+    : data.scope === "superadmin" ? "All companies on the platform" : "Your client companies";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-email-pills">
+          {EMAIL_Q_PILLS.map(p => {
+            const on = pill === p.key;
+            const n = counts[p.key];
+            return (
+              <button key={p.key} type="button" onClick={() => setPill(p.key)} data-testid={`v7-ip-email-pill-${p.key}`}
+                      className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+                        on ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {p.label}
+                <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
+                  on ? "bg-white/20 text-white" : n > 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[11px] text-slate-400" data-testid="v7-ip-email-scope">{scopeNote} · last {data.days}d</div>
+      </div>
+
+      <QcSection title="Waiting on the client" count={waiting.length} empty="Nothing outstanding — every email in this group has been actioned.">
+        {waiting.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+      </QcSection>
+      <QcSection title="Resolved" count={resolved.length} empty="No resolved emails yet in this window.">
+        {resolved.slice(0, 25).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+      </QcSection>
+      {undeliv.length > 0 && (
+        <div>
+          <button type="button" onClick={() => setShowUndelivered(v => !v)} data-testid="v7-ip-email-undelivered-toggle"
+                  className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 hover:text-slate-600 inline-flex items-center gap-1">
+            {showUndelivered ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Not delivered · {undeliv.length}
+          </button>
+          {showUndelivered && (
+            <ul className="mt-2 divide-y divide-slate-100 border border-slate-100 rounded-md">
+              {undeliv.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const QC_PILLS = [

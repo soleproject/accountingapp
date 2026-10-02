@@ -29,6 +29,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+from pymongo.errors import DuplicateKeyError
+
 from db import db, now_iso
 from email_dispatcher import dispatch, get_prefs, public_base_url
 import email_templates as tmpl
@@ -284,6 +286,67 @@ async def _draft_question(txn: dict, company_name: str) -> str:
         )
 
 
+# ---------------------------------------------------------------------------
+# Single-runner lease. Every pod runs its own in-process loop, so without
+# this N pods = N sweeps = N "Quick one" emails for the same transaction.
+# A lease row in `db.scheduler_locks` lets exactly one runner sweep at a
+# time; the others skip the tick.
+# ---------------------------------------------------------------------------
+LOCK_NAME = "ai_ask_client_sweep"
+LOCK_TTL_SECONDS = int(os.environ.get("AI_ASK_CLIENT_LOCK_TTL_SEC", "3000"))
+_RUNNER_ID = f"{os.uname().nodename}:{os.getpid()}"
+
+
+async def acquire_sweep_lock(name: str = LOCK_NAME, ttl: int = LOCK_TTL_SECONDS) -> bool:
+    now = datetime.now(timezone.utc)
+    expires = (now + timedelta(seconds=ttl)).isoformat()
+    try:
+        res = await db.scheduler_locks.update_one(
+            {"_id": name, "$or": [{"expires_at": {"$lt": now.isoformat()}}, {"expires_at": None}]},
+            {"$set": {"holder": _RUNNER_ID, "acquired_at": now.isoformat(), "expires_at": expires}},
+            upsert=True,
+        )
+        return bool(res.upserted_id or res.modified_count)
+    except DuplicateKeyError:
+        return False  # live lease held by another runner
+
+
+async def release_sweep_lock(name: str = LOCK_NAME) -> None:
+    await db.scheduler_locks.update_one(
+        {"_id": name, "holder": _RUNNER_ID},
+        {"$set": {"expires_at": None, "released_at": now_iso()}},
+    )
+
+
+async def _sent_recently_for_txn(txn_id: str, hours: int = 24) -> bool:
+    """Belt-and-braces: has a Quick one about this exact txn already gone
+    out recently (any runner, any company)?"""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    doc = await db.communications.find_one(
+        {"kind": KIND, "status": "sent", "related.txn_id": txn_id, "sent_at": {"$gte": since}},
+        {"_id": 1},
+    )
+    return doc is not None
+
+
+async def _claim_txn(cid: str, txn_id: str, token: str) -> bool:
+    """Atomically reserve the txn for this question. Only the first runner
+    to flip `client_question_id` from empty → token wins; everyone else
+    sees no match and backs off before spending an LLM call."""
+    res = await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid, "client_question_id": {"$in": [None, ""]}},
+        {"$set": {"client_question_id": token, "ai_ask_claimed_at": now_iso()}},
+    )
+    return res.modified_count == 1
+
+
+async def _release_claim(cid: str, txn_id: str, token: str) -> None:
+    await db.transactions.update_one(
+        {"id": txn_id, "company_id": cid, "client_question_id": token},
+        {"$set": {"client_question_id": None}, "$unset": {"ai_ask_claimed_at": ""}},
+    )
+
+
 async def process_company(cid: str) -> dict:
     """One iteration for a single company. Returns a small summary dict.
 
@@ -330,11 +393,24 @@ async def process_company(cid: str) -> dict:
             "prior_company_id": prior.get("company_id"),
         }
 
-    question = await _draft_question(txn, company_name=company.get("name") or "")
+    if await _sent_recently_for_txn(txn["id"]):
+        return {"cid": cid, "status": "already_sent_recently", "txn_id": txn["id"]}
+
+    # Claim the txn atomically BEFORE the LLM call. Two concurrent
+    # runners (two pods, or the hourly tick racing a manual run) both
+    # select the same candidate; only one can win this update.
+    token = secrets.token_urlsafe(24)
+    if not await _claim_txn(cid, txn["id"], token):
+        return {"cid": cid, "status": "claimed_by_other_runner", "txn_id": txn["id"]}
+
+    try:
+        question = await _draft_question(txn, company_name=company.get("name") or "")
+    except Exception:
+        await _release_claim(cid, txn["id"], token)
+        raise
 
     # Materialize the client_question record BEFORE dispatching the email
     # so a webhook/answer arriving before the write finishes still resolves.
-    token = secrets.token_urlsafe(24)
     expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     q_doc = {
         "id": token,
@@ -357,7 +433,11 @@ async def process_company(cid: str) -> dict:
         "payment_signature": signature,
         "counterparty_label": txn.get("contact_name") or "",
     }
-    await db.client_questions.insert_one(q_doc)
+    try:
+        await db.client_questions.insert_one(q_doc)
+    except Exception:
+        await _release_claim(cid, txn["id"], token)
+        raise
 
     # Stamp `client_question_id` onto EVERY duplicate row for this
     # same real-world payment (same date + rounded amount + counterparty
@@ -406,6 +486,8 @@ async def process_company(cid: str) -> dict:
     await db.transactions.update_one(
         {"id": txn["id"], "company_id": cid},
         {"$set": {
+            "needs_review": True,
+            "updated_at": now_iso(),
             "ai_comment": (txn.get("ai_comment") or "")
                           + f"\n\n[AI asked client on {now_iso()[:10]}]: {question}",
         }},
@@ -492,8 +574,9 @@ _TASK: Optional[asyncio.Task] = None
 
 async def _loop() -> None:
     global _LAST_AUTO_ARCHIVE_RUN
-    # Small warm-up so we don't spam on process restart loops.
-    await asyncio.sleep(30)
+    # Small warm-up so we don't spam on process restart loops, plus a
+    # per-process jitter so pods that boot together don't tick together.
+    await asyncio.sleep(30 + secrets.randbelow(120))
     while True:
         try:
             # --- Nightly-ish auto-archive: run at most once per calendar day.
@@ -510,35 +593,40 @@ async def _loop() -> None:
                 except Exception:  # noqa: BLE001
                     logger.exception("AI ask-client auto-archive failed — will retry next tick")
 
-            if _in_send_window():
-                summary = await run_once()
-                if summary["sent"]:
-                    logger.info("AI ask-client: sent=%s companies=%s",
-                                summary["sent"], summary["companies"])
-                # Batch client-review flow (Phase 3). Runs alongside
-                # per-txn asks. Every tick handles reminders, nudges,
-                # expiry and fresh batch trigger — see
-                # `client_review.client_review_tick`.
-                try:
-                    import client_review
-                    cr_summary = await client_review.client_review_tick()
-                    tr = cr_summary.get("triggered") or {}
-                    rm = cr_summary.get("reminders") or {}
-                    nd = cr_summary.get("nudges") or {}
-                    if (tr.get("fired") or rm.get("sent") or nd.get("sent")):
-                        logger.info(
-                            "client_review tick: fired=%s reminders=%s nudges=%s",
-                            tr.get("fired"), rm.get("sent"), nd.get("sent"),
-                        )
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "client_review tick failed — will retry next tick"
-                    )
-            else:
+            if not _in_send_window():
                 logger.debug(
                     "AI ask-client tick outside %s window (%02d:00–%02d:00 %s) — skipping scan",
                     SEND_TZ, SEND_START_HOUR, SEND_END_HOUR, SEND_TZ,
                 )
+            elif not await acquire_sweep_lock():
+                logger.info("AI ask-client tick skipped — another runner holds the sweep lease")
+            else:
+                try:
+                    summary = await run_once()
+                    if summary["sent"]:
+                        logger.info("AI ask-client: sent=%s companies=%s",
+                                    summary["sent"], summary["companies"])
+                    # Batch client-review flow (Phase 3). Runs alongside
+                    # per-txn asks. Every tick handles reminders, nudges,
+                    # expiry and fresh batch trigger — see
+                    # `client_review.client_review_tick`.
+                    try:
+                        import client_review
+                        cr_summary = await client_review.client_review_tick()
+                        tr = cr_summary.get("triggered") or {}
+                        rm = cr_summary.get("reminders") or {}
+                        nd = cr_summary.get("nudges") or {}
+                        if (tr.get("fired") or rm.get("sent") or nd.get("sent")):
+                            logger.info(
+                                "client_review tick: fired=%s reminders=%s nudges=%s",
+                                tr.get("fired"), rm.get("sent"), nd.get("sent"),
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.exception(
+                            "client_review tick failed — will retry next tick"
+                        )
+                finally:
+                    await release_sweep_lock()
         except Exception:  # noqa: BLE001
             logger.exception("AI ask-client run failed — will retry next tick")
         await asyncio.sleep(SCHEDULER_INTERVAL_SECONDS)

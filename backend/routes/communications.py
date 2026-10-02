@@ -1047,18 +1047,25 @@ async def run_ai_ask_client(
     own tenants; superadmins can pass ``for_company_id`` to smoke-test one
     company, or omit to run against every company."""
     import ai_ask_client_scheduler as sched
-    if for_company_id:
-        summary = await sched.process_company(for_company_id)
-        return {"companies": 1, "sent": 1 if summary.get("status") == "sent" else 0, "details": [summary]}
-    if user["role"] == "pro":
-        # Restrict to companies this pro is a member of.
-        ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
-        cids = [m["company_id"] for m in ms]
-        summaries = []
-        for cid in cids:
-            summaries.append(await sched.process_company(cid))
-        return {"companies": len(cids), "sent": sum(1 for s in summaries if s.get("status") == "sent"), "details": summaries}
-    return await sched.run_once()
+    # Same lease as the hourly tick — a manual run racing the background
+    # sweep was one way clients got two "Quick one" emails for one txn.
+    if not await sched.acquire_sweep_lock():
+        raise HTTPException(409, "An AI Ask Client sweep is already running — try again in a few minutes.")
+    try:
+        if for_company_id:
+            summary = await sched.process_company(for_company_id)
+            return {"companies": 1, "sent": 1 if summary.get("status") == "sent" else 0, "details": [summary]}
+        if user["role"] == "pro":
+            # Restrict to companies this pro is a member of.
+            ms = await db.memberships.find({"user_id": user["id"], "role": "pro"}).to_list(1000)
+            cids = [m["company_id"] for m in ms]
+            summaries = []
+            for cid in cids:
+                summaries.append(await sched.process_company(cid))
+            return {"companies": len(cids), "sent": sum(1 for s in summaries if s.get("status") == "sent"), "details": summaries}
+        return await sched.run_once()
+    finally:
+        await sched.release_sweep_lock()
 
 
 @router.get("/q/{token}/next")

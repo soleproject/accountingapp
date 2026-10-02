@@ -216,6 +216,158 @@ async def cockpit_pending_reconciliations(
     }
 
 
+EMAIL_Q_GROUPS = {
+    "ai_ask_client":            "quick_ones",
+    "ask_client":               "quick_ones",
+    "client_review_batch":      "qc_emails",
+    "client_welcome":           "setup_invites",
+    "client_welcome_returning": "setup_invites",
+    "portal_invite":            "setup_invites",
+    "team_invite":              "setup_invites",
+}
+
+
+async def _email_scope(user: dict) -> tuple[list[str], dict]:
+    """Companies whose outbound client emails this user may see.
+    superadmin → all · enterprise owner → every company served by any pro
+    in their enterprise (same rule as the Enterprises page rollup) ·
+    pro → own memberships."""
+    base = await require_firm_or_pro(user)
+    role = (user.get("role") or "").lower()
+    if role == "superadmin":
+        return base, {"scope": "superadmin"}
+    ent = await db.enterprises.find_one({"owner_user_id": user["id"]}, {"_id": 0, "id": 1, "name": 1})
+    if ent:
+        from enterprises import rollup_stats
+        stats = await rollup_stats(ent["id"])
+        ids = list({*base, *(stats.get("company_ids") or [])})
+        return ids, {"scope": "enterprise", "enterprise_name": ent.get("name")}
+    return base, {"scope": "pro"}
+
+
+@router.get("/email-questions")
+async def cockpit_email_questions(
+    user: dict = Depends(get_current_user),
+    days: int = Query(60, ge=1, le=365),
+):
+    """Every client-facing ask / set-up email the platform sent for the
+    companies in this user's scope, joined to its outcome (answered,
+    activated, accepted, completed, expired, still waiting)."""
+    accessible, scope = await _email_scope(user)
+    if not accessible:
+        return {"rows": [], **scope}
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    since = (now - timedelta(days=days)).isoformat()
+
+    co_names: dict[str, str] = {}
+    async for c in db.companies.find({"id": {"$in": accessible}}, {"_id": 0, "id": 1, "name": 1}):
+        co_names[c["id"]] = c.get("name") or "Untitled"
+
+    comms = await db.communications.find({
+        "company_id": {"$in": accessible},
+        "kind": {"$in": list(EMAIL_Q_GROUPS)},
+        "sent_at": {"$gte": since},
+    }, {"_id": 0, "html": 0}).sort("sent_at", -1).to_list(400)
+
+    def rel(c, k):
+        return (c.get("related") or {}).get(k)
+
+    q_ids = [rel(c, "question_id") for c in comms if rel(c, "question_id")]
+    b_ids = [rel(c, "batch_id") for c in comms if rel(c, "batch_id")]
+    t_ids = [rel(c, "password_set_token") for c in comms if rel(c, "password_set_token")]
+    i_ids = [rel(c, "invite_id") for c in comms if rel(c, "invite_id")]
+
+    questions = {q["id"]: q async for q in db.client_questions.find(
+        {"id": {"$in": q_ids}}, {"_id": 0, "id": 1, "status": 1, "answered_at": 1, "question": 1, "expires_at": 1})} if q_ids else {}
+    batches = {b["id"]: b async for b in db.client_review_batches.find(
+        {"id": {"$in": b_ids}}, {"_id": 0, "id": 1, "status": 1, "client_token": 1, "completed_at": 1,
+                                 "answer_count": 1, "items.item_id": 1})} if b_ids else {}
+    tokens = {t["id"]: t async for t in db.password_set_tokens.find(
+        {"id": {"$in": t_ids}}, {"_id": 0, "id": 1, "used": 1, "used_at": 1, "expires_at": 1})} if t_ids else {}
+    invites = {i["id"]: i async for i in db.invites.find(
+        {"id": {"$in": i_ids}}, {"_id": 0, "id": 1, "status": 1, "accepted_at": 1, "expires_at": 1})} if i_ids else {}
+
+    def _days(iso):
+        try:
+            d = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=timezone.utc)
+            return max(0, (now - d).days)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _expired(iso):
+        return bool(iso) and str(iso) < now_iso
+
+    rows = []
+    for c in comms:
+        kind = c.get("kind")
+        delivered = c.get("status") == "sent"
+        outcome = "waiting" if delivered else "not_delivered"
+        outcome_at = open_url = detail = None
+        if kind in ("ai_ask_client", "ask_client"):
+            q = questions.get(rel(c, "question_id") or "")
+            if q:
+                detail = q.get("question")
+                open_url = f"/q/{q['id']}"
+                if q.get("status") == "answered" or q.get("answered_at"):
+                    outcome, outcome_at = "answered", q.get("answered_at")
+                elif delivered and (q.get("status") == "expired" or _expired(q.get("expires_at"))):
+                    outcome = "expired"
+        elif kind == "client_review_batch":
+            b = batches.get(rel(c, "batch_id") or "")
+            if b:
+                if b.get("client_token"):
+                    open_url = f"/client-review/{b['client_token']}"
+                detail = f"{int(b.get('answer_count') or 0)}/{len(b.get('items') or [])} answered"
+                if b.get("status") == "completed":
+                    outcome, outcome_at = "completed", b.get("completed_at")
+                elif delivered and b.get("status") == "expired":
+                    outcome = "expired"
+        elif kind in ("client_welcome", "client_welcome_returning"):
+            t = tokens.get(rel(c, "password_set_token") or "")
+            if t:
+                if t.get("used"):
+                    outcome, outcome_at = "activated", t.get("used_at")
+                elif delivered and _expired(t.get("expires_at")):
+                    outcome = "expired"
+            elif kind == "client_welcome_returning" and delivered:
+                outcome = "info"
+        elif kind == "team_invite":
+            i = invites.get(rel(c, "invite_id") or "")
+            detail = f"role: {rel(c, 'role') or '—'}"
+            if i:
+                st = i.get("status")
+                if st == "accepted":
+                    outcome, outcome_at = "accepted", i.get("accepted_at")
+                elif st in ("revoked", "superseded"):
+                    outcome = st
+                elif delivered and _expired(i.get("expires_at")):
+                    outcome = "expired"
+        elif kind == "portal_invite" and delivered:
+            outcome = "info"
+
+        rows.append({
+            "id":           c.get("id"),
+            "kind":         kind,
+            "group":        EMAIL_Q_GROUPS.get(kind, "other"),
+            "to":           c.get("to"),
+            "subject":      c.get("subject"),
+            "delivery":     c.get("status"),
+            "error":        c.get("error"),
+            "sent_at":      c.get("sent_at"),
+            "days_since":   _days(c.get("sent_at")),
+            "company_id":   c.get("company_id"),
+            "company_name": co_names.get(c.get("company_id") or "", "—"),
+            "outcome":      outcome,
+            "outcome_at":   outcome_at,
+            "detail":       detail,
+            "open_url":     open_url,
+        })
+    return {"rows": rows, "days": days, **scope}
+
+
 @router.post("/scheduled-qc/{batch_id}/nudge")
 async def cockpit_scheduled_qc_nudge(
     batch_id: str,
