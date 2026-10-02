@@ -26,6 +26,7 @@ import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
 import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { SimilarApproveModal } from "@/components/SimilarApproveModal";
+import ContactPicker from "@/components/ContactPicker";
 import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
@@ -1425,7 +1426,7 @@ export default function Transactions() {
       .catch(() => ({ data: {} }))
       .then((contactsRes) => {
         setFilterContactOptions((contactsRes.data?.contacts || []).map((c) => ({
-          id: c.id, name: c.name || c.display_name || "—",
+          id: c.id, name: c.name || c.display_name || "—", logo_url: c.logo_url || null,
         })));
       });
   }, [currentId]);
@@ -2294,6 +2295,14 @@ export default function Transactions() {
   const updateCategory = async (id, acctId) => {
     await api.patch(`/companies/${currentId}/transactions/${id}`, { category_account_id: acctId });
     load();
+  };
+  const updateContact = async (id, contactId) => {
+    try {
+      await api.patch(`/companies/${currentId}/transactions/${id}`, { contact_id: contactId || "" });
+      load();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't update the contact.");
+    }
   };
   const del = async (id) => {
     if (!confirm("Delete this transaction?")) return;
@@ -3352,16 +3361,16 @@ export default function Transactions() {
                       checked={selected.has(t.id)} onChange={() => toggleSel(t.id)} />
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-slate-600 font-mono-num">{fmtDate(t.date)}</td>
-                  <td className="px-3 py-2 text-slate-700 max-w-[200px]" title={t.contact_name || ""}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <ContactBadge
-                        contact={{ name: t.contact_name, logo_url: t.contact_logo_url }}
-                        size={22}
-                      />
-                      <span className="truncate">
-                        {t.contact_name || <span className="text-slate-300">—</span>}
-                      </span>
-                    </div>
+                  <td className="px-3 py-2 text-slate-700 max-w-[200px]">
+                    <ContactPicker
+                      value={t.contact_id || null}
+                      name={t.contact_name}
+                      logoUrl={t.contact_logo_url}
+                      contacts={filterContactOptions}
+                      onChange={(cid) => updateContact(t.id, cid)}
+                      onCreate={createContactInline}
+                      testId={`txn-contact-picker-${t.id}`}
+                    />
                   </td>
                   <td className="px-3 py-2 align-top max-w-[420px]">
                     {/* Merchant + description. Cap the column at ~420px

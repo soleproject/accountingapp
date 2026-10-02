@@ -1818,6 +1818,9 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
         contact = await db.contacts.find_one({"id": upd["contact_id"], "company_id": cid})
         if contact:
             upd["contact_name"] = contact.get("name") or upd.get("contact_name")
+    elif "contact_id" in upd:
+        upd["contact_id"] = None
+        upd["contact_name"] = None
     if "category_account_id" in upd:
         # If this txn is locked to A/R or A/P via a linked invoice/bill,
         # reject the category change — the category is what makes the
