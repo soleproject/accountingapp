@@ -2303,36 +2303,31 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDi
 // identical to the previous "Upload the statement / I don't have the
 // statement" quick-reply pills — just visually promoted to full tiles.
 function LiabilityShortcuts({ currentItem, onUploadStatement, onNoStatement }) {
+  const Tile = ({ onClick, testId, icon, iconCls, title, hint, primary }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group flex items-center gap-3.5 p-4 rounded-2xl border bg-white text-left shadow-[0_8px_20px_-16px_rgba(15,23,42,0.18)] transition
+        hover:-translate-y-[1px] hover:shadow-[0_12px_24px_-16px_rgba(15,23,42,0.28)]
+        ${primary ? "border-indigo-200 hover:border-indigo-400" : "border-slate-200 hover:border-slate-300"}`}
+      data-testid={testId}
+    >
+      <div className={`w-12 h-12 rounded-2xl grid place-items-center shrink-0 ${iconCls}`}>{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[14px] font-semibold text-slate-900 leading-tight">{title}</div>
+        <div className="text-[11.5px] text-slate-500 leading-snug mt-0.5">{hint}</div>
+      </div>
+      <ChevronRight size={16} className="ml-auto shrink-0 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+    </button>
+  );
   return (
-    <div className="grid grid-cols-2 gap-3 py-3" data-testid="liability-shortcuts">
-      <button
-        type="button"
-        onClick={onUploadStatement}
-        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-indigo-200 bg-indigo-50/40 hover:bg-indigo-50 hover:border-indigo-400 transition"
-        data-testid="liability-upload-statement"
-      >
-        <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
-          <FileText size={18} className="text-indigo-700" />
-        </div>
-        <div className="text-sm font-semibold text-slate-800">Upload the statement</div>
-        <div className="text-[11px] text-slate-500 leading-tight text-center">
-          Mortgage / credit card / auto — I'll pull the split.
-        </div>
-      </button>
-      <button
-        type="button"
-        onClick={onNoStatement}
-        className="group flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300 transition"
-        data-testid="liability-no-statement"
-      >
-        <div className="w-10 h-10 rounded-full bg-slate-100 group-hover:bg-slate-200 flex items-center justify-center transition">
-          <X size={18} className="text-slate-600" />
-        </div>
-        <div className="text-sm font-semibold text-slate-800">I don't have the statement</div>
-        <div className="text-[11px] text-slate-500 leading-tight text-center">
-          Type the split — I'll book each line.
-        </div>
-      </button>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 py-3" data-testid="liability-shortcuts">
+      <Tile primary onClick={onUploadStatement} testId="liability-upload-statement"
+            icon={<Paperclip size={20} />} iconCls="bg-indigo-50 text-indigo-600 shadow-[inset_0_0_0_1px_rgba(99,102,241,0.12)]"
+            title="Upload the statement" hint="Mortgage / credit card / auto — I'll pull the split." />
+      <Tile onClick={onNoStatement} testId="liability-no-statement"
+            icon={<Pencil size={19} />} iconCls="bg-slate-100 text-slate-600"
+            title="I don't have the statement" hint="Type the split — I'll book each line." />
     </div>
   );
 }
