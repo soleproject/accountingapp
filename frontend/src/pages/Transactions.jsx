@@ -2952,24 +2952,25 @@ export default function Transactions() {
       )}
 
       {selected.size > 0 && (
-        <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div data-testid="txn-bulk-bar" className="rounded-md border border-indigo-200 bg-indigo-50 text-indigo-950 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-semibold">{selected.size} selected</span>
           <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
             <Check size={12} /> Approve all
           </button>
           <button
             data-testid="txn-bulk-update"
             disabled={busy}
             onClick={() => setBulkUpdateOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white border border-indigo-300 text-indigo-800 text-xs font-medium hover:bg-indigo-100 disabled:opacity-50"
           >
             <SlidersHorizontal size={12} /> Bulk update
           </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
             <Wand2 size={12} /> Make these rules
           </button>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs opacity-70 hover:opacity-100">Clear</button>
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-indigo-700 hover:text-indigo-950 hover:underline">Clear</button>
         </div>
       )}
 
