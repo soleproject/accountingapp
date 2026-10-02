@@ -17,7 +17,7 @@ import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useUserPref } from "@/hooks/useUserPref";
-import { reviewEta } from "@/components/DashboardTodos";
+import { reviewEta, reviewMinutes } from "@/components/DashboardTodos";
 import {
   ArrowLeft, Loader2, ChevronRight, ChevronDown, CircleAlert, User, Bot, Wrench,
   LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
@@ -713,7 +713,11 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                 </div>
                 {isTxnAi ? (
                   <div className="text-[11px] text-slate-600 mt-0.5" data-testid="sidebar-todo2-txn-eta">
-                    {unapproved == null ? "…" : unapproved === 0 ? "All reviewed" : `${unapproved.toLocaleString()} transactions to review`}
+                    {unapproved == null ? "…" : unapproved === 0 ? "All reviewed" : (() => {
+                      const m = reviewMinutes(unapproved);
+                      const span = m >= 60 ? `${Math.floor(m / 60)} Hour${Math.floor(m / 60) === 1 ? "" : "s"}${m % 60 ? ` ${m % 60} Minutes` : ""}` : `${m} Minute${m === 1 ? "" : "s"}`;
+                      return `Estimated ${span} to complete.`;
+                    })()}
                   </div>
                 ) : isTxnChat ? (
                   <div className="text-[11px] text-slate-600 mt-0.5">
