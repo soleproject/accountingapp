@@ -22,6 +22,7 @@ from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
 )
+from canonical_semantic_accounts import ensure_semantic_account
 from ai_service import (
     categorize_transaction, chat_stream, suggest_chart_of_accounts,
     onboarding_interview_questions, onboarding_interview_synthesize,
@@ -88,6 +89,39 @@ class CpaReviewIn(BaseModel):
     txn_ids: Optional[List[str]] = None
 
 
+_SEMANTIC_ALIASES = {
+    "charitable_contributions": ("charitable contributions", "charitable contribution", "donations", "donation",
+                                  "charity", "charitable giving", "tithes", "tithing", "contributions"),
+    "meals": ("meals", "meals & entertainment", "meals and entertainment"),
+    "office_supplies": ("office supplies", "supplies - office"),
+    "software_saas": ("software", "software & saas", "software subscriptions", "saas", "subscriptions"),
+    "travel": ("travel", "travel expense"),
+    "fuel": ("fuel", "gas", "fuel & vehicle expense"),
+    "utilities": ("utilities",),
+    "telecom": ("telephone", "phone", "internet", "telecom", "telecommunications"),
+    "rent": ("rent", "rent expense"),
+    "insurance_expense": ("insurance", "insurance expense"),
+    "marketing": ("marketing", "advertising", "advertising & marketing", "advertising and marketing"),
+    "repairs_maintenance": ("repairs", "repairs & maintenance", "repairs and maintenance", "maintenance"),
+    "professional_fees": ("professional fees", "legal & professional fees", "legal and professional fees", "consulting"),
+    "bank_fees": ("bank fees", "bank service charges", "bank charges"),
+    "payroll_expense": ("payroll", "wages", "salaries", "payroll expense"),
+    "owner_draw": ("owner draw", "owner's draw", "owner draws", "distributions"),
+    "loan_payment": ("loan payment", "loan payments"),
+    "credit_card_payment": ("credit card payment", "credit card payments"),
+    "inter_account_transfer": ("transfer", "transfers", "inter-account transfer"),
+}
+
+
+def canonical_semantic_for_name(name: str) -> Optional[str]:
+    n = " ".join((name or "").lower().replace("&", " and ").split()).replace(" and ", " & ")
+    for sem, aliases in _SEMANTIC_ALIASES.items():
+        for a in aliases:
+            if n == a.replace(" and ", " & "):
+                return sem
+    return None
+
+
 @router.post("/companies/{cid}/ai/cpa-review")
 async def ai_cpa_review(cid: str, inp: CpaReviewIn, user: dict = Depends(get_current_user)):
     """LLM-backed CPA gate for cleanup-inquiry answers. Given a user's raw text
@@ -139,6 +173,24 @@ async def ai_cpa_review(cid: str, inp: CpaReviewIn, user: dict = Depends(get_cur
         txn_sample=txn_sample,
         current_categories=current_categories,
     )
+    # Route NEW-account proposals through the canonical library so "these
+    # are donations" lands on the firm-standard Charitable Contributions
+    # (6850) instead of an LLM-invented code.
+    if result.get("intent") == "categorize":
+        company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
+        template = (company or {}).get("industry_template") or "generic"
+        for b in (result.get("resolution") or {}).get("buckets", []) or []:
+            acct = b.get("account") or {}
+            if acct.get("existing_account_id"):
+                continue
+            sem = canonical_semantic_for_name(acct.get("name") or "")
+            if not sem:
+                continue
+            ensured = await ensure_semantic_account(db, cid, sem, template=template)
+            if ensured:
+                acct.update({"existing_account_id": ensured["id"], "code": ensured.get("code"),
+                             "name": ensured.get("name"), "type": ensured.get("type") or acct.get("type")})
+                b["account"] = acct
     return result
 
 

@@ -678,3 +678,7 @@ need to type into the chat box to invoke the matching help flow.
 
 ## 2026-10-01 — Duplicate "Quick one" fix
 - Root cause: in-process hourly sweep per pod + manual /communications/ai-ask-client/run, no lock, txn stamped AFTER LLM+insert (TOCTOU). Fix: atomic _claim_txn (update_one on client_question_id empty→token) BEFORE LLM, release on failure; _sent_recently_for_txn 24h guard on communications.related.txn_id; db.scheduler_locks lease (acquire_sweep_lock/release) around tick + manual run (409 if held); 30-150s startup jitter. Tests: tests/test_ai_ask_client_race.py (3 concurrent runners → 1 email).
+
+## 2026-10-02 — AI cleanup chat mis-targeting fix
+- Root causes: pendingIntentRef single-slot set BEFORE awaits (prompt for B fired mid-await re-pointed reply meant for A); CPA_REVIEWER prompt biased "these are …" → approve_existing; no canonical account path.
+- Fixes: AiPanel sets pending intent when bubble appends + tags bubble `inquiry`; interceptor trusts last displayed prompt; stale focus pin cleared on new vendor prompt; Undo chip after bulk approve → POST /companies/{cid}/transactions/bulk-unapprove. ai_service: is_explicit_approval() regex gate (approve_existing only on explicit sign-off; otherwise clarifying question), nothing_to_approve gate when rows are Uncategorized; prompt rewritten (donations examples). ai_ops: new-account proposals routed via canonical_semantic_for_name → ensure_semantic_account (added charitable_contributions 6850). Reverted the 204 accidental Walmart approvals on Michael Co 2.

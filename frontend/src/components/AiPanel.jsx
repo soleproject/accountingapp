@@ -438,6 +438,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     window.addEventListener("mouseup", onUp);
   };
   const [messages, setMessages] = useState([]);
+  const messagesRef = useRef([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   // Route awareness — the "Review | Chat" toggle at the top of the
@@ -664,8 +666,6 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
     if (!msg) return;
 
-    pendingIntentRef.current = { kind: "cleanup-inquiry", action: a };
-
     // For contact-in-uncat, probe the amount distribution — if it's bimodal,
     // surface the natural split as a quick-action chip so the user doesn't
     // have to eyeball the amounts themselves.
@@ -694,7 +694,17 @@ export default function AiPanel({ collapsed, onToggle }) {
       } catch { /* non-fatal */ }
     }
 
-    setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
+    // The reply always answers the prompt the user can SEE. Set the
+    // pending intent at the same instant the bubble is appended (after
+    // any awaits above) so an inquiry for another contact that fired
+    // mid-await can't silently re-point the user's next answer.
+    const inquiry = { kind: "cleanup-inquiry", action: a };
+    pendingIntentRef.current = inquiry;
+    // A stale "Focused transaction" pin from another contact only adds
+    // noise next to a vendor prompt — drop it.
+    if (focus && focus.contact_name && focus.contact_name !== a.contact_name) setFocus(null);
+    setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, inquiry,
+                              skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
     // Barge in on any still-playing previous vendor's message when the
     // user manually clicks Skip / Next on the AI Cleanup Copilot — same
     // "manual advance stops the AI mid-sentence" behavior as onboarding.
@@ -1727,7 +1737,14 @@ export default function AiPanel({ collapsed, onToggle }) {
     // as a category description, resolve/create the account, and show a
     // bulk-approve confirmation card.
     if (pendingIntentRef.current?.kind === "cleanup-inquiry") {
-      const inq = pendingIntentRef.current;
+      // Source of truth = the newest vendor prompt in the transcript. If
+      // the ref drifted (prompt for contact B fired after A's bubble was
+      // already the latest), trust the bubble the user is replying to.
+      const lastPrompt = [...messagesRef.current].reverse().find(mm => mm.role === "assistant" && mm.inquiry);
+      const inq = (lastPrompt?.inquiry?.action?.contact_id
+                   && lastPrompt.inquiry.action.contact_id !== pendingIntentRef.current?.action?.contact_id)
+        ? lastPrompt.inquiry
+        : pendingIntentRef.current;
       pendingIntentRef.current = null;
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       const rawText = userMsg;
@@ -1843,7 +1860,8 @@ export default function AiPanel({ collapsed, onToggle }) {
               groups, create_rules: false }
           );
           const say = `Approved **${res.data?.updated || 0}** ${inq.action.contact_name} rows with their current categorization.${uncatCount ? ` (${uncatCount} without a category were left alone.)` : ""}`;
-          setMessages(mm => [...mm, { role: "assistant", content: say }]);
+          setMessages(mm => [...mm, { role: "assistant", content: say,
+            undo: { txnIds: catRows.map(t => t.id), contactName: inq.action.contact_name } }]);
           if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
           emitAction("txns:changed");
           emitAction("cleanup-completed", {
@@ -3554,6 +3572,28 @@ export default function AiPanel({ collapsed, onToggle }) {
                     {a.label}
                   </button>
                 ))}
+              </div>
+            )}
+            {m.undo && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  data-testid="chat-undo-approve"
+                  onClick={async () => {
+                    try {
+                      const r = await api.post(`/companies/${currentId}/transactions/bulk-unapprove`, m.undo.txnIds);
+                      const n = r.data?.count || 0;
+                      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, undo: null } : mm2)
+                        .concat([{ role: "assistant", content: `Undone — **${n}** ${m.undo.contactName} rows are back in review with their categories unchanged.` }]));
+                      emitAction("txns:changed");
+                    } catch {
+                      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't undo that approval." }]);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                >
+                  Undo approval
+                </button>
               </div>
             )}
             {m.card?.kind === "bulk-approve-confirm" && (

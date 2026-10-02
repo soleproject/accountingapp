@@ -47,6 +47,12 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "6400", "professional_services": "6400", "restaurant": "6400", "construction": "6400", "ecommerce": "6400"},
         "tax_line": "sched_c_24b_meals",
     },
+    "charitable_contributions": {
+        "name": "Charitable Contributions", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "charitable_contributions",
+        "code_by_template": {"generic": "6850", "professional_services": "6850", "restaurant": "6850", "construction": "6850", "ecommerce": "6850"},
+        "tax_line": "sched_c_27a_other",
+    },
     "office_supplies": {
         "name": "Office Supplies", "type": "expense",
         "subtype": "operating_expense", "detail_type": "office_general_administrative_expenses",
