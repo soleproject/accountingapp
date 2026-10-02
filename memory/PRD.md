@@ -686,3 +686,7 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-02 — Meaning-first category resolver (pro AI panel)
 - backend/ai_category_resolver.py: canonical cue table (direction-aware) → existing account (linked_semantic / normalized-name / contains) or full-field proposal from CANONICAL spec; else LLM with CoA → closest existing or complete GAAP new account (type/subtype/detail_type/parent/code). POST /companies/{cid}/ai/resolve-category (creates nothing) and /resolve-category/apply (ensure/create account with all fields, categorize+review txns, optional contact rule). Added canonical: contract_labor, cleaning_janitorial, consulting_revenue, donation_income.
 - AiPanel: recategorize-focused branch + pinned-txn free-text fallback → recommendCategory → CategoryRecommendCard (Use this / Create account & categorize / Also N similar + save rule / alternatives / Owner's Draw escape hatch). Review Chat untouched.
+
+## 2026-10-02 — Resolver direction enforcement
+- direction_ok(): money_out never revenue; money_in never expense/cogs unless refund/reimbursement wording. CoA pre-filtered before LLM + post-validation; LLM may return account code or id. Money-out "consulting" → Professional Fees cue. Frontend no-match message is direction-aware.
+- Vagueness gate (is_too_vague) → direction-aware clarifying question; bank Conf#/Ref# codes stripped from memo before LLM.

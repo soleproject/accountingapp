@@ -38,7 +38,7 @@ _CUES: list[tuple[str, str, str | None]] = [
     (r"\b(?:insurance|premium)\b", "insurance_expense", "money_out"),
     (r"\b(?:ads?|advertising|marketing|promo|facebook ads|google ads|sponsorship)\b", "marketing", "money_out"),
     (r"\b(?:repair|repairs|fixed the|maintenance|plumber|hvac)\b", "repairs_maintenance", "money_out"),
-    (r"\b(?:lawyer|attorney|legal|cpa|accountant|bookkeeper|consultant we hired|consulting firm we use|professional fees?)\b", "professional_fees", "money_out"),
+    (r"\b(?:lawyer|attorney|legal|cpa|accountant|bookkeeper|consultant|consulting|advisor|advisory|professional fees?)\b", "professional_fees", "money_out"),
     (r"\b(?:bank fee|service charge|overdraft|wire fee|monthly fee)\b", "bank_fees", "money_out"),
     (r"\b(?:payroll|wages|salary|salaries|paid (?:my|our) (?:employees?|staff))\b", "payroll_expense", "money_out"),
     (r"\b(?:contractor|freelancer|1099|subcontractor|gig worker|contract labor)\b", "contract_labor", "money_out"),
@@ -170,17 +170,40 @@ _RESOLVER_SYSTEM = (
 )
 
 
+_INCOMPATIBLE = {"money_out": {"revenue"}, "money_in": {"expense", "cogs"}}
+_REFUND_RE = re.compile(r"refund|reimburs|credit(?:ed)? back|returned|rebate|cash ?back|chargeback", re.IGNORECASE)
+
+
+def direction_ok(acct_type: str | None, direction: str, message: str = "") -> bool:
+    """Money out can't be revenue; money in can't be an expense — EXCEPT a
+    vendor refund / reimbursement, which legitimately credits the original
+    expense account."""
+    if direction == "money_in" and _REFUND_RE.search(message or ""):
+        return True
+    return (acct_type or "") not in _INCOMPATIBLE.get(direction, set())
+
+
 async def _llm_resolve(message: str, txn: dict | None, accounts: list[dict], direction: str) -> dict:
     from ai_service import MODEL_NAME, _extract_json, _new_chat
     from llm_client import StreamDone, TextDelta, UserMessage
+    # Structural guard: the LLM never even sees accounts whose type can't
+    # hold money flowing this way (no Revenue for money out, no Expense
+    # for money in).
+    accounts = [a for a in accounts if direction_ok(a.get("type"), direction, message)]
     acct_lines = "\n".join(
         f"  - id={a.get('id')} code={a.get('code')} name={a.get('name')} type={a.get('type')} subtype={a.get('subtype','')}"
         for a in accounts[:220])
     tline = ""
     if txn:
-        tline = (f"Transaction: {txn.get('merchant') or txn.get('description')} · amount {txn.get('amount')} "
-                 f"({direction.replace('_', ' ')}) · date {txn.get('date')} · memo {(txn.get('description') or '')[:80]}\n")
-    prompt = f"{tline}User's description: {message!r}\n\nChart of accounts:\n{acct_lines}\n\nReturn the JSON."
+        tline = (f"Transaction: {_clean_memo(txn.get('merchant') or txn.get('description'))} · amount {txn.get('amount')} "
+                 f"({direction.replace('_', ' ')}) · date {txn.get('date')} · memo {_clean_memo(txn.get('description') or '')[:80]}\n")
+    hint = ("Money is going OUT (a payment). It cannot be revenue." if direction == "money_out" else
+            "Money is coming IN (a deposit). It cannot be an expense — unless the user describes a refund or "
+            "reimbursement, which credits the ORIGINAL expense account.")
+    hint += (" If the description is too vague to decide (a single generic word like 'stuff', 'things', 'misc') "
+             "or contradicts the direction (e.g. 'sales' for money going out), do NOT guess: return "
+             "existing_account_id=null, new_account=null, confidence=0 and say what you'd need to know.")
+    prompt = f"{tline}{hint}\nUser's description: {message!r}\n\nChart of accounts (already filtered to types valid for this direction):\n{acct_lines}\n\nReturn the JSON."
     sid = hashlib.md5(f"rc-{message}-{(txn or {}).get('id')}".encode(), usedforsecurity=False).hexdigest()[:12]
     chat = _new_chat(_RESOLVER_SYSTEM, f"resolve-cat-{sid}", model_name=MODEL_NAME, feature="ai-review")
     raw = ""
@@ -198,6 +221,30 @@ async def _llm_resolve(message: str, txn: dict | None, accounts: list[dict], dir
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+_VAGUE = {"stuff", "things", "thing", "misc", "miscellaneous", "something", "business", "expense", "expenses",
+          "payment", "payments", "purchase", "purchases", "money", "cost", "costs", "sales", "sale", "income",
+          "revenue", "deposit", "withdrawal", "bill", "bills", "fee", "fees", "other", "general"}
+_LEAD_IN = re.compile(r"^\s*(?:(?:these|those|they|this|that|it)\s+(?:are|is|were|was)\s+(?:all\s+|just\s+|for\s+|a\s+|an\s+)?|"
+                      r"(?:it's|that's|they're)\s+(?:a\s+|an\s+|for\s+)?|(?:for|just|all)\s+)", re.IGNORECASE)
+
+
+def is_too_vague(message: str) -> bool:
+    """One generic word ('stuff', 'sales', 'misc') tells us nothing — ask
+    instead of letting the model guess off the bank memo."""
+    core = _LEAD_IN.sub("", (message or "").lower()).strip(" .!?,")
+    words = [w for w in re.findall(r"[a-z']+", core) if w not in {"the", "a", "an", "some", "our", "my"}]
+    return len(words) == 0 or (len(words) == 1 and words[0] in _VAGUE)
+
+
+_CONF_RE = re.compile(r"\b(?:conf(?:irmation)?#?\s*[:#]?\s*[a-z0-9]{5,}|ref(?:erence)?#?\s*[a-z0-9]{5,})", re.IGNORECASE)
+
+
+def _clean_memo(text: str) -> str:
+    """Strip bank confirmation / reference codes ('Conf# ywz25vsrm') so the
+    model doesn't read 'Conf' as 'conference'."""
+    return _CONF_RE.sub("", text or "").strip(" -·")
+
+
 async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid}, {"_id": 0}) if txn_id else None
     direction = _direction(txn)
@@ -213,6 +260,10 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
                 "subtype": a.get("subtype"), "detail_type": a.get("detail_type"),
                 "parent_account_id": a.get("parent_account_id"), "parent_name": p.get("name") if p else None}
 
+    if is_too_vague(message):
+        return {"recommendation": None, "alternatives": [], "direction": direction, "similar_count": similar,
+                "txn": _txn_brief(txn), "not_business": False, "too_vague": True}
+
     sem = canonical_semantic_for_text(message, direction)
     if sem:
         hit = _existing_for_semantic(accounts, sem)
@@ -225,14 +276,30 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
                 "similar_count": similar, "txn": _txn_brief(txn), "not_business": sem == "owner_draw"}
 
     data = await _llm_resolve(message, txn, accounts, direction)
-    ex = by_id.get(str(data.get("existing_account_id") or ""))
-    alts = [_pack(by_id[i]) for i in (data.get("alternatives") or []) if i in by_id][:2]
+    by_code = {str(a.get("code")): a for a in accounts if a.get("code")}
+
+    def _lookup(ref) -> dict | None:
+        ref = str(ref or "")
+        return by_id.get(ref) or by_code.get(ref)
+
+    ex = _lookup(data.get("existing_account_id"))
+    try:
+        conf = float(data.get("confidence") or 0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    if conf < 0.5:
+        ex = None  # low-confidence guess → ask a direction-aware clarifying question instead
+    if ex and not direction_ok(ex.get("type"), direction, message):
+        ex = None  # belt and braces — never recommend a revenue account for money out, etc.
+    alts = [_pack(a) for a in (_lookup(i) for i in (data.get("alternatives") or []))
+            if a and direction_ok(a.get("type"), direction, message)][:2]
     if ex:
         rec = {"kind": "existing", "account": _pack(ex), "why": data.get("why") or "", "source": "llm",
                "confidence": float(data.get("confidence") or 0.6)}
-    elif isinstance(data.get("new_account"), dict) and data["new_account"].get("name"):
+    elif isinstance(data.get("new_account"), dict) and data["new_account"].get("name") \
+            and direction_ok(data["new_account"].get("type"), direction, message):
         na = data["new_account"]
-        parent = by_id.get(str(na.get("parent_account_id") or ""))
+        parent = _lookup(na.get("parent_account_id"))
         taken = {a.get("code") for a in accounts}
         code = str(na.get("code") or "")
         if not code or code in taken:

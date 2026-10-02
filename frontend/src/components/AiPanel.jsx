@@ -1795,7 +1795,11 @@ export default function AiPanel({ collapsed, onToggle }) {
         const { data } = await api.post(`/companies/${currentId}/ai/resolve-category`, { message: text, txn_id: txnId || null });
         const rec = data?.recommendation;
         if (!rec?.account) {
-          const say = "I couldn't work out where that belongs yet — tell me what the money was for in a few words (e.g. “office supplies”, “a customer paying an invoice”, “paid myself”).";
+          const say = data?.direction === "money_out"
+            ? "This is money going OUT, so it can't be a sale or customer payment. Was it something you bought (what?), a refund you gave a customer, a transfer to another account, or money you took for yourself?"
+            : data?.direction === "money_in"
+              ? "This is money coming IN, so it can't be an expense. Was it a customer paying you (for what?), a refund from a vendor, a transfer from another account, or money you put in yourself?"
+              : "I couldn't work out where that belongs yet — tell me what the money was for in a few words (e.g. “office supplies”, “a customer paying an invoice”, “paid myself”).";
           setMessages(m => [...m, { role: "assistant", content: say }]);
           if (voiceOnRef.current) speakOne(say);
           return true;
