@@ -44,24 +44,24 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   // Quick-action strip pinned beside the pointer that clicked the check,
   // so the common "yes, all of them" path is one short move away.
   const strip = anchor ? (() => {
-    const w = ruleExists ? 230 : 440, h = 44;
-    const left = Math.max(8, Math.min(anchor.x - w + 20, window.innerWidth - w - 8));
+    const w = 240, h = ruleExists ? 52 : 96;
+    const left = Math.max(8, Math.min(anchor.x - w + 24, window.innerWidth - w - 8));
     const top = anchor.y + 14 + h > window.innerHeight ? anchor.y - h - 14 : anchor.y + 14;
-    return { left, top };
+    return { left, top, w };
   })() : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="similar-approve-modal">
       {strip && (
-        <div className="fixed z-[60] flex items-center gap-2 rounded-full bg-white border border-fuchsia-200 shadow-2xl px-2 py-1.5"
-             style={{ left: strip.left, top: strip.top }} data-testid="similar-approve-quick-strip">
+        <div className="fixed z-[60] flex flex-col gap-1.5 rounded-xl bg-white border border-fuchsia-200 shadow-2xl p-1.5"
+             style={{ left: strip.left, top: strip.top, width: strip.w }} data-testid="similar-approve-quick-strip">
           <button type="button" disabled={busy || !ticked.size} onClick={() => run(false)} data-testid="similar-approve-quick-apply"
-                  className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-1.5 rounded-full bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50 whitespace-nowrap">
+                  className="inline-flex items-center justify-center gap-1.5 text-[13px] font-semibold px-3 py-2 rounded-lg bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50 whitespace-nowrap">
             <Check size={14} /> {busy ? "Applying…" : `Categorize & approve ${ticked.size}`}
           </button>
           {!ruleExists && (
             <button type="button" disabled={busy || !ticked.size} onClick={() => run(true)} data-testid="similar-approve-quick-apply-rule"
-                    className="text-[13px] font-semibold px-3.5 py-1.5 rounded-full border border-fuchsia-300 bg-white text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50 whitespace-nowrap">
+                    className="text-[13px] font-semibold px-3 py-2 rounded-lg border border-fuchsia-300 bg-white text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50 whitespace-nowrap">
               Approve {ticked.size} + create rule
             </button>
           )}
