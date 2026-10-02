@@ -15,6 +15,7 @@ import BulkConfirmModal from "@/components/BulkConfirmModal";
 import BulkUpdateModal from "@/components/BulkUpdateModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import { toast } from "sonner";
+import { reviewEta } from "@/components/DashboardTodos";
 
 // Compact SVG donut: reviewed (emerald), ai (indigo), uncategorized (rose),
 // flagged (amber), rest of total (slate). All slice sizes are proportional
@@ -862,6 +863,20 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
       .then((r) => setChecklistTodos(r.data?.todos || null))
       .catch(() => setChecklistTodos(null));
   }, [currentId, data]);
+  // Step 1 badge shows a time-to-finish estimate (same formula as the
+  // dashboard: ~15 min per 1,300 unapproved rows) and ticks down as rows
+  // get approved — refetched on every txns:changed.
+  const [unapprovedCount, setUnapprovedCount] = useState(null);
+  const [etaTick, setEtaTick] = useState(0);
+  useActionListener("txns:changed", () => setEtaTick((t) => t + 1));
+  useEffect(() => {
+    if (!currentId) return;
+    let cancelled = false;
+    api.get(`/companies/${currentId}/transactions?status=unapproved&limit=1`)
+      .then((r) => !cancelled && setUnapprovedCount(r.data?.pagination?.total ?? 0))
+      .catch(() => !cancelled && setUnapprovedCount(null));
+    return () => { cancelled = true; };
+  }, [currentId, data, etaTick]);
   // Pick the earliest step still open (count > 0). That's the step the CPA
   // is currently on — matches the dashboard checklist numbering.
   // Pick the step to show in the header badge:
@@ -926,8 +941,11 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
         if (forceSubLabel === "3C") return { count: s.check_count || 0, unit: "checks" };
         return null;
       })();
+      const etaFor1 = n === 1 && !subOverrides && unapprovedCount != null && unapprovedCount > 0;
       return {
         n,
+        // Step 1: headline is time-to-finish; raw count moves to a sub-line.
+        eta: etaFor1 ? { value: reviewEta(unapprovedCount), unit: "to finish" } : null,
         // sub_label = "3A"/"3B" when firm-glance splits a step into
         // sub-phases; fall back to the numeric n for steps 1/2 which
         // aren't split.
@@ -1931,12 +1949,17 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   )}
                 </div>
                 <div className="shrink-0 flex flex-col items-end justify-center pl-3 border-l border-slate-200">
-                  <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
-                    {activeStep.count.toLocaleString()}
+                  <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums" data-testid="copilot-step-headline">
+                    {activeStep.eta ? activeStep.eta.value : activeStep.count.toLocaleString()}
                   </div>
                   <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
-                    {activeStep.unit}
+                    {activeStep.eta ? activeStep.eta.unit : activeStep.unit}
                   </div>
+                  {activeStep.eta && (
+                    <div className="mt-0.5 text-[10px] text-slate-400 tabular-nums whitespace-nowrap">
+                      {activeStep.count.toLocaleString()} {activeStep.unit}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : (
@@ -2026,11 +2049,16 @@ export default function CleanupCopilot({ currentId, onApplyAction, onStartSessio
                   ) : (
                     <>
                       <div className="font-heading text-3xl font-bold text-slate-900 leading-none tabular-nums">
-                        {activeStep.count.toLocaleString()}
+                        {activeStep.eta ? activeStep.eta.value : activeStep.count.toLocaleString()}
                       </div>
                       <div className="mt-1.5 text-[10px] uppercase tracking-wider text-slate-500 font-semibold whitespace-nowrap">
-                        {activeStep.unit}
+                        {activeStep.eta ? activeStep.eta.unit : activeStep.unit}
                       </div>
+                      {activeStep.eta && (
+                        <div className="mt-0.5 text-[10px] text-slate-400 tabular-nums whitespace-nowrap">
+                          {activeStep.count.toLocaleString()} {activeStep.unit}
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
