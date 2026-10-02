@@ -120,6 +120,12 @@ _RESOLVER_SYSTEM = (
     "party: pick the GENERIC parent account (e.g. 'Loans Payable', not a sibling like 'SoFi' that belongs to another "
     "lender) and set counterparty_subaccount=true; the system books it to a sub-account named after the party. "
     "Fixed assets, bank accounts, tax payables, clearing/transfer accounts are NOT per-party: counterparty_subaccount=false.\n"
+    "• LOANS are direction-specific. Money OUT described as 'a loan' (no mention of paying back) means the business LENT "
+    "money → asset 'Loans Receivable' (library key loans_receivable), per-borrower sub-account. Money OUT described as "
+    "'loan payment' / 'paying back' / 'paid down' → the lender's sub-account under 'Loans Payable'. Money IN described as "
+    "'a loan' → liability 'Loans Payable', per-lender sub-account. Money IN described as 'paid me back' / 'repaid' → the "
+    "borrower's sub-account under 'Loans Receivable'. If the needed parent does not exist on the chart, return its "
+    "library key as `semantic` with counterparty_subaccount=true.\n"
     "• Only when nothing existing reasonably fits, propose a NEW account. First look in the STANDARD LIBRARY below "
     "and return its key as `semantic`; only if the library has nothing suitable, return a fully specified "
     "`new_account` with standard GAAP naming (never the user's literal words), the right code range (1xxx assets, "
@@ -312,10 +318,24 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
     if dup:
         rec = {"kind": "existing", "account": _pack(dup), "source": "llm+dedupe", "confidence": conf,
                "why": f"{why} Your chart already has “{dup.get('name')}” for this, so I'd use it rather than add a near-duplicate."}
+        sub = _counterparty_subaccount(dup, accounts, txn) if data.get("counterparty_subaccount") else None
+        if sub:
+            a2 = sub["account"] if sub["kind"] == "new" else _pack(sub["account"])
+            rec = {"kind": sub["kind"], "account": a2, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
+                   "why": f"{why} Tracked in its own sub-account “{a2['name']}” under {dup.get('name')} so this party's balance stays visible."}
     else:
         rec = {"kind": "new", "account": acct, "why": why, "source": "llm", "confidence": conf}
         if acct.get("semantic"):
             rec["semantic"] = acct["semantic"]
+        if data.get("counterparty_subaccount") and acct.get("type") in ("asset", "liability"):
+            party = ((txn or {}).get("contact_name") or _clean_memo((txn or {}).get("merchant") or "") or "").strip()
+            if party:
+                # Parent doesn't exist yet: propose parent + per-party child together.
+                child = {"name": party, "code": str(int(acct["code"]) + 1) if str(acct.get("code") or "").isdigit() else "",
+                         "type": acct["type"], "subtype": acct.get("subtype") or "", "detail_type": acct.get("detail_type") or "",
+                         "parent_account_id": None, "parent_name": acct["name"], "parent_proposal": acct, "tax_line": None, "semantic": None}
+                rec = {"kind": "new", "account": child, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
+                       "why": f"{why} I'll add “{acct['name']}” to your chart with a sub-account “{party}” under it so this party's balance stays visible."}
     return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
 
 
@@ -472,7 +492,14 @@ def _txn_brief(txn: dict | None) -> dict | None:
 async def create_account_from_proposal(cid: str, proposal: dict, template: str = "generic") -> dict:
     """Create the proposed account with every field. Library proposals go
     through ensure_semantic_account (idempotent); custom LLM proposals are
-    inserted directly with normalized subtype/detail_type and optional parent."""
+    inserted directly with normalized subtype/detail_type and optional parent.
+    A `parent_proposal` (per-party sub-account whose parent is also new) is
+    created first and linked."""
+    if proposal.get("parent_proposal") and not proposal.get("parent_account_id"):
+        parent = await create_account_from_proposal(cid, proposal["parent_proposal"], template=template)
+        proposal = {**proposal, "parent_account_id": parent["id"], "parent_name": parent.get("name")}
+        if not proposal.get("code") and str(parent.get("code") or "").isdigit():
+            proposal["code"] = str(int(parent["code"]) + 1)
     if proposal.get("semantic"):
         acct = await csa.ensure_semantic_account(db, cid, proposal["semantic"], template=template)
         if acct:
