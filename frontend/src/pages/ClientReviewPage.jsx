@@ -1097,6 +1097,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
   }
 
   const firmLabel = session?.firm_name || "your bookkeeping team";
+  const colW = embedded ? "max-w-4xl" : "max-w-2xl";
   const firmInitials = (session?.firm_name || "NG")
     .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
@@ -1104,7 +1105,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     <div className={`${embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto flex items-center gap-3">
+        <div className={`${colW} mx-auto flex items-center gap-3`}>
           <button
             onClick={() => jumpTo(activeIdx - 1)}
             disabled={!canPrev}
@@ -1187,7 +1188,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
             at a glance. Falls back to a single bar for solo-type
             batches. */}
         {groups.length > 1 ? (
-          <div className="max-w-2xl mx-auto mt-2 grid gap-1"
+          <div className={`${colW} mx-auto mt-2 grid gap-1`}
                style={{ gridTemplateColumns: groups.map((g) => g.items.length).join("fr ") + "fr" }}
                data-testid="review-progress-segments">
             {groups.map((g, gi) => {
@@ -1208,7 +1209,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
             })}
           </div>
         ) : (
-          <div className="max-w-2xl mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden">
+          <div className={`${colW} mx-auto mt-2 h-1 bg-slate-200 rounded-full overflow-hidden`}>
             <div
               className="h-full bg-gradient-to-r from-emerald-500 to-indigo-600 transition-all"
               style={{ width: `${(finishedCount / Math.max(1, totalCount)) * 100}%` }}
@@ -1224,14 +1225,14 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
           the card feels like a trailing comment on the PREVIOUS
           answer). Only the first message is treated as an arrival. */}
       {currentItem && messages[0]?.isTransition && (
-        <div className="max-w-2xl mx-auto w-full px-4 pt-3">
+        <div className={`${colW} mx-auto w-full px-4 pt-3`}>
           <ChatBubble message={{ role: "assistant", content: messages[0].content }} />
         </div>
       )}
 
       {/* Item context card */}
       {currentItem && (
-        <div className="max-w-2xl mx-auto w-full px-4 pt-4">
+        <div className={`${colW} mx-auto w-full px-4 pt-4`}>
           <ItemContextCard
             item={currentItem}
             token={token}
@@ -1271,7 +1272,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       )}
 
       {/* Chat */}
-      <main className="flex-1 max-w-2xl mx-auto w-full px-4 py-4">
+      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4`}>
         <div className="space-y-3">
           {/* `visibleMessages` = the chat excluding the leading arrival
               transition bubble (rendered ABOVE the item card). Initial
@@ -1802,7 +1803,7 @@ ${companyName}`;
 
       {/* Composer */}
       <footer className="bg-white border-t px-4 py-3 sticky bottom-0">
-        <div className="max-w-2xl mx-auto">
+        <div className={`${colW} mx-auto`}>
           {justCompleted ? (
             <div className="flex items-center gap-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3" data-testid="review-completed-gate">
               <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
@@ -6345,7 +6346,7 @@ function ItemContextCard({ item, token, onRowAction, onEdited, onLinked }) {
                 AI Junior
               </div>
             </div>
-            <div className="mt-1 text-[17px] leading-snug font-heading font-medium text-slate-800">
+            <div className="mt-1 text-[14px] leading-snug font-heading font-medium text-slate-700">
               {emphasizePrompt(item.prompt)}
             </div>
           </div>
