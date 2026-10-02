@@ -81,7 +81,7 @@ function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClea
       <div className="flex flex-wrap gap-1.5">
         <button type="button" disabled={busy} onClick={() => run(primaryArgs)} data-testid="category-recommend-apply"
                 className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
-          {busy ? "Applying…" : isNew ? "Create account & categorize" : "Use this"}
+          {busy ? "Applying…" : isNew ? (rec.subaccount ? "Create sub-account & categorize" : "Create account & categorize") : "Use this"}
         </button>
         {similar > 0 && (
           <button type="button" disabled={busy || !!ticked} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
@@ -1919,7 +1919,9 @@ export default function AiPanel({ collapsed, onToggle }) {
         const typeLine = [...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ");
         const say = rec.kind === "existing"
           ? `${who}**${label}** (already on your chart). ${rec.why}`
-          : `${who}nothing on your chart fits, so I'd add **${label}** — ${typeLine}${a.parent_name ? `, under ${a.parent_name}` : ""}. ${rec.why}`;
+          : rec.subaccount
+            ? `${who}I'd add a sub-account **${a.name}** under **${a.parent_name}**${a.code ? ` (${a.code})` : ""}. ${rec.why}`
+            : `${who}nothing on your chart fits, so I'd add **${label}** — ${typeLine}${a.parent_name ? `, under ${a.parent_name}` : ""}. ${rec.why}`;
         setMessages(m => [...m, {
           role: "assistant", content: say,
           card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,

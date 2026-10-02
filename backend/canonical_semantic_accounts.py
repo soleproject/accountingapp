@@ -312,6 +312,15 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "1350", "professional_services": "1350", "restaurant": "1350", "construction": "1350", "ecommerce": "1350"},
         "tax_line": None,
     },
+    "loans_receivable": {
+        # Money the business LENT to someone (money out described as a
+        # loan, or a borrower paying the business back). Per-borrower
+        # sub-accounts live under this parent.
+        "name": "Loans Receivable", "type": "asset",
+        "subtype": "other_current_asset", "detail_type": "other_short_term_asset",
+        "code_by_template": {"generic": "1400", "professional_services": "1400", "restaurant": "1400", "construction": "1400", "ecommerce": "1400"},
+        "tax_line": None,
+    },
     "inter_account_transfer": {
         "name": "Inter-Account Transfer (Clearing)", "type": "asset",
         "subtype": "other_current_asset", "detail_type": "other_current_assets",
