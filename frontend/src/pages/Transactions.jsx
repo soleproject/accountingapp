@@ -1271,6 +1271,8 @@ export default function Transactions() {
   const [pagination, setPagination] = useState({ total: 0, page: 1, pages: 1, limit: 25 });
   // Toolbar filters
   const [search, setSearch] = useState("");
+  // "Show N similar" from the AI panel pins the list to an explicit id set.
+  const [similarView, setSimilarView] = useState(null); // { ids, label, count }
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -1378,6 +1380,7 @@ export default function Transactions() {
     if (isLetsReview) {
       params.set("status", "unapproved");
     }
+    if (similarView?.ids?.length) params.set("ids", similarView.ids.join(","));
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
@@ -1412,7 +1415,23 @@ export default function Transactions() {
       });
   }, [currentId]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter, txnTypeFilter]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter, txnTypeFilter, similarView]);
+
+  // "Show N similar" from the AI panel: same-page via action bus, cross-page
+  // via sessionStorage (the panel navigates here first, then we hydrate).
+  const applySimilarView = (p) => {
+    if (!p?.ids?.length) return;
+    setFilter("all"); setSearch(""); setDebouncedSearch(""); setView("list");
+    setSimilarView(p); setPage(1);
+  };
+  useActionListener("show-similar-txns", applySimilarView);
+  useEffect(() => {
+    const raw = sessionStorage.getItem("axiom_similar_view");
+    if (!raw) return;
+    sessionStorage.removeItem("axiom_similar_view");
+    try { applySimilarView(JSON.parse(raw)); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch unreviewed silent-match counts by txn_type — only in
   // Advanced mode where the chip strip actually renders. Cheap: one
@@ -1641,7 +1660,7 @@ export default function Transactions() {
   }, [currentId]);
 
   const clearFilters = () => {
-    setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
+    setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all"); setSimilarView(null);
     setFilterBankAccountId(""); setFilterCategoryId(""); setFilterContactId("");
     setFilterAmountMin(""); setFilterAmountMax(""); setDirectionFilter("");
   };
@@ -1649,7 +1668,7 @@ export default function Transactions() {
     filterBankAccountId || filterCategoryId || filterContactId ||
     filterAmountMin || filterAmountMax
   );
-  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all") || advancedActive || directionFilter);
+  const filtersActive = Boolean(debouncedSearch || dateFrom || dateTo || (filter !== "all") || advancedActive || directionFilter || similarView);
 
   // Voice-command deep-link support: /accounting/transactions?q=Walmart or
   // ?date_from=2026-07-15&date_to=2026-07-15. On mount / URL change, hydrate
@@ -2674,6 +2693,18 @@ export default function Transactions() {
           </button>
         )}
       </div>
+
+      {similarView && (
+        <div data-testid="similar-view-chip"
+             className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 pl-3 pr-1.5 py-1 text-[12px] text-indigo-900">
+          <Sparkles size={12} className="text-indigo-500" />
+          <span>Showing <b>{similarView.count || similarView.ids.length}</b> similar{similarView.label ? <> to <b>{similarView.label}</b></> : null} · unreviewed only</span>
+          <button type="button" data-testid="similar-view-clear" onClick={() => setSimilarView(null)}
+                  className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-indigo-700 hover:bg-indigo-100">
+            <X size={11} /> Clear
+          </button>
+        </div>
+      )}
 
       {advancedOpen && (
         <div

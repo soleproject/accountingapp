@@ -62,7 +62,7 @@ function inferAccountTypeFromName(name) {
 // Recommendation card for the meaning-first resolver: one primary action
 // (use existing / create & categorize), optional "also N similar", up to
 // two alternative existing accounts, and an owner-draw escape hatch.
-function CategoryRecommendCard({ card, onApply, onDismiss }) {
+function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar }) {
   const [busy, setBusy] = useState(false);
   const { rec, similar, alternatives, direction } = card;
   const a = rec.account;
@@ -82,6 +82,12 @@ function CategoryRecommendCard({ card, onApply, onDismiss }) {
                 className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
           {busy ? "Applying…" : isNew ? "Create account & categorize" : "Use this"}
         </button>
+        {similar > 0 && (
+          <button type="button" disabled={busy} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
+                  className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            Show {similar} similar
+          </button>
+        )}
         {similar > 0 && (
           <button type="button" disabled={busy} onClick={() => run({ ...primaryArgs, withSimilar: true })} data-testid="category-recommend-apply-similar"
                   className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
@@ -1814,7 +1820,8 @@ export default function AiPanel({ collapsed, onToggle }) {
         setMessages(m => [...m, {
           role: "assistant", content: say,
           card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,
-                  similar: data.similar_count || 0, alternatives: data.alternatives || [], direction: data.direction },
+                  similar: data.similar_count || 0, similarIds: data.similar_ids || [], similarLabel: data.similar_label || data.txn?.merchant || "",
+                  alternatives: data.alternatives || [], direction: data.direction },
         }]);
         if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
         return true;
@@ -3750,6 +3757,12 @@ export default function AiPanel({ collapsed, onToggle }) {
             {m.card?.kind === "category-recommend" && (
               <CategoryRecommendCard
                 card={m.card}
+                onShowSimilar={(card) => {
+                  const payload = { ids: card.similarIds || [], label: card.similarLabel || "", count: card.similar || 0 };
+                  sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
+                  if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
+                  else navigate("/accounting/transactions");
+                }}
                 onApply={async ({ withSimilar, accountId, newAccount }) => {
                   try {
                     let ids = m.card.txnId ? [m.card.txnId] : [];

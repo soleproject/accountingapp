@@ -55,18 +55,22 @@ def _proposal_from_spec(sem: str, accounts: list[dict], template: str) -> dict:
     }
 
 
-async def _similar_count(cid: str, txn: dict | None) -> int:
+async def _similar(cid: str, txn: dict | None) -> dict:
+    """Unreviewed siblings of `txn` (same contact, else same merchant/memo)."""
+    empty = {"similar_count": 0, "similar_ids": [], "similar_label": ""}
     if not txn:
-        return 0
+        return empty
     q: dict = {"company_id": cid, "id": {"$ne": txn["id"]}, "human_reviewed": {"$ne": True}}
+    label = txn.get("contact_name") or txn.get("merchant") or txn.get("description") or ""
     if txn.get("contact_id"):
         q["contact_id"] = txn["contact_id"]
     else:
         m = (txn.get("merchant") or txn.get("description") or "").strip()
         if not m:
-            return 0
+            return empty
         q["$or"] = [{"merchant": m}, {"description": m}]
-    return await db.transactions.count_documents(q)
+    rows = await db.transactions.find(q, {"_id": 0, "id": 1}).sort("date", -1).to_list(500)
+    return {"similar_count": len(rows), "similar_ids": [r["id"] for r in rows], "similar_label": _clean_memo(label)}
 
 
 _CONF_RE = re.compile(r"\b(?:conf(?:irmation)?#?\s*[:#]?\s*[a-z0-9]{5,}|ref(?:erence)?#?\s*[a-z0-9]{5,})", re.IGNORECASE)
@@ -211,7 +215,7 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
     by_code = {str(a.get("code")): a for a in accounts if a.get("code")}
     company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
     template = (company or {}).get("industry_template") or "generic"
-    similar = await _similar_count(cid, txn)
+    similar = await _similar(cid, txn)
 
     def _pack(a: dict) -> dict:
         p = by_id.get(a.get("parent_account_id") or "")
@@ -223,7 +227,7 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
         ref = str(ref or "")
         return by_id.get(ref) or by_code.get(ref)
 
-    base = {"direction": direction, "similar_count": similar, "txn": _txn_brief(txn)}
+    base = {"direction": direction, **similar, "txn": _txn_brief(txn)}
     data = await _llm_resolve(message, txn, accounts, direction)
     try:
         conf = float(data.get("confidence") or 0)

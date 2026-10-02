@@ -1177,9 +1177,12 @@ async def list_transactions(
     desc_group: Optional[str] = None,
     txn_type: Optional[str] = None,
     include_matched: bool = False,
+    ids: Optional[str] = None,
 ):
     await require_company(user, cid)
     query: dict = {"company_id": cid}
+    if ids:
+        query["id"] = {"$in": [i for i in ids.split(",") if i][:500]}
     # Silent bank-feed matcher hides paired editor rows behind
     # `hidden_by_match=True`. Callers that explicitly want to see the
     # editor side of a pair (Sales Receipts list, Credit Memos list,
