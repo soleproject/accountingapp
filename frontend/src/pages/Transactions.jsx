@@ -532,7 +532,7 @@ function NarrowTxnCardList({
                     },
                   });
                 }}
-                className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                className="p-1 rounded hover:bg-sky-100 text-sky-500"
               >
                 <Sparkles size={14} />
               </button>
@@ -2670,7 +2670,7 @@ export default function Transactions() {
               data-testid="uncat-sweep-btn"
               onClick={() => { emitAction("ai-open"); emitAction("uncat-sweep-start"); }}
               title="Walk through every uncategorized transaction with the assistant"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 text-xs font-medium hover:bg-fuchsia-100"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-sky-300 bg-sky-50 text-sky-700 text-xs font-medium hover:bg-sky-100"
             >
               <Sparkles size={13} /> Sweep uncategorized
             </button>
@@ -3314,7 +3314,7 @@ export default function Transactions() {
                           },
                         });
                       }}
-                      className="p-1 rounded hover:bg-fuchsia-100 text-fuchsia-600"
+                      className="p-1 rounded hover:bg-sky-100 text-sky-500"
                     >
                       <Sparkles size={14} />
                     </button>
