@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
 const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
@@ -43,6 +43,21 @@ const ITEM_TYPE_LABELS = {
   8: "Split transaction",
   15: "AI cleanup",
 };
+
+// Icon badge per Quick Check-in type (question card).
+const ITEM_TYPE_ICONS = {
+  1: HelpCircle, 2: Users, 3: ReceiptText, 4: FileText, 9: Home, 10: Utensils,
+  11: Landmark, 12: ArrowDownToLine, 13: Pencil, 14: Plane, 5: ArrowRight, 6: Clock, 8: Percent, 15: Check,
+};
+
+// Bold the money words in a prompt ("mortgage payment", "principal",
+// "escrow", "$2,145.67") so the eye lands on what matters.
+const PROMPT_KEYWORDS = /(\$[\d,]+(?:\.\d{2})?|mortgage payment|credit card payment|auto loan payment|loan payment|principal|interest|escrow|owner'?s draw|receipt|w-?9|deposit|refund|transfer|check(?:s)?\b|meals?|travel|lodging)/gi;
+function emphasizePrompt(text) {
+  if (!text) return null;
+  const parts = String(text).split(PROMPT_KEYWORDS);
+  return parts.map((p, i) => (i % 2 === 1 ? <b key={i} className="font-semibold text-slate-900">{p}</b> : p));
+}
 
 // Item types that surface the 📎 paperclip in the composer:
 //   1 — Uncategorized transaction (receipt as evidence + optional category)
@@ -6281,69 +6296,68 @@ function ItemContextCard({ item, token, onRowAction, onEdited, onLinked }) {
   return (
     <div className="space-y-2">
       <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_20px_-14px_rgba(15,23,42,0.12)]">
-        <div className="flex items-center justify-between mb-1.5">
-          <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full">
-            {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 grid place-items-center shrink-0 shadow-[inset_0_0_0_1px_rgba(99,102,241,0.12)]" data-testid="item-type-icon">
+            {(() => { const Icon = ITEM_TYPE_ICONS[item.item_type] || HelpCircle; return <Icon size={22} />; })()}
           </div>
-          <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-            AI Junior
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <div className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-full">
+                {ITEM_TYPE_LABELS[item.item_type] || "Item"}
+              </div>
+              <div className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                AI Junior
+              </div>
+            </div>
+            <div className="mt-1 text-[17px] leading-snug font-heading font-medium text-slate-800">
+              {emphasizePrompt(item.prompt)}
+            </div>
           </div>
-        </div>
-        <div className="mt-1 text-[17px] leading-snug font-heading font-semibold text-slate-900">
-          {item.prompt}
         </div>
       </div>
 
       {hasLineItem && (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3"
+        <div className="rounded-2xl border border-slate-200 bg-white/80 px-3 py-2.5 shadow-[0_8px_20px_-16px_rgba(15,23,42,0.12)]"
              data-testid="review-txn-card">
-          <div className="grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2 items-baseline">
-            <div>
-              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
-                Date
-              </div>
-              <div className="mt-0.5 text-sm text-slate-900 font-mono-num tabular-nums"
-                   data-testid="txn-card-date">
-                {date ? fmtDate(date) : <span className="text-slate-400">—</span>}
+          <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] divide-x divide-slate-200 items-center">
+            <div className="flex items-center gap-2.5 pr-4">
+              <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 grid place-items-center shrink-0"><Calendar size={14} /></div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Date</div>
+                <div className="text-sm text-slate-900 font-mono-num tabular-nums whitespace-nowrap" data-testid="txn-card-date">
+                  {date ? fmtDate(date) : <span className="text-slate-400">—</span>}
+                </div>
               </div>
             </div>
-            <div className="min-w-0">
-              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
-                Description
-              </div>
-              <div className="mt-0.5 text-sm text-slate-900 truncate"
-                   title={lineDesc}
-                   data-testid="txn-card-description">
-                {lineDesc || <span className="text-slate-400">—</span>}
-              </div>
-              {merchant && description && merchant !== description && (
-                <div className="text-[11px] text-slate-500 truncate mt-0.5"
-                     data-testid="txn-card-merchant">
-                  {merchant}
+            <div className="flex items-center gap-2.5 px-4 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 grid place-items-center shrink-0"><FileText size={14} /></div>
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Description</div>
+                <div className="text-sm text-slate-900 truncate" title={lineDesc} data-testid="txn-card-description">
+                  {lineDesc || <span className="text-slate-400">—</span>}
                 </div>
-              )}
-              {account && (
-                <div className="text-[11px] text-slate-500 truncate mt-0.5"
-                     data-testid="txn-card-account">
-                  {account}
-                  {creditAcct && <span className="text-slate-400"> → {creditAcct}</span>}
-                </div>
-              )}
+                {merchant && description && merchant !== description && (
+                  <div className="text-[11px] text-slate-500 truncate mt-0.5" data-testid="txn-card-merchant">{merchant}</div>
+                )}
+                {account && (
+                  <div className="text-[11px] text-slate-500 truncate mt-0.5" data-testid="txn-card-account">
+                    {account}
+                    {creditAcct && <span className="text-slate-400"> → {creditAcct}</span>}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="text-right">
-              <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
-                Amount
-              </div>
-              <div
-                className={`mt-0.5 text-base font-semibold font-mono-num tabular-nums ${
-                  isNegative ? "text-rose-600" : "text-emerald-700"
-                }`}
-                data-testid="txn-card-amount"
-              >
-                {amount != null
-                  ? `${isNegative ? "−" : "+"}${money(amount)}`
-                  : <span className="text-slate-400 text-sm font-normal">—</span>}
+            <div className="flex items-center gap-2.5 pl-4">
+              <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-500 grid place-items-center shrink-0"><Wallet size={14} /></div>
+              <div className="text-right">
+                <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Amount</div>
+                <div className={`text-base font-semibold font-mono-num tabular-nums whitespace-nowrap ${isNegative ? "text-rose-600" : "text-emerald-700"}`}
+                     data-testid="txn-card-amount">
+                  {amount != null
+                    ? `${isNegative ? "−" : "+"}${money(amount)}`
+                    : <span className="text-slate-400 text-sm font-normal">—</span>}
+                </div>
               </div>
             </div>
           </div>
