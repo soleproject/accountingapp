@@ -2742,6 +2742,19 @@ async def list_all_open_invoices(
     ]}
 
 
+_DESC_NOISE_RE = re.compile(r"(conf(?:irmation)?#?\s*[:#]?\s*\S+|ref(?:erence)?#?\s*\S+|\b(?:on|dated?)\s+\d{1,2}/\d{1,2}(?:/\d{2,4})?|[#*]\S*|\S*\d\S*)", re.IGNORECASE)
+
+
+def _desc_key(text: str | None) -> str:
+    """Normalize a bank memo into a vendor-ish key: drop confirmation /
+    reference codes, dates and any token containing digits, keep the first
+    six words. 'Online Banking transfer to CHK 6084 Confirmation# XXXXX98242'
+    → 'online banking transfer to chk'."""
+    t = _DESC_NOISE_RE.sub(" ", (text or "").lower())
+    words = [w for w in re.split(r"[^a-z&']+", t) if w]
+    return " ".join(words[:6])
+
+
 UNCATEGORIZED_CODES = {"9999", "6999", "4999"}
 
 
@@ -3385,17 +3398,20 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
     contact_id = txn.get("contact_id")
     category_id = txn.get("category_account_id")
     contact_name = txn.get("contact_name")
-    if contact_id and category_id:
-        # Find every other transaction for this contact that hasn't been
-        # human-reviewed yet. Excludes the one we just approved and anything
-        # in a closed period (we can't safely bulk-update those).
-        candidates_q = {
-            "company_id": cid,
-            "contact_id": contact_id,
-            "human_reviewed": {"$ne": True},
-            "id": {"$ne": tid},
-        }
-        candidates = await db.transactions.find(candidates_q).sort([("date", -1), ("_id", -1)]).to_list(500)
+    # No contact → fall back to "same description" siblings (normalized memo).
+    desc_key = None if contact_id else _desc_key(txn.get("merchant") or txn.get("description"))
+    if category_id and (contact_id or desc_key):
+        # Find every other transaction for this contact (or with the same
+        # normalized description) that hasn't been human-reviewed yet.
+        # Excludes the one we just approved and anything in a closed period.
+        if contact_id:
+            candidates_q = {"company_id": cid, "contact_id": contact_id, "human_reviewed": {"$ne": True}, "id": {"$ne": tid}}
+            candidates = await db.transactions.find(candidates_q).sort([("date", -1), ("_id", -1)]).to_list(500)
+        else:
+            pool_q = {"company_id": cid, "contact_id": {"$in": [None, ""]}, "human_reviewed": {"$ne": True}, "id": {"$ne": tid}}
+            pool = await db.transactions.find(pool_q).sort([("date", -1), ("_id", -1)]).to_list(3000)
+            candidates = [c for c in pool if _desc_key(c.get("merchant") or c.get("description")) == desc_key][:500]
+            contact_name = " ".join(_DESC_NOISE_RE.sub(" ", txn.get("merchant") or txn.get("description") or "").split())[:48] or "similar description"
         # Filter out any in a closed period — bulk approval shouldn't silently
         # skip them; the UI will show only the actionable count.
         actionable: list[dict] = []
@@ -3407,6 +3423,8 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
             similar = {
                 "contact_id": contact_id,
                 "contact_name": contact_name,
+                "match_kind": "contact" if contact_id else "description",
+                "match_value": contact_id or desc_key,
                 "category_account_id": category_id,
                 "category_account_code": txn.get("category_account_code"),
                 "category_account_name": txn.get("category_account_name"),
@@ -3432,11 +3450,9 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
             }
         # Detect if a rule for this contact already exists so the client
         # doesn't create a duplicate.
-        rule_exists = bool(await db.rules.find_one({
-            "company_id": cid,
-            "match_type": "contact_id",
-            "match_value": contact_id,
-        }))
+        rule_exists = bool(await db.rules.find_one(
+            {"company_id": cid, "match_type": "contact_id", "match_value": contact_id} if contact_id
+            else {"company_id": cid, "match_type": "merchant_contains", "match_value": desc_key}))
 
     await _invalidate_dash(cid)
     return {"ok": True, "approved": approved_info, "similar": similar, "rule_exists": rule_exists}
@@ -3447,6 +3463,7 @@ class BulkApproveRuleIn(BaseModel):
     category_account_id: str
     contact_id: Optional[str] = None
     contact_name: Optional[str] = None
+    match_text: Optional[str] = None  # no-contact flow: normalized description key for a merchant_contains rule
     create_rule: bool = True
 
 
@@ -3719,6 +3736,19 @@ async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict =
                 "category_account_id": acct["id"],
                 "source": "user_bulk_approve",
                 "created_at": now_iso(),
+            }
+            await db.rules.insert_one(rule)
+            rule_id = rule["id"]
+    elif inp.create_rule and inp.match_text:
+        key = inp.match_text.strip().lower()
+        existing = await db.rules.find_one({"company_id": cid, "match_type": "merchant_contains", "match_value": key})
+        if not existing and key:
+            rule = {
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "match_type": "merchant_contains", "match_value": key,
+                "contact_name": inp.contact_name or "",
+                "account_code": acct["code"], "account_name": acct["name"], "category_account_id": acct["id"],
+                "source": "user_bulk_approve", "created_at": now_iso(),
             }
             await db.rules.insert_one(rule)
             rule_id = rule["id"]

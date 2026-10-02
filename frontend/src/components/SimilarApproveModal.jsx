@@ -13,6 +13,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   const [ticked, setTicked] = useState(() => new Set(items.map(i => i.id)));
   const [busy, setBusy] = useState(false);
   const cat = similar.category_account_name || similar.category_account_code || "the same category";
+  const isDesc = similar.match_kind === "description";
 
   useEffect(() => { emitAction("bulk-approve-selection-changed", { ids: [...ticked], origin: "modal" }); }, [ticked]);
   useActionListener("bulk-approve-selection-changed", (p) => {
@@ -30,6 +31,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
       const res = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
         txn_ids: [...ticked], category_account_id: similar.category_account_id,
         contact_id: similar.contact_id, contact_name: similar.contact_name, create_rule: !!createRule,
+        match_text: similar.match_kind === "description" ? similar.match_value : null,
       });
       const n = res.data?.updated || 0;
       const msg = res.data?.rule_id
@@ -70,9 +72,9 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
       <div className="w-[min(680px,94vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-slate-100">
           <div>
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-fuchsia-700 font-semibold"><Sparkles size={12} /> Same vendor</div>
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-fuchsia-700 font-semibold"><Sparkles size={12} /> {isDesc ? "Similar description" : "Same vendor"}</div>
             <h3 className="text-base font-semibold text-slate-900 mt-0.5">
-              {similar.count} more unapproved from {similar.contact_name}
+              {similar.count} more unapproved {isDesc ? <>like <span className="text-slate-700">“{similar.contact_name}”</span></> : <>from {similar.contact_name}</>}
             </h3>
             <p className="text-[13px] text-slate-600 mt-0.5">Categorize the ticked rows as <b>{cat}</b> and approve them?</p>
           </div>
