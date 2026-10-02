@@ -254,12 +254,17 @@ function MonthlyTodos({ todos, onDismiss }) {
     setMode(next);
     try { localStorage.setItem("dashboard-todos-mode", next); } catch {}
   };
+  // Benchmark: ~15 minutes per 1,300 transactions with check → popup → sparkles.
+  const reviewMinutes = (n) => Math.max(1, Math.ceil((n * 15) / 1300));
+  const fmtMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim() : `~${m} min`);
   const aiSteps = aiMode ? [
     {
       title:    "AI Transaction Review",
-      subtitle: "Approve what the AI got right, hand anything off to the assistant",
-      count:    todoCount ?? "…",
-      unit:     "to review",
+      subtitle: todoCount == null
+        ? "Approve what the AI got right, hand anything off to the assistant"
+        : `${todoCount.toLocaleString()} transaction${todoCount === 1 ? "" : "s"} to review — approve what the AI got right, hand the rest to the assistant`,
+      count:    todoCount == null ? "…" : todoCount === 0 ? 0 : fmtMinutes(reviewMinutes(todoCount)),
+      unit:     "to finish",
       cta:      "/accounting/transactions?filter=unapproved",
       ctaLabel: "Open transactions",
       icon:     FileText,
