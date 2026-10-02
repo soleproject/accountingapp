@@ -62,34 +62,43 @@ function inferAccountTypeFromName(name) {
 // Recommendation card for the meaning-first resolver: one primary action
 // (use existing / create & categorize), optional "also N similar", up to
 // two alternative existing accounts, and an owner-draw escape hatch.
-function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClearSimilar }) {
+function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClearSimilar, onSweepSkip }) {
   const [busy, setBusy] = useState(false);
-  const { rec, similar, alternatives, direction, similarMode } = card;
+  const { rec, similar, alternatives, direction, similarMode, setContact } = card;
+  const [fixContact, setFixContact] = useState(true);
   const ticked = similarMode?.active ? (similarMode.ticked || []) : null;
   const a = rec.account;
   const isNew = rec.kind === "new";
-  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply(args); } finally { setBusy(false); } };
-  const primaryArgs = isNew ? { newAccount: a } : { accountId: a.id };
+  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply({ ...args, setContactName: setContact && fixContact ? setContact : null }); } finally { setBusy(false); } };
+  const sweep = !!card.sweep;
+  const primaryArgs = { ...(isNew ? { newAccount: a } : { accountId: a.id }), ...(sweep && ticked ? { txnIds: ticked } : {}) };
+  const nTicked = ticked ? ticked.length : 0;
   return (
     <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-2" data-testid="category-recommend-card">
       <div className="text-[12px] text-slate-700 flex flex-wrap gap-x-2 gap-y-0.5">
         <span className="font-semibold text-slate-900">{a.code || "new"} {a.name}</span>
         <span className="text-slate-500">· {[...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ")}</span>
         {a.parent_name && <span className="text-slate-500">· under {a.parent_name}</span>}
-        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? "new account" : "existing"}</span>
+        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? (rec.subaccount ? "new sub-account" : "new account") : "existing"}</span>
       </div>
+      {setContact && (
+        <label className="flex items-center gap-2 text-[12px] text-slate-700 cursor-pointer" data-testid="category-recommend-set-contact">
+          <input type="checkbox" checked={fixContact} onChange={e => setFixContact(e.target.checked)} />
+          Also set contact to <b>{setContact}</b>{card.txn?.contact_name ? <span className="text-slate-500">(currently {card.txn.contact_name})</span> : null}
+        </label>
+      )}
       <div className="flex flex-wrap gap-1.5">
         <button type="button" disabled={busy} onClick={() => run(primaryArgs)} data-testid="category-recommend-apply"
                 className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
-          {busy ? "Applying…" : isNew ? (rec.subaccount ? "Create sub-account & categorize" : "Create account & categorize") : "Use this"}
+          {busy ? "Applying…" : isNew ? (rec.subaccount ? "Create sub-account & categorize" : "Create account & categorize") : "Use this"}{sweep && nTicked ? ` (${nTicked} ticked)` : ""}
         </button>
-        {similar > 0 && (
+        {similar > 0 && !sweep && (
           <button type="button" disabled={busy || !!ticked} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
                   className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             Show {similar} similar
           </button>
         )}
-        {ticked && (
+        {ticked && !sweep && (
           <>
             <button type="button" disabled={busy || ticked.length === 0} onClick={() => run({ ...primaryArgs, txnIds: ticked })}
                     data-testid="category-recommend-apply-ticked"
@@ -105,7 +114,13 @@ function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClea
         {similar > 0 && (
           <button type="button" disabled={busy} onClick={() => run({ ...primaryArgs, withSimilar: true })} data-testid="category-recommend-apply-similar"
                   className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
-            Also {similar} similar + save rule
+            {sweep ? `Use for ${nTicked || similar + 1} + save rule` : `Also ${similar} similar + save rule`}
+          </button>
+        )}
+        {sweep && (
+          <button type="button" disabled={busy} onClick={() => onSweepSkip?.()} data-testid="category-recommend-sweep-skip"
+                  className="text-[12px] px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+            Skip vendor
           </button>
         )}
         <button type="button" disabled={busy} onClick={onDismiss} data-testid="category-recommend-dismiss"
@@ -246,31 +261,30 @@ function SplitHintForm({ hint, onApply, onDismiss }) {
 // Interactive confirmation card shown in the chat stream after a user
 // approves a transaction that has other unapproved siblings from the same
 // contact. Yes → bulk-approve + rule; No → dismiss.
-function BulkApproveCard({ similar, createRule, currentId, onDone, onDismiss }) {
+function BulkApproveCard({ similar, createRule, ruleExists, ticked, currentId, onDone, onDismiss }) {
   const [busy, setBusy] = useState(false);
   const [handled, setHandled] = useState(false);
   const catName = similar.category_account_name || similar.category_account_code || "the same category";
+  const ids = ticked || null;
+  const n = ids ? ids.length : similar.count;
 
-  const applyBulk = async () => {
+  const applyBulk = async (withRule = createRule) => {
     if (busy || handled) return;
     setBusy(true);
     try {
-      // Fetch every unapproved txn for this contact — the sample in `similar`
-      // caps at 5 for chat display, so ask the server for the full list.
-      const r = await api.get(
-        `/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`
-      );
-      const ids = (r.data.transactions || [])
-        .filter((t) => !t.human_reviewed)
-        .map((t) => t.id);
+      let txnIds = ids;
+      if (!txnIds) {
+        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`);
+        txnIds = (r.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+      }
       const res = await api.post(
         `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
         {
-          txn_ids: ids,
+          txn_ids: txnIds,
           category_account_id: similar.category_account_id,
           contact_id: similar.contact_id,
           contact_name: similar.contact_name,
-          create_rule: !!createRule,
+          create_rule: !!withRule,
         }
       );
       const updated = res.data?.updated || 0;
@@ -300,21 +314,30 @@ function BulkApproveCard({ similar, createRule, currentId, onDone, onDismiss }) 
       className="mt-2 rounded-md border border-fuchsia-200 bg-fuchsia-50/60 px-3 py-2 text-[13px]"
     >
       <div className="text-fuchsia-900 mb-2">
-        <span className="font-semibold">{similar.count}</span> other{" "}
+        <span className="font-semibold">{n}</span>{ids && ids.length !== similar.count ? ` of ${similar.count}` : " other"}{" "}
         <span className="font-semibold">{similar.contact_name}</span>{" "}
-        transaction{similar.count === 1 ? "" : "s"} → categorize as{" "}
-        <span className="font-semibold">{catName}</span> and approve
-        {createRule ? " + create a rule" : ""}?
+        transaction{n === 1 ? "" : "s"} → categorize as{" "}
+        <span className="font-semibold">{catName}</span> and approve?
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           data-testid="bulk-approve-yes"
-          disabled={busy || handled}
-          onClick={applyBulk}
+          disabled={busy || handled || n === 0}
+          onClick={() => applyBulk(false)}
           className="px-3 py-1 text-xs font-medium rounded bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50"
         >
-          {busy ? "Applying…" : "Yes, do it"}
+          {busy ? "Applying…" : `Yes, approve ${n}`}
         </button>
+        {!ruleExists && (
+          <button
+            data-testid="bulk-approve-yes-rule"
+            disabled={busy || handled || n === 0}
+            onClick={() => applyBulk(true)}
+            className="px-3 py-1 text-xs font-medium rounded border border-fuchsia-300 bg-white text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50"
+          >
+            Approve {n} + create rule
+          </button>
+        )}
         <button
           data-testid="bulk-approve-no"
           disabled={busy || handled}
@@ -850,12 +873,39 @@ export default function AiPanel({ collapsed, onToggle }) {
   // while the similar view is active, and tells us when it's been cleared.
   useActionListener("similar-selection-changed", (payload) => {
     const ids = payload?.ids || [];
+    lastSimilarSelectionRef.current = ids;
     setMessages(m => m.map(mm => mm.card?.similarMode?.active
       ? { ...mm, card: { ...mm.card, similarMode: { active: true, ticked: ids } } } : mm));
   });
   useActionListener("similar-view-cleared", () => {
     setMessages(m => m.map(mm => mm.card?.similarMode?.active
       ? { ...mm, card: { ...mm.card, similarMode: null } } : mm));
+  });
+
+  // Row approve → same-vendor bulk prompt. Mirrors the SimilarApproveModal
+  // on the Transactions page: ticks sync both ways, either side applies.
+  useActionListener("ai-bulk-approve-prompt", (payload) => {
+    const { similar, rule_exists, ids } = payload || {};
+    if (!similar?.count) return;
+    const catName = similar.category_account_name || similar.category_account_code || "the same category";
+    const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} **${similar.count}** other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Categorize the ticked ones as **${catName}** and approve them? Say **yes**${rule_exists ? "" : ", or **yes, and make a rule** so future imports land there automatically"}.`;
+    pendingIntentRef.current = { kind: "bulk-approve-contact", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null };
+    setMessages(m => [...m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm),
+      { role: "assistant", content: prompt, card: { kind: "bulk-approve-confirm", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null } }]);
+    stopTtsNow();
+    if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
+  });
+  useActionListener("bulk-approve-selection-changed", (p) => {
+    if (p?.origin === "chat" || !Array.isArray(p?.ids)) return;
+    if (pendingIntentRef.current?.kind === "bulk-approve-contact") pendingIntentRef.current.ticked = p.ids;
+    setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: { ...mm.card, ticked: p.ids } } : mm));
+  });
+  useActionListener("bulk-approve-done", (p) => {
+    if (p?.origin === "chat") return;
+    if (pendingIntentRef.current?.kind === "bulk-approve-contact") pendingIntentRef.current = null;
+    const msg = p?.declined ? "OK — just the one approved." : (p?.msg || "Done.");
+    setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm).concat([{ role: "assistant", content: msg }]));
+    if (voiceOnRef.current) speakOne(msg);
   });
 
   // Same as `ai-chat-say` but attaches a clickable CTA to the bubble
@@ -1675,10 +1725,10 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
     else navigate("/accounting/transactions");
   };
-  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds }) => {
+  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds, setContactName }) => {
     try {
       let ids = txnIds || (card.txnId ? [card.txnId] : []);
-      if (withSimilar && card.txn) {
+      if (withSimilar && card.txn && !txnIds) {
         const q = card.txn.contact_id ? `contact_id=${card.txn.contact_id}` : `q=${encodeURIComponent(card.txn.merchant || "")}`;
         const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
         ids = [...new Set([...ids, ...(r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id)])];
@@ -1686,25 +1736,93 @@ export default function AiPanel({ collapsed, onToggle }) {
       const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
         txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
         create_rule: !!withSimilar && !!card.txn?.contact_id, contact_id: card.txn?.contact_id || null,
+        set_contact_name: setContactName || null,
       });
       const acct = res.data.account;
-      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
+      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.contact ? ` · contact set to **${res.data.contact.name}**` : ""}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
       setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
       if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
       if (card.similarMode?.active) emitAction("similar-clear");
       emitAction("txns:changed");
       if (card.txnId && inquiryTxnRef.current === card.txnId) resolveInquiry();
+      if (sweepRef.current) sweepAdvance("done", res.data.updated || 0);
     } catch {
       setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
     }
   };
+  const runBulkApprove = async (i, card, withRule) => {
+    const sim = card.similar;
+    try {
+      let ids = card.ticked;
+      if (!ids) {
+        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`);
+        ids = (r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id);
+      }
+      const res = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
+        txn_ids: ids, category_account_id: sim.category_account_id, contact_id: sim.contact_id,
+        contact_name: sim.contact_name, create_rule: !!withRule,
+      });
+      const n = res.data?.updated || 0;
+      const msg = res.data?.rule_id ? `Approved ${n} transaction${n === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.` : `Approved ${n} transaction${n === 1 ? "" : "s"}.`;
+      pendingIntentRef.current = null;
+      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: msg }]));
+      if (voiceOnRef.current) speakOne(msg);
+      emitAction("bulk-approve-done", { msg, origin: "chat" });
+      emitAction("txns:changed");
+    } catch {
+      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — bulk approval failed." }]);
+    }
+  };
+  const declineBulkApprove = (i) => {
+    pendingIntentRef.current = null;
+    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: "OK — just the one approved." }]));
+    if (voiceOnRef.current) speakOne("OK, just the one approved.");
+    emitAction("bulk-approve-done", { origin: "chat", declined: true });
+  };
   // Voice/text → card button. The LLM picks which visible button the
   // utterance means (or none → normal chat flow). Returns true if handled.
+  const SWEEP_ACTIONS = [
+    { id: "sweep_skip", label: "Skip", hint: "skip this vendor for now and move to the next uncategorized one" },
+    { id: "sweep_stop", label: "Stop", hint: "stop the uncategorized sweep entirely" },
+  ];
+  const runSweepAction = (id, userMsg) => {
+    setMessages(m => [...m, { role: "user", content: userMsg }]);
+    if (id === "sweep_skip") sweepAdvance("skip");
+    else endSweep("stopped");
+  };
   const routeToCategoryCard = async (userMsg) => {
     const msgs = messagesRef.current;
-    const i = msgs.map(mm => mm.card?.kind === "category-recommend").lastIndexOf(true);
-    if (i < 0) return false;
+    const i = msgs.map(mm => ["category-recommend", "bulk-approve-confirm"].includes(mm.card?.kind)).lastIndexOf(true);
+    if (i < 0) {
+      if (!sweepRef.current) return false;
+      try {
+        const { data } = await api.post(`/companies/${currentId}/ai/card-intent`, { message: userMsg, actions: SWEEP_ACTIONS });
+        if (data?.action_id && (data.confidence ?? 0) >= 0.6) { runSweepAction(data.action_id, userMsg); return true; }
+      } catch { /* fall through */ }
+      return false;
+    }
     const card = msgs[i].card;
+    const sweepExtra = sweepRef.current ? SWEEP_ACTIONS : [];
+    if (card.kind === "bulk-approve-confirm") {
+      const n = card.ticked ? card.ticked.length : card.similar.count;
+      const actions = [
+        { id: "approve_ticked", label: `Yes, approve ${n}`, hint: `categorize the ${n} ticked ${card.similar.contact_name} rows the same way and approve them, no rule` },
+        ...(card.rule_exists ? [] : [{ id: "approve_ticked_rule", label: `Approve ${n} + create rule`, hint: "same, AND create a rule so future imports from this vendor land there automatically" }]),
+        { id: "decline", label: "No, thanks", hint: "leave the others alone, only the one already approved" },
+        ...sweepExtra,
+      ];
+      let pick = null;
+      try {
+        const { data } = await api.post(`/companies/${currentId}/ai/card-intent`, { message: userMsg, actions });
+        if (data?.action_id && (data.confidence ?? 0) >= 0.6) pick = actions.find(x => x.id === data.action_id) || null;
+      } catch { return false; }
+      if (!pick) return false;
+      if (pick.id.startsWith("sweep_")) { runSweepAction(pick.id, userMsg); return true; }
+      setMessages(m => [...m, { role: "user", content: userMsg }]);
+      if (pick.id === "decline") declineBulkApprove(i);
+      else await runBulkApprove(i, card, pick.id === "approve_ticked_rule");
+      return true;
+    }
     const a = card.rec.account;
     const isNew = card.rec.kind === "new";
     const ticked = card.similarMode?.active ? (card.similarMode.ticked || []) : null;
@@ -1717,6 +1835,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       { id: "not_this", label: "Not this", hint: "dismiss / reject the recommendation" },
       ...(card.alternatives || []).map(alt => ({ id: `alt:${alt.id}`, label: `${alt.code} ${alt.name}`, hint: `use alternative account ${alt.name} instead` })),
       ...(card.direction === "money_out" && !/owner/i.test(a.name) ? [{ id: "owner_draw", label: "Not a business expense (Owner's Draw)", hint: "personal spending, book to Owner's Draw" }] : []),
+      ...sweepExtra,
     ];
     let pick = null;
     try {
@@ -1724,8 +1843,9 @@ export default function AiPanel({ collapsed, onToggle }) {
       if (data?.action_id && (data.confidence ?? 0) >= 0.6) pick = actions.find(x => x.id === data.action_id) || null;
     } catch { return false; }
     if (!pick) return false;
+    if (pick.id.startsWith("sweep_")) { dismissCard(i); runSweepAction(pick.id, userMsg); return true; }
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: `On it — **${pick.label}**.` }]);
-    const primary = isNew ? { newAccount: a } : { accountId: a.id };
+    const primary = { ...(isNew ? { newAccount: a } : { accountId: a.id }), setContactName: card.setContact || null };
     if (pick.id === "use_this") await applyCategoryCard(i, card, primary);
     else if (pick.id === "show_similar") showSimilarForCard(i, card);
     else if (pick.id === "apply_similar_rule") await applyCategoryCard(i, card, { ...primary, withSimilar: true });
@@ -1736,6 +1856,69 @@ export default function AiPanel({ collapsed, onToggle }) {
     else if (pick.id.startsWith("alt:")) await applyCategoryCard(i, card, { accountId: pick.id.slice(4) });
     return true;
   };
+
+  // ---- Uncategorized Sweep: one group (vendor) at a time ----
+  // Reuses the pinned-txn → recommendCategory → applyCategoryCard flow; the
+  // Transactions page shows the group's rows pre-ticked via show-similar-txns.
+  const sweepRef = useRef(null); // { groups, idx, done, doneTxns, skipped }
+  const lastSimilarSelectionRef = useRef(null);
+  const fmtMoney = (n) => Math.abs(n).toLocaleString("en-US", { style: "currency", currency: "USD" });
+  const endSweep = (reason) => {
+    const s = sweepRef.current;
+    sweepRef.current = null;
+    emitAction("similar-clear");
+    resolveInquiry();
+    if (!s) return;
+    const say = reason === "empty"
+      ? "Nothing left in Uncategorized — you're all caught up."
+      : `Sweep ${reason === "stopped" ? "stopped" : "complete"} — categorized **${s.done}** group${s.done === 1 ? "" : "s"} (${s.doneTxns} transaction${s.doneTxns === 1 ? "" : "s"})${s.skipped ? `, skipped **${s.skipped}**` : ""}${reason === "stopped" && s.idx < s.groups.length ? `, ${s.groups.length - s.idx} left for later` : ""}.`;
+    setMessages(m => [...m, { role: "assistant", content: say }]);
+    if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+  };
+  const sweepStep = () => {
+    const s = sweepRef.current;
+    if (!s) return;
+    if (s.idx >= s.groups.length) return endSweep("done");
+    const g = s.groups[s.idx];
+    const dir = g.money_in && g.money_out ? "mixed in/out" : g.money_in ? "in" : "out";
+    const when = g.first_date === g.last_date ? g.last_date : `${g.first_date} → ${g.last_date}`;
+    const say = `**${s.idx + 1} of ${s.groups.length}** · **${g.label}** — ${g.count} uncategorized, ${fmtMoney(g.total)} ${dir} (${when}). What ${g.count === 1 ? "was this" : "were these"} for? Describe it, or say **skip** / **stop**.`;
+    inquiryTxnRef.current = g.sample.id;
+    setFocus({ id: g.sample.id, merchant: g.sample.merchant, amount: g.sample.amount, date: g.sample.date }, { pin: true });
+    const payload = { ids: g.ids, label: g.label, count: Math.max(0, g.count - 1), returnTo: "/accounting/transactions" };
+    lastSimilarSelectionRef.current = g.ids;
+    sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
+    if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
+    else navigate("/accounting/transactions");
+    setMessages(m => [...m, { role: "assistant", content: say }]);
+    if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+    setTimeout(() => setMicMode("open"), 250);
+  };
+  const sweepAdvance = (how, txns = 0) => {
+    const s = sweepRef.current;
+    if (!s) return;
+    if (how === "done") { s.done += 1; s.doneTxns += txns; } else if (how === "skip") { s.skipped += 1; }
+    s.idx += 1;
+    emitAction("similar-clear");
+    setTimeout(sweepStep, 450);
+  };
+  const startSweep = async () => {
+    try {
+      const { data } = await api.get(`/companies/${currentId}/ai/uncategorized-sweep`);
+      const groups = data.groups || [];
+      if (!groups.length) { sweepRef.current = { groups: [], idx: 0, done: 0, doneTxns: 0, skipped: 0 }; return endSweep("empty"); }
+      sweepRef.current = { groups, idx: 0, done: 0, doneTxns: 0, skipped: 0 };
+      const intro = `Let's clear Uncategorized — **${data.total_transactions}** transaction${data.total_transactions === 1 ? "" : "s"} across **${groups.length}** vendor${groups.length === 1 ? "" : "s"}. I'll take them one vendor at a time; answer in your own words and I'll categorize the ticked rows.`;
+      setMessages(m => [...m, { role: "assistant", content: intro }]);
+      if (voiceOnRef.current) speakOne(intro.replace(/\*\*/g, ""));
+      setTimeout(sweepStep, 300);
+    } catch {
+      setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't load the uncategorized list." }]);
+    }
+  };
+  const startSweepRef = useRef(startSweep);
+  startSweepRef.current = startSweep;
+  useActionListener("uncat-sweep-start", () => { if (!sweepRef.current) startSweepRef.current(); });
 
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
@@ -1926,7 +2109,8 @@ export default function AiPanel({ collapsed, onToggle }) {
           role: "assistant", content: say,
           card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,
                   similar: data.similar_count || 0, similarIds: data.similar_ids || [], similarLabel: data.similar_label || data.txn?.merchant || "",
-                  alternatives: data.alternatives || [], direction: data.direction },
+                  alternatives: data.alternatives || [], direction: data.direction, setContact: data.set_contact || null, partyName: data.party_name || null,
+                  sweep: !!sweepRef.current, similarMode: sweepRef.current ? { active: true, ticked: lastSimilarSelectionRef.current || [] } : null },
         }]);
         if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
         return true;
@@ -2338,12 +2522,13 @@ export default function AiPanel({ collapsed, onToggle }) {
         try {
           const sim = p.similar;
           // Fetch every unapproved txn for this contact — sample caps at 5.
-          const full = await api.get(
-            `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
-          );
-          const ids = (full.data.transactions || [])
-            .filter((t) => !t.human_reviewed)
-            .map((t) => t.id);
+          let ids = p.ticked || null;
+          if (!ids) {
+            const full = await api.get(
+              `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
+            );
+            ids = (full.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+          }
           const res = await api.post(
             `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
             {
@@ -2359,8 +2544,9 @@ export default function AiPanel({ collapsed, onToggle }) {
           const reply = ruleId
             ? `Approved ${updated} transaction${updated === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.`
             : `Approved ${updated} transaction${updated === 1 ? "" : "s"}.`;
-          setMessages(m => [...m, { role: "assistant", content: reply }]);
+          setMessages(m => m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm).concat([{ role: "assistant", content: reply }]));
           if (voiceOnRef.current) speakOne(reply);
+          emitAction("bulk-approve-done", { msg: reply, origin: "chat" });
           emitAction("txns:changed");
         } catch (e) {
           setMessages(m => [...m, { role: "assistant", content: "Sorry — bulk approval failed." }]);
@@ -2753,20 +2939,27 @@ export default function AiPanel({ collapsed, onToggle }) {
           }
           const catName = similar.category_account_name || similar.category_account_code || "the same category";
           const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} ${similar.count} other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Would you like me to categorize them all as **${catName}** and approve them${rule_exists ? "" : ", and create a rule for this contact"}?`;
+          const tickedIds = (similar.items || []).map(x => x.id);
           pendingIntentRef.current = {
             kind: "bulk-approve-contact",
             similar,
-            create_rule: !rule_exists,
+            create_rule: false,
+            rule_exists: !!rule_exists,
+            ticked: tickedIds,
           };
           setMessages(m => [...m, {
             role: "assistant",
             content: prompt,
-            card: { kind: "bulk-approve-confirm", similar, create_rule: !rule_exists },
+            card: { kind: "bulk-approve-confirm", similar, create_rule: false, rule_exists: !!rule_exists, ticked: tickedIds },
           }]);
+          emitAction("open-similar-approve-modal", { similar, rule_exists: !!rule_exists });
           if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
           emitAction("txns:changed");
         } catch (e) {
-          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't approve that transaction." }]);
+          const detail = e?.response?.data?.detail;
+          const say = detail ? `${detail} Tell me what it was and I'll categorize it.` : "Sorry — I couldn't approve that transaction.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
         }
         return;
       }
@@ -3823,17 +4016,21 @@ export default function AiPanel({ collapsed, onToggle }) {
               <BulkApproveCard
                 similar={m.card.similar}
                 createRule={m.card.create_rule}
+                ruleExists={m.card.rule_exists}
+                ticked={m.card.ticked || null}
                 currentId={currentId}
                 onDone={(msg) => {
                   pendingIntentRef.current = null;
-                  setMessages(mm => [...mm, { role: "assistant", content: msg }]);
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: msg }]));
                   if (voiceOnRef.current) speakOne(msg);
+                  emitAction("bulk-approve-done", { msg, origin: "chat" });
                   emitAction("txns:changed");
                 }}
                 onDismiss={() => {
                   pendingIntentRef.current = null;
-                  setMessages(mm => [...mm, { role: "assistant", content: "OK — just the one approved." }]);
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: "OK — just the one approved." }]));
                   if (voiceOnRef.current) speakOne("OK, just the one approved.");
+                  emitAction("bulk-approve-done", { origin: "chat", declined: true });
                 }}
               />
             )}
@@ -3864,6 +4061,7 @@ export default function AiPanel({ collapsed, onToggle }) {
                 card={m.card}
                 onShowSimilar={(card) => showSimilarForCard(i, card)}
                 onClearSimilar={() => emitAction("similar-clear")}
+                onSweepSkip={() => { dismissCard(i); sweepAdvance("skip"); }}
                 onApply={(args) => applyCategoryCard(i, m.card, args)}
                 onDismiss={() => dismissCard(i)}
               />

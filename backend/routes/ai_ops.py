@@ -142,11 +142,45 @@ class ApplyCategoryIn(BaseModel):
     new_account: Optional[dict] = None
     create_rule: bool = False
     contact_id: Optional[str] = None
+    set_contact_name: Optional[str] = None  # re-point the rows' contact to the real counterparty
 
 
 class CardIntentIn(BaseModel):
     message: str
     actions: List[dict]
+
+
+_UNCAT_CODES = {"9999", "6999", "4999"}
+
+
+@router.get("/companies/{cid}/ai/uncategorized-sweep")
+async def ai_uncategorized_sweep(cid: str, user: dict = Depends(get_current_user)):
+    """Unreviewed rows still in Uncategorized (or with no category), grouped
+    by contact (fallback: merchant) so one answer can cover a whole vendor."""
+    await require_company(user, cid)
+    q = {"company_id": cid, "human_reviewed": {"$ne": True},
+         "$or": [{"category_account_id": {"$in": [None, ""]}}, {"category_account_code": {"$in": list(_UNCAT_CODES)}},
+                 {"category_account_name": {"$regex": "uncategorized", "$options": "i"}}]}
+    rows = await db.transactions.find(q, {"_id": 0, "id": 1, "date": 1, "merchant": 1, "description": 1, "amount": 1,
+                                          "contact_id": 1, "contact_name": 1}).sort("date", -1).to_list(3000)
+    groups: dict[str, dict] = {}
+    for r in rows:
+        key = r.get("contact_id") or f"m:{(r.get('merchant') or r.get('description') or '').strip().lower()[:60]}"
+        g = groups.setdefault(key, {"key": key, "contact_id": r.get("contact_id"),
+                                    "label": r.get("contact_name") or r.get("merchant") or r.get("description") or "Unknown",
+                                    "count": 0, "total": 0.0, "money_in": 0, "money_out": 0, "ids": [], "sample": None,
+                                    "first_date": r.get("date"), "last_date": r.get("date")})
+        g["count"] += 1
+        g["total"] = round(g["total"] + float(r.get("amount") or 0), 2)
+        g["money_in" if float(r.get("amount") or 0) > 0 else "money_out"] += 1
+        g["ids"].append(r["id"])
+        g["first_date"] = min(g["first_date"] or r.get("date"), r.get("date") or g["first_date"])
+        g["last_date"] = max(g["last_date"] or r.get("date"), r.get("date") or g["last_date"])
+        if g["sample"] is None:
+            g["sample"] = {"id": r["id"], "merchant": r.get("merchant") or r.get("description"), "description": r.get("description"),
+                           "amount": r.get("amount"), "date": r.get("date"), "contact_name": r.get("contact_name")}
+    out = sorted(groups.values(), key=lambda g: (-g["count"], -abs(g["total"])))
+    return {"total_transactions": len(rows), "groups": out}
 
 
 @router.post("/companies/{cid}/ai/card-intent")
@@ -179,14 +213,20 @@ async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict =
     docs = await db.transactions.find({"id": {"$in": inp.txn_ids[:3000]}, "company_id": cid}).to_list(3000)
     ids = [d["id"] for d in docs if not await is_period_closed(cid, d.get("date"))]
     updated = 0
+    contact = None
+    if inp.set_contact_name and inp.set_contact_name.strip():
+        from contact_resolver import get_or_create_contact
+        contact = await get_or_create_contact(cid, inp.set_contact_name.strip(), source="ai_panel_resolver")
     if ids:
-        res = await db.transactions.update_many(
-            {"id": {"$in": ids}, "company_id": cid},
-            {"$set": {"category_account_id": acct["id"], "category_account_code": acct.get("code"),
-                      "category_account_name": acct.get("name"), "human_reviewed": True, "needs_review": False,
-                      "posted": True, "ai_confidence": 1.0, "updated_at": now_iso()}},
-        )
+        fields = {"category_account_id": acct["id"], "category_account_code": acct.get("code"),
+                  "category_account_name": acct.get("name"), "human_reviewed": True, "needs_review": False,
+                  "posted": True, "ai_confidence": 1.0, "updated_at": now_iso()}
+        if contact:
+            fields.update({"contact_id": contact["id"], "contact_name": contact.get("name"), "contact_source": "user"})
+        res = await db.transactions.update_many({"id": {"$in": ids}, "company_id": cid}, {"$set": fields})
         updated = res.modified_count
+    if contact:
+        inp.contact_id = contact["id"]
     rule_id = None
     if inp.create_rule and inp.contact_id:
         existing = await db.rules.find_one({"company_id": cid, "match_type": "contact_id", "match_value": inp.contact_id})
@@ -200,7 +240,7 @@ async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict =
                                        "created_via": "ai_panel_resolver", "created_at": now_iso(), "updated_at": now_iso()})
     return {"ok": True, "updated": updated, "skipped_closed": len(docs) - len(ids), "created_account": created,
             "account": {"id": acct["id"], "code": acct.get("code"), "name": acct.get("name"), "type": acct.get("type")},
-            "rule_id": rule_id}
+            "rule_id": rule_id, "contact": ({"id": contact["id"], "name": contact.get("name")} if contact else None)}
 
 
 @router.post("/companies/{cid}/ai/cpa-review")

@@ -23,6 +23,7 @@ import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
 import BulkUpdateModal from "@/components/BulkUpdateModal";
+import { SimilarApproveModal } from "@/components/SimilarApproveModal";
 import { CreateRuleModal } from "@/pages/Rules";
 import CleanupCopilot, { NextStepCard } from "@/components/CleanupCopilot";
 import AccountPicker from "@/components/AccountPicker";
@@ -39,6 +40,10 @@ import { useNoContactReviewNav, NoContactReviewListToggle, ListModeView } from "
 import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import { useAuth } from "@/lib/auth";
+
+const UNCAT_CODES = new Set(["9999", "6999", "4999"]);
+const isUncategorizedTxn = (t) =>
+  !t?.category_account_id || UNCAT_CODES.has(String(t.category_account_code || "")) || /uncategorized/i.test(t?.category_account_name || "");
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
@@ -492,13 +497,15 @@ function NarrowTxnCardList({
             />
             <div className="flex items-center gap-1 shrink-0">
               <button
-                title={t.human_reviewed ? "Unapprove" : "Approve"}
+                title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                 data-testid={TID.txnApprove}
                 onClick={() => toggleApprove(t)}
                 className={
                   t.human_reviewed
                     ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                    : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                    : isUncategorizedTxn(t)
+                      ? "p-1 rounded text-slate-300 hover:bg-slate-100 cursor-not-allowed"
+                      : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
                 }
               >
                 <Check size={14} />
@@ -1464,6 +1471,11 @@ export default function Transactions() {
   useEffect(() => { applySimilarRef.current = applySimilarView; clearSimilarRef.current = clearSimilarView; });
   useActionListener("show-similar-txns", (p) => applySimilarRef.current(p));
   useActionListener("similar-clear", () => clearSimilarRef.current());
+  // Voice "yes" on a focused row (AiPanel) approved it and found same-vendor
+  // siblings — show the same modal the checkmark click shows.
+  useActionListener("open-similar-approve-modal", (p) => {
+    if (p?.similar?.count) setSimilarApprove({ similar: p.similar, ruleExists: !!p.rule_exists });
+  });
   useEffect(() => {
     if (!similarView) return;
     emitAction("similar-selection-changed", { ids: [...selected] });
@@ -2206,14 +2218,35 @@ export default function Transactions() {
   };
 
   const approve = async (id) => {
-    await api.post(`/companies/${currentId}/transactions/${id}/approve`);
+    let r;
+    try {
+      r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't approve that transaction.");
+      return;
+    }
     load();
+    const { similar, rule_exists } = r.data || {};
+    if (similar?.count) {
+      setSimilarApprove({ similar, ruleExists: !!rule_exists });
+      emitAction("ai-bulk-approve-prompt", { similar, rule_exists: !!rule_exists, ids: (similar.items || []).map(i => i.id) });
+      emitAction("ai-open");
+    }
   };
   const unapprove = async (id) => {
     await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
     load();
   };
-  const toggleApprove = (t) => (t.human_reviewed ? unapprove(t.id) : approve(t.id));
+  const toggleApprove = (t) => {
+    if (t.human_reviewed) return unapprove(t.id);
+    if (isUncategorizedTxn(t)) {
+      toast.error("Pick a category first — Uncategorized Expense/Income can't be approved.");
+      emitAction("ai-tell-me-about", { txn: t });
+      emitAction("ai-open");
+      return;
+    }
+    return approve(t.id);
+  };
   const recategorize = async (id) => {
     setBusy(true);
     await api.post(`/companies/${currentId}/ai/recategorize/${id}`);
@@ -2231,6 +2264,7 @@ export default function Transactions() {
 
   const [xferBusy, setXferBusy] = useState(false);
   const [xferPreview, setXferPreview] = useState(null);
+  const [similarApprove, setSimilarApprove] = useState(null); // { similar, ruleExists }
   const detectTransfers = async () => {
     if (xferBusy || !currentId) return;
     setXferBusy(true);
@@ -2555,6 +2589,17 @@ export default function Transactions() {
                 </button>
               ))}
             </div>
+          )}
+          {!isReviewMode && (
+            <button
+              type="button"
+              data-testid="uncat-sweep-btn"
+              onClick={() => { emitAction("ai-open"); emitAction("uncat-sweep-start"); }}
+              title="Walk through every uncategorized transaction with the assistant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 text-xs font-medium hover:bg-fuchsia-100"
+            >
+              <Sparkles size={13} /> Sweep uncategorized
+            </button>
           )}
           {!isReviewMode && (
             <NewTransactionMenu
@@ -2907,24 +2952,25 @@ export default function Transactions() {
       )}
 
       {selected.size > 0 && (
-        <div className="rounded-md border bg-slate-900 text-white px-4 py-2.5 flex items-center gap-3 flex-wrap">          <span className="text-sm font-medium">{selected.size} selected</span>
+        <div data-testid="txn-bulk-bar" className="rounded-md border border-indigo-200 bg-indigo-50 text-indigo-950 px-4 py-2.5 flex items-center gap-3 flex-wrap">
+          <span className="text-sm font-semibold">{selected.size} selected</span>
           <button data-testid={TID.txnBulkApprove} disabled={busy} onClick={bulkApprove}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white text-slate-900 text-xs font-medium">
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 disabled:opacity-50">
             <Check size={12} /> Approve all
           </button>
           <button
             data-testid="txn-bulk-update"
             disabled={busy}
             onClick={() => setBulkUpdateOpen(true)}
-            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-sky-500 text-white text-xs font-medium hover:bg-sky-400"
+            className="inline-flex items-center gap-1 px-3 py-1 rounded bg-white border border-indigo-300 text-indigo-800 text-xs font-medium hover:bg-indigo-100 disabled:opacity-50"
           >
             <SlidersHorizontal size={12} /> Bulk update
           </button>
           <button data-testid={TID.txnBulkCreateRules} disabled={busy} onClick={bulkCreateRules}
-                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-500 text-xs font-medium">
+                  className="inline-flex items-center gap-1 px-3 py-1 rounded bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
             <Wand2 size={12} /> Make these rules
           </button>
-          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs opacity-70 hover:opacity-100">Clear</button>
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-indigo-700 hover:text-indigo-950 hover:underline">Clear</button>
         </div>
       )}
 
@@ -3161,13 +3207,15 @@ export default function Transactions() {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
                     <button
-                      title={t.human_reviewed ? "Unapprove" : "Approve"}
+                      title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                       data-testid={TID.txnApprove}
                       onClick={() => toggleApprove(t)}
                       className={
                         t.human_reviewed
                           ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                          : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                          : isUncategorizedTxn(t)
+                            ? "p-1 rounded text-slate-300 hover:bg-slate-100 cursor-not-allowed"
+                            : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
                       }
                     >
                       <Check size={14} />
@@ -3345,6 +3393,10 @@ export default function Transactions() {
       {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} onOpenMultiLink={() => setLinking(editing)} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
+      {similarApprove && (
+        <SimilarApproveModal currentId={currentId} similar={similarApprove.similar} ruleExists={similarApprove.ruleExists}
+                             onClose={() => setSimilarApprove(null)} />
+      )}
       {xferPreview && (
         <Modal title={`Found ${xferPreview.length} internal-transfer pair${xferPreview.length === 1 ? "" : "s"}`}
                onClose={() => setXferPreview(null)}>

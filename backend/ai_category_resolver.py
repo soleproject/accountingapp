@@ -118,7 +118,11 @@ _RESOLVER_SYSTEM = (
     "• Balance-sheet accounts that track a balance owed to or by ONE specific party — loans payable/receivable, notes, "
     "credit cards, lines of credit, due to/from owner or affiliates, customer/vendor deposits held — are tracked per "
     "party: pick the GENERIC parent account (e.g. 'Loans Payable', not a sibling like 'SoFi' that belongs to another "
-    "lender) and set counterparty_subaccount=true; the system books it to a sub-account named after the party. "
+    "lender) and set counterparty_subaccount=true, and name the PARTY in `party_name`. The party is the person or "
+    "business the money is owed to/by — take it from the user's words first ('a loan from Mark Robinson' → 'Mark Robinson'), "
+    "else from the transaction's contact or memo. The bank, card network or payment app the money moved THROUGH "
+    "(the business's own bank, Zelle, Venmo, PayPal, ACH, wire) is NOT the party — if that is all you can see, set "
+    "party_name=null and the system will ask. Use the person's proper name as written, no titles or extra words. "
     "Fixed assets, bank accounts, tax payables, clearing/transfer accounts are NOT per-party: counterparty_subaccount=false.\n"
     "• LOANS are direction-specific. Money OUT described as 'a loan' (no mention of paying back) means the business LENT "
     "money → asset 'Loans Receivable' (library key loans_receivable), per-borrower sub-account. Money OUT described as "
@@ -138,7 +142,7 @@ _RESOLVER_SYSTEM = (
     "Return strict JSON: {\"existing_account_id\": <id or null>, \"semantic\": <library key or null>, "
     "\"new_account\": {\"name\",\"code\",\"type\",\"subtype\",\"detail_type\",\"parent_account_id\"} or null, "
     "\"why\": str, \"ask\": str or null, \"confidence\": 0-1, \"alternatives\": [<up to 2 existing ids>], "
-    "\"not_business\": bool, \"counterparty_subaccount\": bool}"
+    "\"not_business\": bool, \"counterparty_subaccount\": bool, \"party_name\": str or null}"
 )
 
 _DEDUPE_SYSTEM = (
@@ -221,10 +225,10 @@ async def _llm_dedupe(proposal: dict, accounts: list[dict], direction: str, mess
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def _counterparty_subaccount(parent: dict, accounts: list[dict], txn: dict | None) -> dict | None:
+def _counterparty_subaccount(parent: dict, accounts: list[dict], party: str | None) -> dict | None:
     """For per-party balance-sheet accounts: reuse the child named after the
     counterparty under `parent`, else propose creating it."""
-    name = ((txn or {}).get("contact_name") or _clean_memo((txn or {}).get("merchant") or "") or "").strip()
+    name = (party or "").strip()
     if not name or parent.get("type") not in ("asset", "liability") or parent.get("parent_account_id"):
         return None
     want = _norm_name(name)
@@ -273,16 +277,32 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
             if a and direction_ok(a.get("type"), direction, message)][:2]
     not_business = bool(data.get("not_business")) or data.get("semantic") == "owner_draw"
 
+    per_party = bool(data.get("counterparty_subaccount"))
+    party = (str(data.get("party_name") or "").strip() or None) if per_party else None
+    if per_party and not party:
+        # Per-party account but only the bank/channel is visible → ask who.
+        return {**base, "recommendation": None, "alternatives": alts, "not_business": not_business,
+                "ask": data.get("ask") or f"Who is the other party on this {'loan' if 'loan' in message.lower() else 'balance'} — a person or business name? I'll track it in its own sub-account."}
+    set_contact = None
+    if party and _norm_name(party) != _norm_name((txn or {}).get("contact_name") or ""):
+        set_contact = party
+    base["party_name"] = party
+    base["set_contact"] = set_contact
+
+    def _sub_rec(parent: dict) -> dict | None:
+        sub = _counterparty_subaccount(parent, accounts, party)
+        if not sub:
+            return None
+        acct = sub["account"] if sub["kind"] == "new" else _pack(sub["account"])
+        verb = "I'll add" if sub["kind"] == "new" else "I'll use the existing"
+        return {"kind": sub["kind"], "account": acct, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
+                "why": f"{why} {verb} sub-account “{acct['name']}” under {parent.get('name')} so {party}'s balance stays visible."}
+
     ex = _lookup(data.get("existing_account_id"))
     if conf < 0.5 or (ex and not direction_ok(ex.get("type"), direction, message)):
         ex = None
     if ex:
-        rec = {"kind": "existing", "account": _pack(ex), "why": why, "source": "llm", "confidence": conf}
-        sub = _counterparty_subaccount(ex, accounts, txn) if data.get("counterparty_subaccount") else None
-        if sub:
-            acct = sub["account"] if sub["kind"] == "new" else _pack(sub["account"])
-            rec = {"kind": sub["kind"], "account": acct, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
-                   "why": f"{why} Tracked in its own sub-account “{acct['name']}” under {ex.get('name')} so this party's balance stays visible."}
+        rec = (_sub_rec(ex) if per_party else None) or {"kind": "existing", "account": _pack(ex), "why": why, "source": "llm", "confidence": conf}
         return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
 
     if conf < 0.5:
@@ -318,24 +338,19 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
     if dup:
         rec = {"kind": "existing", "account": _pack(dup), "source": "llm+dedupe", "confidence": conf,
                "why": f"{why} Your chart already has “{dup.get('name')}” for this, so I'd use it rather than add a near-duplicate."}
-        sub = _counterparty_subaccount(dup, accounts, txn) if data.get("counterparty_subaccount") else None
-        if sub:
-            a2 = sub["account"] if sub["kind"] == "new" else _pack(sub["account"])
-            rec = {"kind": sub["kind"], "account": a2, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
-                   "why": f"{why} Tracked in its own sub-account “{a2['name']}” under {dup.get('name')} so this party's balance stays visible."}
+        if per_party:
+            rec = _sub_rec(dup) or rec
     else:
         rec = {"kind": "new", "account": acct, "why": why, "source": "llm", "confidence": conf}
         if acct.get("semantic"):
             rec["semantic"] = acct["semantic"]
-        if data.get("counterparty_subaccount") and acct.get("type") in ("asset", "liability"):
-            party = ((txn or {}).get("contact_name") or _clean_memo((txn or {}).get("merchant") or "") or "").strip()
-            if party:
-                # Parent doesn't exist yet: propose parent + per-party child together.
-                child = {"name": party, "code": str(int(acct["code"]) + 1) if str(acct.get("code") or "").isdigit() else "",
-                         "type": acct["type"], "subtype": acct.get("subtype") or "", "detail_type": acct.get("detail_type") or "",
-                         "parent_account_id": None, "parent_name": acct["name"], "parent_proposal": acct, "tax_line": None, "semantic": None}
-                rec = {"kind": "new", "account": child, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
-                       "why": f"{why} I'll add “{acct['name']}” to your chart with a sub-account “{party}” under it so this party's balance stays visible."}
+        if per_party and party and acct.get("type") in ("asset", "liability"):
+            # Parent doesn't exist yet: propose parent + per-party child together.
+            child = {"name": party, "code": str(int(acct["code"]) + 1) if str(acct.get("code") or "").isdigit() else "",
+                     "type": acct["type"], "subtype": acct.get("subtype") or "", "detail_type": acct.get("detail_type") or "",
+                     "parent_account_id": None, "parent_name": acct["name"], "parent_proposal": acct, "tax_line": None, "semantic": None}
+            rec = {"kind": "new", "account": child, "source": "llm+subaccount", "confidence": conf, "subaccount": True,
+                   "why": f"{why} I'll add “{acct['name']}” to your chart with a sub-account “{party}” under it so {party}'s balance stays visible."}
     return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
 
 
