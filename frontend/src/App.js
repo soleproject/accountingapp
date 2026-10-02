@@ -319,6 +319,7 @@ function App() {
               <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
               <Route path="/accounting/review-chat" element={<ChatReview />} />
               <Route path="/accounting/liability-payments" element={<EmbeddedCheckin scope="liability_payments" />} />
+              <Route path="/accounting/receipt-followup" element={<EmbeddedCheckin scope="receipt_followup" />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />

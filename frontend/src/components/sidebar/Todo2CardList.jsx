@@ -432,6 +432,10 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       navigate("/accounting/liability-payments");
       return;
     }
+    if (item.key === "receipt_followup" || item.key === "cleanup_receipt_followup") {
+      navigate("/accounting/receipt-followup");
+      return;
+    }
     // Prefer the item's own area link, appending any per-card filter
     // params so the destination page opens scoped to the work the
     // sidebar card represents (e.g. Bills → outstanding only).
@@ -465,6 +469,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
     }
     if (item.key === "liability_payments" || item.key === "cleanup_liability_payments") return "/accounting/liability-payments";
+    if (item.key === "receipt_followup" || item.key === "cleanup_receipt_followup") return "/accounting/receipt-followup";
     if (!item.area_link) return "/accounting/todo";
     return item.area_link.split("?")[0];
   };
