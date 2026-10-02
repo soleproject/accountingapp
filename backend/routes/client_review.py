@@ -2650,6 +2650,36 @@ async def get_upload_file(token: str, item_id: str, aid: str):
 
 
 
+@router.post("/{token}/items/{item_id}/reset-statement")
+async def reset_statement(token: str, item_id: str):
+    """"Start over" on a statement/receipt item: drop every attachment
+    (batch item + source record), the AI analyses derived from them, and
+    the per-item chat history so the item returns to its fresh state.
+    Refused once the item is answered — the upload is then part of the JE."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    if item.get("answered_at"):
+        raise HTTPException(409, "Item already answered — reopen it first")
+    ids = [a.get("id") for a in (item.get("attachments") or []) if a.get("id")]
+    coll = item.get("source_collection")
+    if ids and coll in ("agent_findings", "transactions", "contacts"):
+        await db[coll].update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$pull": {"attachments": {"id": {"$in": ids}}}, "$set": {"updated_at": _now_iso()}},
+        )
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.attachments": [], "items.$.messages": [], "items.$.client_messages": [],
+                  "updated_at": _now_iso()},
+         "$unset": {"items.$.liability_analysis": "", "items.$.categorization_analysis": "",
+                    "items.$.receipt_analysis": ""}},
+    )
+    return {"ok": True, "removed_attachments": len(ids)}
+
+
+
 @router.delete("/{token}/items/{item_id}/attachments/{aid}")
 async def delete_upload(token: str, item_id: str, aid: str):
     """Remove a previously-uploaded attachment from a batch item.

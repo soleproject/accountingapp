@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine, RotateCcw } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
 const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
@@ -1032,6 +1032,32 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
   };
 
 
+  // "Start over" on a liability statement — wipe the upload, the AI
+  // breakdown and the chat so the Upload / No-statement tiles return.
+  const resetStatement = async () => {
+    if (!currentItem) return;
+    if (!window.confirm("Start over? This removes the uploaded statement and the proposed split for this payment.")) return;
+    try {
+      await axios.post(`${API}/${token}/items/${currentItem.item_id}/reset-statement`);
+    } catch (e) {
+      alert(e?.response?.data?.detail || "Couldn't reset this item.");
+      return;
+    }
+    const itemId = currentItem.item_id;
+    setSession((prev) => {
+      if (!prev) return prev;
+      const items = (prev.items || []).map((it) => it.item_id !== itemId ? it : {
+        ...it, attachments: [], messages: [], client_messages: [],
+        liability_analysis: undefined, categorization_analysis: undefined, receipt_analysis: undefined,
+      });
+      return { ...prev, items };
+    });
+    setMessages([]);
+    setJustCompleted(null);
+    setInput("");
+  };
+
+
   const complete = async () => {
     try {
       const r = await axios.post(`${API}/${token}/complete`);
@@ -1578,6 +1604,7 @@ ${companyName}`;
               w9Token={token}
               w9ItemId={currentItem?.item_id}
               attachments={currentItem?.attachments}
+              onResetStatement={currentItem && !currentItem.answered_at ? resetStatement : null}
               onW9Sent={(to) => {
                 // Mark the DRAFT bubble as sent (so rehydrate shows the
                 // green "Sent to …" state, not an empty draft form) AND
@@ -5072,7 +5099,7 @@ function CategorizationBreakdown({ breakdown, onChange }) {
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
-function LiabilityBreakdown({ breakdown, token, onChange, description, itemId, attachmentId }) {
+function LiabilityBreakdown({ breakdown, token, onChange, description, itemId, attachmentId, onReset }) {
   // Editable bucket list for mortgage / credit-card / auto-loan
   // statements. Each bucket has {label, amount, account_name}. The
   // client can tweak any amount inline AND swap the target account
@@ -5157,13 +5184,22 @@ function LiabilityBreakdown({ breakdown, token, onChange, description, itemId, a
             </div>
             {description && <div className="text-[12px] text-slate-500 mt-1 leading-snug">{description}</div>}
           </div>
-          {statementUrl && (
-            <a href={statementUrl} target="_blank" rel="noreferrer"
-               className="shrink-0 inline-flex items-center gap-1.5 text-[12px] font-semibold text-indigo-700 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm hover:bg-indigo-50"
-               data-testid="liability-view-statement">
-              <FileText size={13} /> View statement
-            </a>
-          )}
+          <div className="shrink-0 flex items-center gap-1.5">
+            {statementUrl && (
+              <a href={statementUrl} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-indigo-700 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm hover:bg-indigo-50"
+                 data-testid="liability-view-statement">
+                <FileText size={13} /> View statement
+              </a>
+            )}
+            {onReset && (
+              <button type="button" onClick={onReset} title="Remove this statement and start over"
+                      className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-600 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                      data-testid="liability-start-over">
+                <RotateCcw size={13} /> Start over
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mt-4 divide-y divide-white/70">
@@ -5668,7 +5704,7 @@ function W9Checklist() {
   );
 }
 
-function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment, w9Token, w9ItemId, onW9Sent, attachments }) {
+function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment, w9Token, w9ItemId, onW9Sent, attachments, onResetStatement }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
   const hasLiability = !isUser && message._liabilityBreakdown;
@@ -5690,6 +5726,7 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
             itemId={w9ItemId}
             attachmentId={latestAtt?.id}
             description={message.content}
+            onReset={message._readOnlyAnswered ? null : onResetStatement}
             onChange={(next) => onBreakdownChange?.(next)}
           />
           {(message.quickReplies || []).length > 0 && (
