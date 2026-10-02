@@ -150,6 +150,39 @@ class CardIntentIn(BaseModel):
     actions: List[dict]
 
 
+_UNCAT_CODES = {"9999", "6999", "4999"}
+
+
+@router.get("/companies/{cid}/ai/uncategorized-sweep")
+async def ai_uncategorized_sweep(cid: str, user: dict = Depends(get_current_user)):
+    """Unreviewed rows still in Uncategorized (or with no category), grouped
+    by contact (fallback: merchant) so one answer can cover a whole vendor."""
+    await require_company(user, cid)
+    q = {"company_id": cid, "human_reviewed": {"$ne": True},
+         "$or": [{"category_account_id": {"$in": [None, ""]}}, {"category_account_code": {"$in": list(_UNCAT_CODES)}},
+                 {"category_account_name": {"$regex": "uncategorized", "$options": "i"}}]}
+    rows = await db.transactions.find(q, {"_id": 0, "id": 1, "date": 1, "merchant": 1, "description": 1, "amount": 1,
+                                          "contact_id": 1, "contact_name": 1}).sort("date", -1).to_list(3000)
+    groups: dict[str, dict] = {}
+    for r in rows:
+        key = r.get("contact_id") or f"m:{(r.get('merchant') or r.get('description') or '').strip().lower()[:60]}"
+        g = groups.setdefault(key, {"key": key, "contact_id": r.get("contact_id"),
+                                    "label": r.get("contact_name") or r.get("merchant") or r.get("description") or "Unknown",
+                                    "count": 0, "total": 0.0, "money_in": 0, "money_out": 0, "ids": [], "sample": None,
+                                    "first_date": r.get("date"), "last_date": r.get("date")})
+        g["count"] += 1
+        g["total"] = round(g["total"] + float(r.get("amount") or 0), 2)
+        g["money_in" if float(r.get("amount") or 0) > 0 else "money_out"] += 1
+        g["ids"].append(r["id"])
+        g["first_date"] = min(g["first_date"] or r.get("date"), r.get("date") or g["first_date"])
+        g["last_date"] = max(g["last_date"] or r.get("date"), r.get("date") or g["last_date"])
+        if g["sample"] is None:
+            g["sample"] = {"id": r["id"], "merchant": r.get("merchant") or r.get("description"), "description": r.get("description"),
+                           "amount": r.get("amount"), "date": r.get("date"), "contact_name": r.get("contact_name")}
+    out = sorted(groups.values(), key=lambda g: (-g["count"], -abs(g["total"])))
+    return {"total_transactions": len(rows), "groups": out}
+
+
 @router.post("/companies/{cid}/ai/card-intent")
 async def ai_card_intent(cid: str, inp: CardIntentIn, user: dict = Depends(get_current_user)):
     """Which visible card button (if any) does this utterance mean?"""

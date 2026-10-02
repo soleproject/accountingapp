@@ -2591,6 +2591,17 @@ export default function Transactions() {
             </div>
           )}
           {!isReviewMode && (
+            <button
+              type="button"
+              data-testid="uncat-sweep-btn"
+              onClick={() => { emitAction("ai-open"); emitAction("uncat-sweep-start"); }}
+              title="Walk through every uncategorized transaction with the assistant"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800 text-xs font-medium hover:bg-fuchsia-100"
+            >
+              <Sparkles size={13} /> Sweep uncategorized
+            </button>
+          )}
+          {!isReviewMode && (
             <NewTransactionMenu
               onQuick={() => setCreating(true)}
               advanced={isAdvancedMode}
