@@ -1818,6 +1818,9 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
         contact = await db.contacts.find_one({"id": upd["contact_id"], "company_id": cid})
         if contact:
             upd["contact_name"] = contact.get("name") or upd.get("contact_name")
+    elif "contact_id" in upd:
+        upd["contact_id"] = None
+        upd["contact_name"] = None
     if "category_account_id" in upd:
         # If this txn is locked to A/R or A/P via a linked invoice/bill,
         # reject the category change — the category is what makes the
@@ -1850,7 +1853,8 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                     upd["category_account_id"] = child["id"]
             upd["category_account_code"] = acct["code"]
             upd["category_account_name"] = acct["name"]
-        upd["human_reviewed"] = True
+        # Picking a category resolves the AI flag but is NOT an approval —
+        # the row stays in To-do until the user clicks the green check.
         upd["needs_review"] = False
     # Splits payload — user edited the transaction and either changed the
     # split lines or converted a single-category txn into a multi-category

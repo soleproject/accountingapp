@@ -270,6 +270,7 @@ function MonthlyTodos({ todos, onDismiss }) {
   const pickMode = (next) => {
     setMode(next);
     try { localStorage.setItem("dashboard-todos-mode", next); } catch {}
+    window.dispatchEvent(new CustomEvent("axiom:action", { detail: { kind: "dashboard-mode-changed", payload: { mode: next }, at: Date.now() } }));
   };
   const aiSteps = aiMode ? [
     {
