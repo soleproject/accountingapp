@@ -21,6 +21,13 @@ import {
   FileText, Receipt as ReceiptIcon, Users,
 } from "lucide-react";
 
+// Benchmark: ~15 minutes per 1,300 unapproved transactions with the
+// check → same-vendor popup → sparkles flow. Shared by the AI card and
+// checklist Step 1 so every company sees the same estimate.
+export const reviewMinutes = (n) => Math.max(1, Math.ceil((n * 15) / 1300));
+export const fmtMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim() : `~${m} min`);
+export const reviewEta = (n) => (n == null ? "…" : n === 0 ? 0 : fmtMinutes(reviewMinutes(n)));
+
 export default function DashboardTodos({ todos }) {
   const { currentId } = useCompany();
   const { user } = useAuth();
@@ -230,6 +237,21 @@ function MonthlyTodos({ todos, onDismiss }) {
   const aiMode = mode === "ai";
   const [chatCounts, setChatCounts] = useState(null);
   const [todoCount, setTodoCount] = useState(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+  useActionListener("txns:changed", () => setRefreshTick(t => t + 1));
+  useEffect(() => {
+    const onFocus = () => setRefreshTick(t => t + 1);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+  useEffect(() => {
+    if (!currentId) return;
+    let cancelled = false;
+    api.get(`/companies/${currentId}/transactions?status=unapproved&limit=1`)
+      .then(r => !cancelled && setTodoCount(r.data?.pagination?.total ?? 0))
+      .catch(() => !cancelled && setTodoCount(0));
+    return () => { cancelled = true; };
+  }, [currentId, refreshTick]);
   useEffect(() => {
     if (mode === "checklist" || !currentId) return;
     let cancelled = false;
@@ -243,27 +265,19 @@ function MonthlyTodos({ todos, onDismiss }) {
         });
       })
       .catch(() => !cancelled && setChatCounts({ no_category: 0, transactions: 0, checks: 0 }));
-    if (aiMode) {
-      api.get(`/companies/${currentId}/transactions?status=unapproved&limit=1`)
-        .then(r => !cancelled && setTodoCount(r.data?.pagination?.total ?? 0))
-        .catch(() => !cancelled && setTodoCount(0));
-    }
     return () => { cancelled = true; };
-  }, [mode, aiMode, currentId]);
+  }, [mode, currentId, refreshTick]);
   const pickMode = (next) => {
     setMode(next);
     try { localStorage.setItem("dashboard-todos-mode", next); } catch {}
   };
-  // Benchmark: ~15 minutes per 1,300 transactions with check → popup → sparkles.
-  const reviewMinutes = (n) => Math.max(1, Math.ceil((n * 15) / 1300));
-  const fmtMinutes = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim() : `~${m} min`);
   const aiSteps = aiMode ? [
     {
       title:    "AI Transaction Review",
       subtitle: todoCount == null
         ? "Approve what the AI got right, hand anything off to the assistant"
         : `${todoCount.toLocaleString()} transaction${todoCount === 1 ? "" : "s"} to review — approve what the AI got right, hand the rest to the assistant`,
-      count:    todoCount == null ? "…" : todoCount === 0 ? 0 : fmtMinutes(reviewMinutes(todoCount)),
+      count:    reviewEta(todoCount),
       unit:     "to finish",
       cta:      "/accounting/transactions?filter=unapproved",
       ctaLabel: "Open transactions",
@@ -376,6 +390,7 @@ function MonthlyTodos({ todos, onDismiss }) {
                 index={i + 1}
                 step={step}
                 highlight={i === highlightIdx}
+                eta={i === 0 ? { value: reviewEta(todoCount), unit: "to finish" } : null}
               />
             ))
           )}
@@ -444,8 +459,9 @@ function ChatStep({ index, step, loading }) {
   );
 }
 
-function TodoStep({ index, step, highlight }) {
+function TodoStep({ index, step, highlight, eta }) {
   const count = step?.count ?? 0;
+  const showEta = eta && count > 0;
   const done = count === 0;
   // Apply the same rainbow-outline shimmer used by the "Needs your
   // attention" priority card — draws the eye to the single active step
@@ -542,11 +558,14 @@ function TodoStep({ index, step, highlight }) {
           {step && (
             <div className="text-right shrink-0">
               <div className={`font-mono-num text-2xl font-bold leading-none ${done ? "text-emerald-600" : count > 0 ? "text-slate-900" : "text-slate-400"}`}>
-                {count}
+                {showEta ? eta.value : count}
               </div>
               <div className="text-[9px] uppercase tracking-wider text-slate-400 mt-0.5">
-                {step.unit}
+                {showEta ? eta.unit : step.unit}
               </div>
+              {showEta && (
+                <div className="text-[10px] text-slate-400 mt-0.5 font-mono-num">{count} {step.unit}</div>
+              )}
             </div>
           )}
         </div>
