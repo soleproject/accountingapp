@@ -17,6 +17,7 @@ import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useUserPref } from "@/hooks/useUserPref";
+import { reviewEta } from "@/components/DashboardTodos";
 import {
   ArrowLeft, Loader2, ChevronRight, ChevronDown, CircleAlert, User, Bot, Wrench,
   LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
@@ -293,6 +294,34 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   const reviewModeKey = `reviewMode.${currentId || "_"}`;
   const [reviewMode] = useUserPref(reviewModeKey, "chat", { localFallback: reviewModeKey });
 
+  // Dashboard "AI Transaction Review" mode (localStorage, same key the
+  // dashboard dropdown writes). In that mode the Transactions card shows
+  // the time-to-finish estimate and opens the To-do tab directly.
+  const readDashMode = () => { try { return localStorage.getItem("dashboard-todos-mode") || "ai"; } catch { return "ai"; } };
+  const [dashMode, setDashMode] = useState(readDashMode);
+  const aiReview = dashMode === "ai";
+  const [unapproved, setUnapproved] = useState(null);
+  useEffect(() => {
+    const sync = () => setDashMode(readDashMode());
+    const onStorage = (e) => { if (e.key === "dashboard-todos-mode") sync(); };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", sync);
+    const onAction = (e) => { if (e.detail?.kind === "dashboard-mode-changed") sync(); };
+    window.addEventListener("axiom:action", onAction);
+    return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("focus", sync); window.removeEventListener("axiom:action", onAction); };
+  }, []);
+  useEffect(() => {
+    if (!currentId || !aiReview) return;
+    let cancelled = false;
+    const fetchCount = () => api.get(`/companies/${currentId}/transactions`, { params: { status: "unapproved", limit: 1 } })
+      .then(r => { if (!cancelled) setUnapproved(r.data?.pagination?.total ?? 0); })
+      .catch(() => {});
+    fetchCount();
+    const onChanged = (e) => { if (e.detail?.kind === "txns:changed" || e.detail?.kind === "bulk-approve-done") fetchCount(); };
+    window.addEventListener("axiom:action", onChanged);
+    return () => { cancelled = true; window.removeEventListener("axiom:action", onChanged); };
+  }, [currentId, aiReview]);
+
   useEffect(() => {
     if (!currentId) { setLoad(false); return; }
     let cancelled = false;
@@ -379,7 +408,9 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
     // In chat mode we also deep-link to whichever bucket has the most
     // items so the CPA lands where the work is heaviest.
     if (item.key === "reviewing_transactions") {
-      if (reviewMode === "chat") {
+      if (aiReview) {
+        navigate(_buildOpenHref("/accounting/transactions", "/accounting/todo", "To Do", { filter: "unapproved" }));
+      } else if (reviewMode === "chat") {
         const cc = item.chat_counts || {};
         // Pick the biggest non-zero bucket; fall back to no_category.
         const entries = [
@@ -599,14 +630,17 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
           // Transactions · Checks) instead of the raw needs-review
           // total, so the sidebar reads like the destination.
           const chatCounts = it.chat_counts;
+          const isTxnAi = it.key === "reviewing_transactions" && aiReview;
           const isTxnChat = it.key === "reviewing_transactions"
-            && reviewMode === "chat" && chatCounts;
+            && !aiReview && reviewMode === "chat" && chatCounts;
           const chatTotal = isTxnChat
             ? (chatCounts.no_category || 0)
               + (chatCounts.transactions || 0)
               + (chatCounts.checks || 0)
             : null;
-          const countChip = isTxnChat
+          const countChip = isTxnAi
+            ? (unapproved ? reviewEta(unapproved) : null)
+            : isTxnChat
             ? (chatTotal > 0 ? chatTotal : null)
             : (typeof it.count === "number" && it.count > 0 ? it.count : null);
 
@@ -677,7 +711,11 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                     </span>
                   )}
                 </div>
-                {isTxnChat ? (
+                {isTxnAi ? (
+                  <div className="text-[11px] text-slate-600 mt-0.5" data-testid="sidebar-todo2-txn-eta">
+                    {unapproved == null ? "…" : unapproved === 0 ? "All reviewed" : `${unapproved.toLocaleString()} transactions to review`}
+                  </div>
+                ) : isTxnChat ? (
                   <div className="text-[11px] text-slate-600 mt-0.5">
                     {chatTotal} {chatTotal === 1 ? "Question" : "Questions"}
                   </div>
