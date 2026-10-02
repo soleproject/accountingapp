@@ -17,8 +17,10 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb,
 } from "lucide-react";
+import ChatReviewTour from "@/components/tour/ChatReviewTour";
+import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
 import BulkConfirmModal from "@/components/BulkConfirmModal";
@@ -1136,6 +1138,7 @@ export default function Transactions() {
     return () => clearTimeout(t);
   }, [tourParam, replayParam, isNoContactReview, user?.id, currentCompanyId]);
   const closeStep3BTour = () => setStep3bTourOpen(false);
+
   // Inline bulk-categorize dropdown in the Let's-Review info card — lets
   // the CPA one-click categorize every currently-visible row for the
   // contact into a chosen GAAP account, bypassing the AI chat entirely.
@@ -1476,6 +1479,31 @@ export default function Transactions() {
   useActionListener("open-similar-approve-modal", (p) => {
     if (p?.similar?.count) setSimilarApprove({ similar: p.similar, ruleExists: !!p.rule_exists });
   });
+
+  // Transactions page tour (same engine as Review Chat). Auto-opens once
+  // per browser when real rows are on screen; replayable via the Tour
+  // button. Snapshots the filter so the "To do" click is undone on close.
+  const TXN_TOUR_SEEN_KEY = "transactions-tour-completed-v1";
+  const [txnTourOpen, setTxnTourOpen] = useState(false);
+  const txnTourSnapRef = useRef(null);
+  const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; setTxnTourOpen(true); };
+  const closeTxnTour = () => {
+    setTxnTourOpen(false);
+    try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
+    const snap = txnTourSnapRef.current; txnTourSnapRef.current = null;
+    if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
+  };
+  useEffect(() => {
+    if (txnTourOpen || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
+    if (!txns.length) return;
+    let seen = false;
+    try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
+    if (seen) return;
+    const t = setTimeout(startTxnTour, 900);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txns.length, isReviewMode, isLetsReview, isNoContactReview, tourParam]);
+  useActionListener("chat-cta:restart-transactions-tour", () => startTxnTour());
   useEffect(() => {
     if (!similarView) return;
     emitAction("similar-selection-changed", { ids: [...selected] });
@@ -2303,6 +2331,9 @@ export default function Transactions() {
 
   return (
     <div className="space-y-4">
+      {txnTourOpen && (
+        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} />
+      )}
       <Step2Tour open={step2TourOpen} onDone={closeStep2Tour} />
       <Step3BTour open={step3bTourOpen} onDone={closeStep3BTour} />
       <MonthCloseBreadcrumb />
@@ -2589,6 +2620,17 @@ export default function Transactions() {
                 </button>
               ))}
             </div>
+          )}
+          {!isReviewMode && (
+            <button
+              type="button"
+              data-testid="txn-tour-btn"
+              onClick={startTxnTour}
+              title="Show me how this page works"
+              className="inline-flex items-center gap-1 px-2 h-7 rounded-full text-slate-600 hover:bg-amber-50 hover:text-amber-700 text-xs font-medium"
+            >
+              <Lightbulb size={14} /> Tour
+            </button>
           )}
           {!isReviewMode && (
             <button

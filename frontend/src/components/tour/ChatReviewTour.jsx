@@ -18,11 +18,11 @@
 // auto-tour doesn't fire again.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, ChevronLeft, ChevronRight, MousePointer2, Volume2, VolumeX } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, MousePointer2, Volume2, VolumeX, Check } from "lucide-react";
+import { emitAction } from "@/lib/createBus";
 import {
   CHAT_REVIEW_BEATS,
   CHAPTERS,
-  TOTAL_BEATS,
 } from "@/tours/chatReviewBeats";
 
 // Cursor SVG follows the target anchor's centre via CSS transform.
@@ -121,6 +121,41 @@ function CheckboxesGhost({ rect }) {
         ))}
         <div className="pt-1 text-[11px] text-fuchsia-700 font-medium">
           → Ask separately
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mock of the same-vendor approval popup (Transactions tour) — shows
+// what appears after the green check when the vendor has more rows.
+function PopupGhost({ rect, ghost }) {
+  if (!rect) return null;
+  const rows = ghost.rows || [
+    { d: "Sep 25", m: "Zelle payment to Phoenix Business", a: "-$100.00", on: true },
+    { d: "Sep 24", m: "Zelle payment to Phoenix Business", a: "-$10.00", on: true },
+    { d: "Sep 24", m: "Zelle payment to Phoenix Business", a: "-$419.00", on: false },
+  ];
+  const n = rows.filter((r) => r.on).length;
+  return (
+    <div className="fixed z-[10002] pointer-events-none" style={{ left: Math.max(16, Math.min(rect.left - 380, window.innerWidth - 420)), top: rect.bottom + 10, width: 400 }}>
+      <div className="bg-white rounded-xl shadow-2xl border border-fuchsia-200 overflow-hidden">
+        <div className="px-3 pt-2 pb-1.5 border-b border-slate-100">
+          <div className="text-[10px] uppercase tracking-wide text-fuchsia-600 font-semibold">Same vendor · preview</div>
+          <div className="text-[13px] font-semibold text-slate-900">{rows.length} more unapproved from {ghost.vendor || "Phoenix Business"}</div>
+        </div>
+        {rows.map((r, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-1 text-[12px] border-b border-slate-50">
+            <span className={`inline-block w-3.5 h-3.5 rounded border ${r.on ? "bg-fuchsia-500 border-fuchsia-500" : "bg-white border-slate-300"}`} />
+            <span className="font-mono text-slate-500">{r.d}</span>
+            <span className="text-slate-700 truncate flex-1">{r.m}</span>
+            <span className="font-mono text-slate-800">{r.a}</span>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 px-3 py-2 bg-slate-50">
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded bg-fuchsia-600 text-white"><Check size={11} /> Categorize & approve {n}</span>
+          <span className="text-[11px] font-medium px-2 py-1 rounded border border-fuchsia-300 text-fuchsia-700 bg-white">Approve {n} + create rule</span>
+          <span className="ml-auto text-[11px] text-slate-500">No, just this one</span>
         </div>
       </div>
     </div>
@@ -255,8 +290,10 @@ function useAnchorRects(anchorTestIds, beatIdx) {
   return rects;
 }
 
-export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
+export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel }) {
   const BEATS = propBeats || CHAT_REVIEW_BEATS;
+  const CHAPTER_LIST = propChapters || CHAPTERS;
+  const TOTAL = BEATS.length;
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   const [clicking, setClicking] = useState(false);
@@ -518,9 +555,13 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
   }, [cursorRect, rect]);
 
   const chapterIdx = useMemo(
-    () => CHAPTERS.findIndex((c) => c.key === beat?.chapter),
-    [beat]
+    () => CHAPTER_LIST.findIndex((c) => c.key === beat?.chapter),
+    [beat, CHAPTER_LIST]
   );
+  // Beats may fire an app action on enter (e.g. open the AI panel).
+  useEffect(() => {
+    if (beat?.emit) emitAction(beat.emit, beat.emitPayload || {});
+  }, [idx, beat]);
   const beatsInChapter = useMemo(
     () =>
       BEATS.filter((b) => b.chapter === beat?.chapter),
@@ -660,6 +701,9 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
       {beat.ghost?.kind === "checkboxes" && (
         <CheckboxesGhost rect={rect} />
       )}
+      {beat.ghost?.kind === "popup" && (
+        <PopupGhost rect={rect} ghost={beat.ghost} />
+      )}
 
       {/* Narrator dock — centered on welcome/finale, otherwise pinned
           to the RIGHT edge of the transaction column so it doesn't
@@ -682,7 +726,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[10px] uppercase tracking-wider text-fuchsia-600 font-semibold">
               {chapterIdx >= 0
-                ? `Chapter ${chapterIdx + 1} · ${CHAPTERS[chapterIdx].title}`
+                ? `Chapter ${chapterIdx + 1} · ${CHAPTER_LIST[chapterIdx].title}`
                 : "Tour"}
             </div>
             <button
@@ -744,7 +788,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
                   className="inline-flex items-center gap-1 px-4 py-2 rounded-full bg-fuchsia-600 text-white text-sm font-semibold hover:bg-fuchsia-700 shadow-md"
                   data-testid="chat-review-tour-v2-finish"
                 >
-                  Start reviewing 🎉
+                  {finaleLabel || "Start reviewing 🎉"}
                 </button>
               ) : (
                 <button
@@ -766,7 +810,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title }) {
           {/* Progress footnote */}
           <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
             <span>
-              Beat {idx + 1} of {TOTAL_BEATS}
+              Beat {idx + 1} of {TOTAL}
               {beatIdxInChapter >= 0 && beatsInChapter.length > 0 && (
                 <>
                   {" "}
