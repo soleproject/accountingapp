@@ -333,11 +333,21 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
     return () => { cancelled = true; window.removeEventListener("axiom:action", onChanged); };
   }, [currentId, aiReview]);
 
+  // Silent refresh (no spinner) when an embedded Quick Check-in item is
+  // answered/deferred so the card counts drop immediately.
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    const onAction = (e) => { if (e.detail?.kind === "checkin:changed") setRefreshTick(t => t + 1); };
+    window.addEventListener("axiom:action", onAction);
+    return () => window.removeEventListener("axiom:action", onAction);
+  }, []);
+
   useEffect(() => {
     if (!currentId) { setLoad(false); return; }
     let cancelled = false;
+    const silent = refreshTick > 0;
     (async () => {
-      setLoad(true);
+      if (!silent) setLoad(true);
       try {
         const [statusR, cashR] = await Promise.allSettled([
           api.get(`/companies/${currentId}/responsibilities/status`,
@@ -347,20 +357,20 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         if (cancelled) return;
         if (statusR.status === "fulfilled") {
           setItems(statusR.value.data?.items || []);
-        } else {
+        } else if (!silent) {
           setError(statusR.reason?.response?.data?.detail || "Couldn't load To Do");
         }
         if (cashR.status === "fulfilled") {
           setCashFlow(cashR.value.data || null);
-        } else {
+        } else if (!silent) {
           setCashFlow(null);
         }
       } finally {
-        if (!cancelled) setLoad(false);
+        if (!cancelled && !silent) setLoad(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [currentId]);
+  }, [currentId, refreshTick]);
 
   // Filter to only actionable, open items.
   // - Drop "done" and "n/a" (as intended by the panel).

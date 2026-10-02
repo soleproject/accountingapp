@@ -256,6 +256,9 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     if (lastSigRef.current === null) { lastSigRef.current = progressSig; return; }
     if (lastSigRef.current === progressSig) return;
     lastSigRef.current = progressSig;
+    if (embedded) {
+      window.dispatchEvent(new CustomEvent("axiom:action", { detail: { kind: "checkin:changed", payload: { batch_id: session.batch_id }, at: Date.now() } }));
+    }
     if (window.parent && window.parent !== window) {
       window.parent.postMessage({ type: "qc:changed", batch_id: session.batch_id, token }, window.location.origin);
     }
