@@ -691,3 +691,9 @@ need to type into the chat box to invoke the matching help flow.
 - direction_ok(): money_out never revenue; money_in never expense/cogs unless refund/reimbursement wording. CoA pre-filtered before LLM + post-validation; LLM may return account code or id. Money-out "consulting" → Professional Fees cue. Frontend no-match message is direction-aware.
 - Vagueness gate (is_too_vague) → direction-aware clarifying question; bank Conf#/Ref# codes stripped from memo before LLM.
 - find_semantic_duplicate(): type + detail_type / word-set (order-free) / subset match; applied to canonical AND LLM proposals before any "new account" is offered ("Marketing & Advertising" → existing "Advertising & Marketing").
+
+## 2026-06 — AI-first category resolver (painter → Food Cost bug)
+- Root cause: `find_semantic_duplicate` matched on generic `detail_type=operating_expense` (shared by every expense account) and returned the first one (5000 Food Cost). Also a hardcoded regex cue list ran before the AI.
+- Fix: backend/ai_category_resolver.py rewritten AI-first — no keyword lists. LLM (LLM_MODEL_RESOLVER=gpt-4o in .env) sees direction-filtered CoA + canonical library; returns existing id / library `semantic` key / full new_account / `ask` clarifying question. New-account proposals go through a second LLM semantic dedupe (`_llm_dedupe`, exact-name identity only shortcut). Direction guard unchanged (structural).
+- Frontend AiPanel.recommendCategory prefers `data.ask` over canned text.
+- Tests: backend/tests/test_ai_category_resolver.py (live painter regression + mocked dedupe).

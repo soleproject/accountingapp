@@ -1795,7 +1795,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         const { data } = await api.post(`/companies/${currentId}/ai/resolve-category`, { message: text, txn_id: txnId || null });
         const rec = data?.recommendation;
         if (!rec?.account) {
-          const say = data?.direction === "money_out"
+          const say = data?.ask ? data.ask : data?.direction === "money_out"
             ? "This is money going OUT, so it can't be a sale or customer payment. Was it something you bought (what?), a refund you gave a customer, a transfer to another account, or money you took for yourself?"
             : data?.direction === "money_in"
               ? "This is money coming IN, so it can't be an expense. Was it a customer paying you (for what?), a refund from a vendor, a transfer from another account, or money you put in yourself?"

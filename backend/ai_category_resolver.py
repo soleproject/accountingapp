@@ -1,15 +1,15 @@
-"""Meaning-first category resolver for the pro AI panel.
+"""AI-first category resolver for the pro AI panel.
 
-Turns a plain-English description of a transaction ("stuff for the office",
-"this is a consulting company", "paid myself") into ONE recommendation:
-either the closest EXISTING account on the company's chart, or a fully
-specified GAAP-aligned NEW account (type / subtype / detail type / tax line /
-code / optional parent). Nothing is created until `/apply` is called.
+Turns a plain-English description of a transaction ("this was a painter",
+"stuff for the office", "paid myself") into ONE recommendation: either the
+closest EXISTING account on the company's chart, or a fully specified
+GAAP-aligned NEW account. Nothing is created until `/apply` is called.
 
-Order of resolution:
-  1. canonical semantic library (deterministic, direction-aware aliases)
-  2. LLM with the chart of accounts in context (closest existing account,
-     else a complete new-account proposal)
+No keyword lists. The LLM sees the chart of accounts (filtered to types that
+can hold money flowing this direction) plus the canonical GAAP library and
+decides. When it proposes a new account, a second LLM check asks whether any
+existing account already MEANS the same thing, so near-duplicates are caught
+semantically rather than by bucket/token matching.
 """
 from __future__ import annotations
 
@@ -20,57 +20,6 @@ import uuid
 import canonical_semantic_accounts as csa
 from account_normalize import normalize_account_payload
 from db import db, now_iso
-
-# ---------------------------------------------------------------------------
-# 1. Canonical pre-pass — phrase cues → semantic key. `dir` restricts a cue
-#    to money_out / money_in when the meaning flips with direction.
-# ---------------------------------------------------------------------------
-_CUES: list[tuple[str, str, str | None]] = [
-    # (regex, semantic, direction or None)
-    (r"\boffice\b|\bstationery\b|\bprinter (?:paper|ink)\b|\bsupplies for the office\b", "office_supplies", "money_out"),
-    (r"\b(?:lunch|dinner|breakfast|coffee|meal|meals|food with|took .* to eat|restaurant)\b", "meals", "money_out"),
-    (r"\b(?:software|subscription|saas|app|zoom|slack|adobe|microsoft 365|google workspace|quickbooks|license(?:s)? for software)\b", "software_saas", "money_out"),
-    (r"\b(?:flight|airfare|hotel|airbnb|lodging|travel|uber to the airport|rental car)\b", "travel", "money_out"),
-    (r"\b(?:gas|fuel|diesel|filled up)\b", "fuel", "money_out"),
-    (r"\b(?:electric|electricity|water bill|power bill|utilities|utility)\b", "utilities", "money_out"),
-    (r"\b(?:phone|cell|internet|wifi|telecom|verizon|at&t|comcast)\b", "telecom", "money_out"),
-    (r"\b(?:rent|lease payment|landlord)\b", "rent", "money_out"),
-    (r"\b(?:insurance|premium)\b", "insurance_expense", "money_out"),
-    (r"\b(?:ads?|advertising|marketing|promo|facebook ads|google ads|sponsorship)\b", "marketing", "money_out"),
-    (r"\b(?:repair|repairs|fixed the|maintenance|plumber|hvac)\b", "repairs_maintenance", "money_out"),
-    (r"\b(?:lawyer|attorney|legal|cpa|accountant|bookkeeper|consultant|consulting|advisor|advisory|professional fees?)\b", "professional_fees", "money_out"),
-    (r"\b(?:bank fee|service charge|overdraft|wire fee|monthly fee)\b", "bank_fees", "money_out"),
-    (r"\b(?:payroll|wages|salary|salaries|paid (?:my|our) (?:employees?|staff))\b", "payroll_expense", "money_out"),
-    (r"\b(?:contractor|freelancer|1099|subcontractor|gig worker|contract labor)\b", "contract_labor", "money_out"),
-    (r"\b(?:clean(?:ing|er)|janitor(?:ial)?|housekeeping)\b", "cleaning_janitorial", "money_out"),
-    (r"\b(?:donation|donations|donated|charity|charitable|tithe|tithes|tithing|giving to)\b", "charitable_contributions", "money_out"),
-    (r"\b(?:donation|donations|donated|grant)\b", "donation_income", "money_in"),
-    (r"\b(?:paid myself|owner(?:'s)? draw|took money out for (?:me|myself)|personal|my own use|not (?:a )?business)\b", "owner_draw", "money_out"),
-    (r"\b(?:put (?:my own )?money in|owner (?:contribution|investment)|i funded|capital contribution)\b", "owner_contribution", "money_in"),
-    (r"\b(?:transfer|moved money|to savings|from savings|between (?:my|our) accounts|internal transfer)\b", "inter_account_transfer", None),
-    (r"\b(?:credit card payment|paid (?:the|my|our) (?:credit )?card|card payment)\b", "credit_card_payment", "money_out"),
-    (r"\b(?:loan payment|paid (?:the|our) loan|mortgage payment)\b", "loan_payment", "money_out"),
-    (r"\b(?:sales tax (?:payment|remittance)|paid sales tax)\b", "sales_tax_payment", "money_out"),
-    (r"\b(?:refund(?:ed)?|returned (?:it|the item)|chargeback)\b", "sales_refunds", "money_out"),
-    (r"\b(?:consulting|consultant|advisory|we consult|my consulting)\b", "consulting_revenue", "money_in"),
-    (r"\b(?:customer paid|client paid|payment from a (?:customer|client)|invoice (?:payment|paid)|sale|sales|revenue|income from)\b", "revenue_generic", "money_in"),
-    (r"\b(?:interest)\b", "interest_income", "money_in"),
-    (r"\b(?:interest)\b", "interest_expense", "money_out"),
-    (r"\b(?:tools?|equipment|machine|laptop|computer|camera)\b", "equipment", "money_out"),
-    (r"\b(?:materials|job supplies|lumber|parts for (?:a|the) job)\b", "job_supplies", "money_out"),
-    (r"\b(?:permit|license|licence|registration fee|dues)\b", "licenses_permits", "money_out"),
-    (r"\b(?:stripe fee|square fee|paypal fee|processing fee|merchant fee)\b", "payment_processing_fees", "money_out"),
-]
-
-
-def canonical_semantic_for_text(text: str, direction: str) -> str | None:
-    t = " " + re.sub(r"\s+", " ", (text or "").lower()) + " "
-    for rx, sem, d in _CUES:
-        if d and d != direction:
-            continue
-        if re.search(rx, t) and sem in csa.CANONICAL_SEMANTIC_ACCOUNTS:
-            return sem
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -87,73 +36,6 @@ def _norm_name(n: str) -> str:
     n = re.sub(r"\(.*?\)", "", (n or "").lower())
     n = n.replace("&", "and").replace("'s", "").replace("-", " ")
     return " ".join(n.split())
-
-
-_STOP = {"and", "the", "of", "for", "expense", "expenses", "income", "other", "general", "misc"}
-
-
-def _tokens(name: str) -> set[str]:
-    toks = set(_norm_name(name).split()) - _STOP
-    return {t[:-1] if t.endswith("s") and len(t) > 4 else t for t in toks}
-
-
-def find_semantic_duplicate(accounts: list[dict], proposal: dict) -> dict | None:
-    """Does an account that MEANS the same thing already exist? Same type
-    and (same detail_type, or the same words in any order, or one name's
-    words all inside the other's). 'Advertising & Marketing' ≡ 'Marketing &
-    Advertising'; 'Legal & Professional Fees' ⊇ 'Professional Fees'."""
-    want = _tokens(proposal.get("name") or "")
-    ptype = proposal.get("type")
-    pdetail = (proposal.get("detail_type") or "").strip()
-    best, best_score = None, 0.0
-    for a in accounts:
-        if a.get("type") != ptype or a.get("active") is False:
-            continue
-        if pdetail and pdetail not in ("", "other_miscellaneous_expense", "other_business_expenses") \
-                and (a.get("detail_type") or "") == pdetail and not a.get("parent_account_id"):
-            return a
-        have = _tokens(a.get("name") or "")
-        if not want or not have:
-            continue
-        inter = len(want & have)
-        score = inter / len(want | have)
-        if want == have or (inter >= 1 and (want <= have or have <= want)):
-            score = max(score, 0.9)
-        if score > best_score:
-            best, best_score = a, score
-    return best if best_score >= 0.6 else None
-
-
-def _existing_for_semantic(accounts: list[dict], sem: str) -> dict | None:
-    spec = csa.CANONICAL_SEMANTIC_ACCOUNTS[sem]
-    for a in accounts:
-        if a.get("linked_semantic") == sem:
-            return a
-    want = _norm_name(spec["name"])
-    for a in accounts:
-        if _norm_name(a.get("name")) == want:
-            return a
-    dup = find_semantic_duplicate(accounts, {"name": spec["name"], "type": spec["type"], "detail_type": spec["detail_type"]})
-    if dup:
-        return dup
-    # Same type + one name contains the other ("Inter-Account Transfer" vs
-    # "Inter-Account Transfer (Clearing)", "Legal & Professional Fees" vs
-    # "Professional Fees").
-    for a in accounts:
-        have = _norm_name(a.get("name"))
-        if a.get("type") == spec["type"] and have and (have in want or want in have) and len(have) >= 6:
-            return a
-    return None
-
-
-def _why_for(sem: str, direction: str, acct: dict | None = None) -> str:
-    spec = csa.CANONICAL_SEMANTIC_ACCOUNTS[sem]
-    t = (acct or {}).get("type") or spec["type"]
-    kind = {"expense": "an ordinary operating expense", "cogs": "a direct cost of what you sell",
-            "revenue": "income the business earned", "equity": "owner money, not a business expense",
-            "liability": "paying down something you owe (not an expense)",
-            "asset": "something the business owns, so it goes on the balance sheet"}.get(t, t)
-    return f"{(acct or {}).get('name') or spec['name']} is {kind}; that matches a {direction.replace('_', '-')} transaction described this way."
 
 
 def _proposal_from_spec(sem: str, accounts: list[dict], template: str) -> dict:
@@ -187,27 +69,18 @@ async def _similar_count(cid: str, txn: dict | None) -> int:
     return await db.transactions.count_documents(q)
 
 
-# ---------------------------------------------------------------------------
-# 2. LLM fallback — closest existing account, else complete GAAP proposal.
-# ---------------------------------------------------------------------------
-_RESOLVER_SYSTEM = (
-    "You are a CPA helping a small-business owner who does not know accounting. They described a bank "
-    "transaction in plain English. Decide where it belongs on THEIR chart of accounts.\n"
-    "Rules:\n"
-    "• Money OUT is normally an expense (or an asset purchase, a loan/credit-card paydown, an owner draw, "
-    "or a transfer). Money IN is normally revenue (or an owner contribution, a loan received, a refund, or a transfer).\n"
-    "• Prefer the closest EXISTING account. Only propose a NEW account when nothing existing reasonably fits.\n"
-    "• A new account must be fully specified with standard GAAP naming (never the user's literal words), the "
-    "right code range (1xxx assets, 2xxx liabilities, 3xxx equity, 4xxx revenue, 5xxx COGS, 6xxx–8xxx expenses), "
-    "type, subtype, detail_type, and — when a natural parent exists on the chart (e.g. 'Software & SaaS' for a "
-    "specific tool, 'Revenue' for a new revenue stream) — parent_account_id.\n"
-    "• Explain in ONE plain sentence a non-accountant understands.\n"
-    "Return strict JSON: {\"existing_account_id\": <id or null>, \"new_account\": {\"name\",\"code\",\"type\","
-    "\"subtype\",\"detail_type\",\"parent_account_id\"} or null, \"why\": str, \"confidence\": 0-1, "
-    "\"alternatives\": [<up to 2 existing ids>], \"not_business\": bool}"
-)
+_CONF_RE = re.compile(r"\b(?:conf(?:irmation)?#?\s*[:#]?\s*[a-z0-9]{5,}|ref(?:erence)?#?\s*[a-z0-9]{5,})", re.IGNORECASE)
 
 
+def _clean_memo(text: str) -> str:
+    """Strip bank confirmation / reference codes ('Conf# ywz25vsrm') so the
+    model doesn't read 'Conf' as 'conference'."""
+    return _CONF_RE.sub("", text or "").strip(" -·")
+
+
+# ---------------------------------------------------------------------------
+# Direction guard — structural, not semantic.
+# ---------------------------------------------------------------------------
 _INCOMPATIBLE = {"money_out": {"revenue"}, "money_in": {"expense", "cogs"}}
 _REFUND_RE = re.compile(r"refund|reimburs|credit(?:ed)? back|returned|rebate|cash ?back|chargeback", re.IGNORECASE)
 
@@ -221,29 +94,52 @@ def direction_ok(acct_type: str | None, direction: str, message: str = "") -> bo
     return (acct_type or "") not in _INCOMPATIBLE.get(direction, set())
 
 
-async def _llm_resolve(message: str, txn: dict | None, accounts: list[dict], direction: str) -> dict:
+# ---------------------------------------------------------------------------
+# LLM calls
+# ---------------------------------------------------------------------------
+_RESOLVER_SYSTEM = (
+    "You are a CPA helping a small-business owner who does not know accounting. They described a bank "
+    "transaction in plain English — it may be a single word, a trade ('a painter', 'the plumber'), a vendor, "
+    "or a story. Work out what the money was FOR and where it belongs on THEIR chart of accounts.\n"
+    "Rules:\n"
+    "• Money OUT is normally an expense (or an asset purchase, a loan/credit-card paydown, an owner draw, "
+    "or a transfer). Money IN is normally revenue (or an owner contribution, a loan received, a refund, or a transfer).\n"
+    "• STRONGLY prefer an EXISTING account whose MEANING matches, even if its name is worded differently "
+    "(a painter → an existing 'Repairs & Maintenance' or 'Contract Labor' account; 'facebook ads' → an existing "
+    "'Advertising & Marketing'). Never pick an existing account just because it is the same type — 'Food Cost' is "
+    "NOT where a painter goes. Read each account's PURPOSE from its name: 'Food Cost (COGS)' is food a restaurant "
+    "sells, not generic job cost; '(COGS)' in a name does not make it a catch-all for direct costs.\n"
+    "• A big-ticket item the business will use for more than a year (vehicle, forklift, machine, computer over ~$2,500) "
+    "is a FIXED ASSET (1xxx), not an expense.\n"
+    "• Only when nothing existing reasonably fits, propose a NEW account. First look in the STANDARD LIBRARY below "
+    "and return its key as `semantic`; only if the library has nothing suitable, return a fully specified "
+    "`new_account` with standard GAAP naming (never the user's literal words), the right code range (1xxx assets, "
+    "2xxx liabilities, 3xxx equity, 4xxx revenue, 5xxx COGS, 6xxx–8xxx expenses), type, subtype, detail_type, and — "
+    "when a natural parent exists on the chart — parent_account_id.\n"
+    "• If the description is genuinely too vague to decide ('stuff', 'things', 'misc') or contradicts the direction "
+    "('sales' for money going out), do NOT guess: return existing_account_id=null, semantic=null, new_account=null, "
+    "confidence=0 and put ONE short, friendly clarifying question in `ask`.\n"
+    "• `why` is ONE plain sentence a non-accountant understands.\n"
+    "Return strict JSON: {\"existing_account_id\": <id or null>, \"semantic\": <library key or null>, "
+    "\"new_account\": {\"name\",\"code\",\"type\",\"subtype\",\"detail_type\",\"parent_account_id\"} or null, "
+    "\"why\": str, \"ask\": str or null, \"confidence\": 0-1, \"alternatives\": [<up to 2 existing ids>], "
+    "\"not_business\": bool}"
+)
+
+_DEDUPE_SYSTEM = (
+    "You are a CPA reviewing a chart of accounts. The owner is about to ADD a new account. Decide whether one of "
+    "the EXISTING accounts listed already means the same thing (same economic purpose), so the new one would be a "
+    "near-duplicate. Be strict: 'Advertising & Marketing' ≡ 'Marketing', 'Legal & Professional Fees' ⊇ "
+    "'Professional Fees', but 'Food Cost' ≠ 'Contract Labor' and 'Meals' ≠ 'Travel'. Same type alone is NOT a match.\n"
+    "Return strict JSON: {\"same_as\": <existing id or null>, \"why\": str}"
+)
+
+
+async def _chat_json(system: str, prompt: str, sid: str) -> dict:
+    import os
     from ai_service import MODEL_NAME, _extract_json, _new_chat
     from llm_client import StreamDone, TextDelta, UserMessage
-    # Structural guard: the LLM never even sees accounts whose type can't
-    # hold money flowing this way (no Revenue for money out, no Expense
-    # for money in).
-    accounts = [a for a in accounts if direction_ok(a.get("type"), direction, message)]
-    acct_lines = "\n".join(
-        f"  - id={a.get('id')} code={a.get('code')} name={a.get('name')} type={a.get('type')} subtype={a.get('subtype','')}"
-        for a in accounts[:220])
-    tline = ""
-    if txn:
-        tline = (f"Transaction: {_clean_memo(txn.get('merchant') or txn.get('description'))} · amount {txn.get('amount')} "
-                 f"({direction.replace('_', ' ')}) · date {txn.get('date')} · memo {_clean_memo(txn.get('description') or '')[:80]}\n")
-    hint = ("Money is going OUT (a payment). It cannot be revenue." if direction == "money_out" else
-            "Money is coming IN (a deposit). It cannot be an expense — unless the user describes a refund or "
-            "reimbursement, which credits the ORIGINAL expense account.")
-    hint += (" If the description is too vague to decide (a single generic word like 'stuff', 'things', 'misc') "
-             "or contradicts the direction (e.g. 'sales' for money going out), do NOT guess: return "
-             "existing_account_id=null, new_account=null, confidence=0 and say what you'd need to know.")
-    prompt = f"{tline}{hint}\nUser's description: {message!r}\n\nChart of accounts (already filtered to types valid for this direction):\n{acct_lines}\n\nReturn the JSON."
-    sid = hashlib.md5(f"rc-{message}-{(txn or {}).get('id')}".encode(), usedforsecurity=False).hexdigest()[:12]
-    chat = _new_chat(_RESOLVER_SYSTEM, f"resolve-cat-{sid}", model_name=MODEL_NAME, feature="ai-review")
+    chat = _new_chat(system, sid, model_name=os.environ.get("LLM_MODEL_RESOLVER") or MODEL_NAME, feature="ai-review")
     raw = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=prompt)):
@@ -256,38 +152,63 @@ async def _llm_resolve(message: str, txn: dict | None, accounts: list[dict], dir
     return _extract_json(raw) or {}
 
 
+def _acct_lines(accounts: list[dict]) -> str:
+    return "\n".join(
+        f"  - id={a.get('id')} code={a.get('code')} name={a.get('name')} type={a.get('type')} subtype={a.get('subtype', '')}"
+        for a in accounts[:220])
+
+
+def _library_lines(direction: str, message: str) -> str:
+    return "\n".join(
+        f"  - {k}: {s['name']} ({s['type']})"
+        for k, s in csa.CANONICAL_SEMANTIC_ACCOUNTS.items() if direction_ok(s["type"], direction, message))
+
+
+async def _llm_resolve(message: str, txn: dict | None, accounts: list[dict], direction: str) -> dict:
+    accounts = [a for a in accounts if direction_ok(a.get("type"), direction, message)]
+    tline = ""
+    if txn:
+        tline = (f"Transaction: {_clean_memo(txn.get('merchant') or txn.get('description'))} · amount {txn.get('amount')} "
+                 f"({direction.replace('_', ' ')}) · date {txn.get('date')} · memo {_clean_memo(txn.get('description') or '')[:80]}\n")
+    hint = ("Money is going OUT (a payment). It cannot be revenue." if direction == "money_out" else
+            "Money is coming IN (a deposit). It cannot be an expense — unless the user describes a refund or "
+            "reimbursement, which credits the ORIGINAL expense account.")
+    prompt = (f"{tline}{hint}\nUser's description: {message!r}\n\n"
+              f"Chart of accounts (already filtered to types valid for this direction):\n{_acct_lines(accounts)}\n\n"
+              f"STANDARD LIBRARY (use a key as `semantic` when proposing new):\n{_library_lines(direction, message)}\n\nReturn the JSON.")
+    sid = hashlib.md5(f"rc-{message}-{(txn or {}).get('id')}".encode(), usedforsecurity=False).hexdigest()[:12]
+    return await _chat_json(_RESOLVER_SYSTEM, prompt, f"resolve-cat-{sid}")
+
+
+async def _llm_dedupe(proposal: dict, accounts: list[dict], direction: str, message: str) -> dict | None:
+    """Does an existing account already MEAN the same thing as `proposal`?
+    Exact normalized-name match is identity; anything looser is decided by
+    the model, never by bucket or token overlap."""
+    want = _norm_name(proposal.get("name"))
+    for a in accounts:
+        if _norm_name(a.get("name")) == want and a.get("type") == proposal.get("type"):
+            return a
+    pool = [a for a in accounts if a.get("type") == proposal.get("type") and direction_ok(a.get("type"), direction, message)]
+    if not pool:
+        return None
+    prompt = (f"Proposed new account: name={proposal.get('name')!r} type={proposal.get('type')} "
+              f"subtype={proposal.get('subtype', '')} detail_type={proposal.get('detail_type', '')}\n"
+              f"Existing accounts of the same type:\n{_acct_lines(pool)}\n\nReturn the JSON.")
+    sid = hashlib.md5(f"dd-{want}-{len(pool)}".encode(), usedforsecurity=False).hexdigest()[:12]
+    data = await _chat_json(_DEDUPE_SYSTEM, prompt, f"dedupe-cat-{sid}")
+    by_id = {a["id"]: a for a in pool}
+    return by_id.get(str(data.get("same_as") or ""))
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-_VAGUE = {"stuff", "things", "thing", "misc", "miscellaneous", "something", "business", "expense", "expenses",
-          "payment", "payments", "purchase", "purchases", "money", "cost", "costs", "sales", "sale", "income",
-          "revenue", "deposit", "withdrawal", "bill", "bills", "fee", "fees", "other", "general"}
-_LEAD_IN = re.compile(r"^\s*(?:(?:these|those|they|this|that|it)\s+(?:are|is|were|was)\s+(?:all\s+|just\s+|for\s+|a\s+|an\s+)?|"
-                      r"(?:it's|that's|they're)\s+(?:a\s+|an\s+|for\s+)?|(?:for|just|all)\s+)", re.IGNORECASE)
-
-
-def is_too_vague(message: str) -> bool:
-    """One generic word ('stuff', 'sales', 'misc') tells us nothing — ask
-    instead of letting the model guess off the bank memo."""
-    core = _LEAD_IN.sub("", (message or "").lower()).strip(" .!?,")
-    words = [w for w in re.findall(r"[a-z']+", core) if w not in {"the", "a", "an", "some", "our", "my"}]
-    return len(words) == 0 or (len(words) == 1 and words[0] in _VAGUE)
-
-
-_CONF_RE = re.compile(r"\b(?:conf(?:irmation)?#?\s*[:#]?\s*[a-z0-9]{5,}|ref(?:erence)?#?\s*[a-z0-9]{5,})", re.IGNORECASE)
-
-
-def _clean_memo(text: str) -> str:
-    """Strip bank confirmation / reference codes ('Conf# ywz25vsrm') so the
-    model doesn't read 'Conf' as 'conference'."""
-    return _CONF_RE.sub("", text or "").strip(" -·")
-
-
 async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
     txn = await db.transactions.find_one({"id": txn_id, "company_id": cid}, {"_id": 0}) if txn_id else None
     direction = _direction(txn)
     accounts = await db.accounts.find({"company_id": cid, "active": {"$ne": False}}, {"_id": 0}).to_list(600)
     by_id = {a["id"]: a for a in accounts}
+    by_code = {str(a.get("code")): a for a in accounts if a.get("code")}
     company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
     template = (company or {}).get("industry_template") or "generic"
     similar = await _similar_count(cid, txn)
@@ -298,42 +219,39 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
                 "subtype": a.get("subtype"), "detail_type": a.get("detail_type"),
                 "parent_account_id": a.get("parent_account_id"), "parent_name": p.get("name") if p else None}
 
-    if is_too_vague(message):
-        return {"recommendation": None, "alternatives": [], "direction": direction, "similar_count": similar,
-                "txn": _txn_brief(txn), "not_business": False, "too_vague": True}
-
-    sem = canonical_semantic_for_text(message, direction)
-    if sem:
-        hit = _existing_for_semantic(accounts, sem)
-        rec = {"kind": "existing", "account": _pack(hit), "why": _why_for(sem, direction, hit),
-               "confidence": 0.9, "source": "canonical"} if hit else \
-              {"kind": "new", "account": _proposal_from_spec(sem, accounts, template), "why": _why_for(sem, direction),
-               "confidence": 0.85, "source": "canonical"}
-        rec["semantic"] = sem
-        return {"recommendation": rec, "alternatives": [], "direction": direction,
-                "similar_count": similar, "txn": _txn_brief(txn), "not_business": sem == "owner_draw"}
-
-    data = await _llm_resolve(message, txn, accounts, direction)
-    by_code = {str(a.get("code")): a for a in accounts if a.get("code")}
-
     def _lookup(ref) -> dict | None:
         ref = str(ref or "")
         return by_id.get(ref) or by_code.get(ref)
 
-    ex = _lookup(data.get("existing_account_id"))
+    base = {"direction": direction, "similar_count": similar, "txn": _txn_brief(txn)}
+    data = await _llm_resolve(message, txn, accounts, direction)
     try:
         conf = float(data.get("confidence") or 0)
     except (TypeError, ValueError):
         conf = 0.0
-    if conf < 0.5:
-        ex = None  # low-confidence guess → ask a direction-aware clarifying question instead
-    if ex and not direction_ok(ex.get("type"), direction, message):
-        ex = None  # belt and braces — never recommend a revenue account for money out, etc.
+    why = data.get("why") or ""
     alts = [_pack(a) for a in (_lookup(i) for i in (data.get("alternatives") or []))
             if a and direction_ok(a.get("type"), direction, message)][:2]
+    not_business = bool(data.get("not_business")) or data.get("semantic") == "owner_draw"
+
+    ex = _lookup(data.get("existing_account_id"))
+    if conf < 0.5 or (ex and not direction_ok(ex.get("type"), direction, message)):
+        ex = None
     if ex:
-        rec = {"kind": "existing", "account": _pack(ex), "why": data.get("why") or "", "source": "llm",
-               "confidence": float(data.get("confidence") or 0.6)}
+        rec = {"kind": "existing", "account": _pack(ex), "why": why, "source": "llm", "confidence": conf}
+        return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
+
+    if conf < 0.5:
+        return {**base, "recommendation": None, "alternatives": alts, "not_business": not_business,
+                "too_vague": True, "ask": data.get("ask") or why or None}
+
+    sem = data.get("semantic") if data.get("semantic") in csa.CANONICAL_SEMANTIC_ACCOUNTS else None
+    if sem and direction_ok(csa.CANONICAL_SEMANTIC_ACCOUNTS[sem]["type"], direction, message):
+        linked = next((a for a in accounts if a.get("linked_semantic") == sem), None)
+        if linked:
+            rec = {"kind": "existing", "account": _pack(linked), "why": why, "source": "llm+library", "confidence": conf}
+            return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
+        acct = _proposal_from_spec(sem, accounts, template)
     elif isinstance(data.get("new_account"), dict) and data["new_account"].get("name") \
             and direction_ok(data["new_account"].get("type"), direction, message):
         na = data["new_account"]
@@ -341,25 +259,26 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
         taken = {a.get("code") for a in accounts}
         code = str(na.get("code") or "")
         if not code or code in taken:
-            base = {"asset": 1500, "liability": 2500, "equity": 3500, "revenue": 4500, "cogs": 5500}.get(na.get("type"), 6900)
-            code = next(str(c) for c in range(base, base + 400) if str(c) not in taken)
+            start = {"asset": 1500, "liability": 2500, "equity": 3500, "revenue": 4500, "cogs": 5500}.get(na.get("type"), 6900)
+            code = next(str(c) for c in range(start, start + 400) if str(c) not in taken)
         acct = {"name": na.get("name"), "code": code, "type": na.get("type") or ("revenue" if direction == "money_in" else "expense"),
                 "subtype": na.get("subtype") or "", "detail_type": na.get("detail_type") or "",
                 "parent_account_id": parent["id"] if parent else None, "parent_name": parent.get("name") if parent else None,
                 "tax_line": None, "semantic": None}
         normalize_account_payload(acct)
-        dup = find_semantic_duplicate(accounts, acct)
-        if dup:
-            rec = {"kind": "existing", "account": _pack(dup), "source": "llm+dedupe",
-                   "why": (data.get("why") or "") + f" Your chart already has “{dup.get('name')}” for this, so I'd use it rather than add a near-duplicate.",
-                   "confidence": float(data.get("confidence") or 0.6)}
-        else:
-            rec = {"kind": "new", "account": acct, "why": data.get("why") or "", "source": "llm",
-                   "confidence": float(data.get("confidence") or 0.6)}
     else:
-        rec = None
-    return {"recommendation": rec, "alternatives": alts, "direction": direction, "similar_count": similar,
-            "txn": _txn_brief(txn), "not_business": bool(data.get("not_business"))}
+        return {**base, "recommendation": None, "alternatives": alts, "not_business": not_business,
+                "ask": data.get("ask") or None}
+
+    dup = await _llm_dedupe(acct, accounts, direction, message)
+    if dup:
+        rec = {"kind": "existing", "account": _pack(dup), "source": "llm+dedupe", "confidence": conf,
+               "why": f"{why} Your chart already has “{dup.get('name')}” for this, so I'd use it rather than add a near-duplicate."}
+    else:
+        rec = {"kind": "new", "account": acct, "why": why, "source": "llm", "confidence": conf}
+        if acct.get("semantic"):
+            rec["semantic"] = acct["semantic"]
+    return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
 
 
 def _txn_brief(txn: dict | None) -> dict | None:
@@ -370,9 +289,9 @@ def _txn_brief(txn: dict | None) -> dict | None:
 
 
 async def create_account_from_proposal(cid: str, proposal: dict, template: str = "generic") -> dict:
-    """Create the proposed account with every field. Canonical proposals go
-    through ensure_semantic_account (idempotent); LLM proposals are inserted
-    directly with normalized subtype/detail_type and optional parent."""
+    """Create the proposed account with every field. Library proposals go
+    through ensure_semantic_account (idempotent); custom LLM proposals are
+    inserted directly with normalized subtype/detail_type and optional parent."""
     if proposal.get("semantic"):
         acct = await csa.ensure_semantic_account(db, cid, proposal["semantic"], template=template)
         if acct:
