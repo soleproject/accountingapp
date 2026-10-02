@@ -1395,7 +1395,12 @@ export default function Transactions() {
     setAccts(a.data.accounts || []);
     setInvoices(i.data.invoices || []);
     setBills(b.data.bills || []);
-    setSelected(new Set());
+    if (similarFreshRef.current) {
+      similarFreshRef.current = false;
+      setSelected(new Set((t.data.transactions || []).map(r => r.id)));
+    } else {
+      setSelected(new Set());
+    }
   };
 
   // Contact options for the advanced-filter panel. Fetched once per
@@ -1419,12 +1424,50 @@ export default function Transactions() {
 
   // "Show N similar" from the AI panel: same-page via action bus, cross-page
   // via sessionStorage (the panel navigates here first, then we hydrate).
+  // We snapshot the view the user was looking at so Clear puts them back.
+  const similarReturnRef = useRef(null);
+  const similarFreshRef = useRef(false);
   const applySimilarView = (p) => {
     if (!p?.ids?.length) return;
+    if (!similarReturnRef.current) {
+      similarReturnRef.current = {
+        filter, search, dateFrom, dateTo, page, view, selected,
+        filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter,
+        returnTo: p.returnTo || null,
+      };
+    }
+    similarFreshRef.current = true;
     setFilter("all"); setSearch(""); setDebouncedSearch(""); setView("list");
+    setFilterBankAccountId(""); setFilterCategoryId(""); setFilterContactId("");
+    setFilterAmountMin(""); setFilterAmountMax(""); setDirectionFilter("");
     setSimilarView(p); setPage(1);
   };
-  useActionListener("show-similar-txns", applySimilarView);
+  const clearSimilarView = () => {
+    const snap = similarReturnRef.current;
+    similarReturnRef.current = null;
+    setSimilarView(null);
+    if (snap) {
+      setFilter(snap.filter); setSearch(snap.search); setDebouncedSearch(snap.search.trim().length >= 2 ? snap.search.trim() : "");
+      setDateFrom(snap.dateFrom); setDateTo(snap.dateTo); setView(snap.view);
+      setFilterBankAccountId(snap.filterBankAccountId); setFilterCategoryId(snap.filterCategoryId); setFilterContactId(snap.filterContactId);
+      setFilterAmountMin(snap.filterAmountMin); setFilterAmountMax(snap.filterAmountMax); setDirectionFilter(snap.directionFilter);
+      setPage(snap.page);
+      setTimeout(() => setSelected(snap.selected || new Set()), 0);
+    } else {
+      setSelected(new Set());
+    }
+    emitAction("similar-view-cleared");
+    if (snap?.returnTo && snap.returnTo !== "/accounting/transactions") navigate(snap.returnTo);
+  };
+  const applySimilarRef = useRef(applySimilarView);
+  const clearSimilarRef = useRef(clearSimilarView);
+  useEffect(() => { applySimilarRef.current = applySimilarView; clearSimilarRef.current = clearSimilarView; });
+  useActionListener("show-similar-txns", (p) => applySimilarRef.current(p));
+  useActionListener("similar-clear", () => clearSimilarRef.current());
+  useEffect(() => {
+    if (!similarView) return;
+    emitAction("similar-selection-changed", { ids: [...selected] });
+  }, [selected, similarView]);
   useEffect(() => {
     const raw = sessionStorage.getItem("axiom_similar_view");
     if (!raw) return;
@@ -1660,7 +1703,8 @@ export default function Transactions() {
   }, [currentId]);
 
   const clearFilters = () => {
-    setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all"); setSimilarView(null);
+    setSearch(""); setDateFrom(""); setDateTo(""); setFilter("all");
+    if (similarView) { similarReturnRef.current = null; setSimilarView(null); emitAction("similar-view-cleared"); }
     setFilterBankAccountId(""); setFilterCategoryId(""); setFilterContactId("");
     setFilterAmountMin(""); setFilterAmountMax(""); setDirectionFilter("");
   };
@@ -2698,8 +2742,8 @@ export default function Transactions() {
         <div data-testid="similar-view-chip"
              className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 pl-3 pr-1.5 py-1 text-[12px] text-indigo-900">
           <Sparkles size={12} className="text-indigo-500" />
-          <span>Showing <b>{similarView.count || similarView.ids.length}</b> similar{similarView.label ? <> to <b>{similarView.label}</b></> : null} · unreviewed only</span>
-          <button type="button" data-testid="similar-view-clear" onClick={() => setSimilarView(null)}
+          <span>Showing <b>{similarView.label || "similar"}</b> · <b>{selected.size}</b> of {similarView.ids.length} ticked{similarView.count ? ` (focused + ${similarView.count} similar)` : ""} · unreviewed only</span>
+          <button type="button" data-testid="similar-view-clear" onClick={clearSimilarView}
                   className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-indigo-700 hover:bg-indigo-100">
             <X size={11} /> Clear
           </button>

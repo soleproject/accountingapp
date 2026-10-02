@@ -62,9 +62,10 @@ function inferAccountTypeFromName(name) {
 // Recommendation card for the meaning-first resolver: one primary action
 // (use existing / create & categorize), optional "also N similar", up to
 // two alternative existing accounts, and an owner-draw escape hatch.
-function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar }) {
+function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClearSimilar }) {
   const [busy, setBusy] = useState(false);
-  const { rec, similar, alternatives, direction } = card;
+  const { rec, similar, alternatives, direction, similarMode } = card;
+  const ticked = similarMode?.active ? (similarMode.ticked || []) : null;
   const a = rec.account;
   const isNew = rec.kind === "new";
   const run = async (args) => { if (busy) return; setBusy(true); try { await onApply(args); } finally { setBusy(false); } };
@@ -83,10 +84,23 @@ function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar }) {
           {busy ? "Applying…" : isNew ? "Create account & categorize" : "Use this"}
         </button>
         {similar > 0 && (
-          <button type="button" disabled={busy} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
+          <button type="button" disabled={busy || !!ticked} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
                   className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             Show {similar} similar
           </button>
+        )}
+        {ticked && (
+          <>
+            <button type="button" disabled={busy || ticked.length === 0} onClick={() => run({ ...primaryArgs, txnIds: ticked })}
+                    data-testid="category-recommend-apply-ticked"
+                    className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+              Apply to {ticked.length}
+            </button>
+            <button type="button" disabled={busy} onClick={() => onClearSimilar?.(card)} data-testid="category-recommend-clear-similar"
+                    className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Clear
+            </button>
+          </>
         )}
         {similar > 0 && (
           <button type="button" disabled={busy} onClick={() => run({ ...primaryArgs, withSimilar: true })} data-testid="category-recommend-apply-similar"
@@ -830,6 +844,18 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("ai-chat-say", (payload) => {
     const msg = (payload?.message || "").trim();
     if (msg) setMessages(m => [...m, { role: "assistant", content: msg }]);
+  });
+
+  // "Show N similar" lifecycle — Transactions page reports the ticked ids
+  // while the similar view is active, and tells us when it's been cleared.
+  useActionListener("similar-selection-changed", (payload) => {
+    const ids = payload?.ids || [];
+    setMessages(m => m.map(mm => mm.card?.similarMode?.active
+      ? { ...mm, card: { ...mm.card, similarMode: { active: true, ticked: ids } } } : mm));
+  });
+  useActionListener("similar-view-cleared", () => {
+    setMessages(m => m.map(mm => mm.card?.similarMode?.active
+      ? { ...mm, card: { ...mm.card, similarMode: null } } : mm));
   });
 
   // Same as `ai-chat-say` but attaches a clickable CTA to the bubble
@@ -3758,14 +3784,17 @@ export default function AiPanel({ collapsed, onToggle }) {
               <CategoryRecommendCard
                 card={m.card}
                 onShowSimilar={(card) => {
-                  const payload = { ids: card.similarIds || [], label: card.similarLabel || "", count: card.similar || 0 };
+                  const ids = [...new Set([card.txnId, ...(card.similarIds || [])].filter(Boolean))];
+                  const payload = { ids, label: card.similarLabel || "", count: card.similar || 0, returnTo: location.pathname };
+                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: { ...mm2.card, similarMode: { active: true, ticked: ids } } } : mm2));
                   sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
                   if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
                   else navigate("/accounting/transactions");
                 }}
-                onApply={async ({ withSimilar, accountId, newAccount }) => {
+                onClearSimilar={() => emitAction("similar-clear")}
+                onApply={async ({ withSimilar, accountId, newAccount, txnIds }) => {
                   try {
-                    let ids = m.card.txnId ? [m.card.txnId] : [];
+                    let ids = txnIds || (m.card.txnId ? [m.card.txnId] : []);
                     if (withSimilar && m.card.txn) {
                       const q = m.card.txn.contact_id ? `contact_id=${m.card.txn.contact_id}` : `q=${encodeURIComponent(m.card.txn.merchant || "")}`;
                       const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
@@ -3779,6 +3808,7 @@ export default function AiPanel({ collapsed, onToggle }) {
                     const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
                     setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
                     if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+                    if (m.card.similarMode?.active) emitAction("similar-clear");
                     emitAction("txns:changed");
                     if (m.card.txnId && inquiryTxnRef.current === m.card.txnId) resolveInquiry();
                   } catch {
