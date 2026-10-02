@@ -17,7 +17,7 @@ import { useAuth } from "@/lib/auth";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
 import {
-  X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks, MessageCircle,
+  X, Check, CheckCircle2, ArrowRight as ArrowRightIcon, ListChecks,
   FileText, Receipt as ReceiptIcon, Users,
 } from "lucide-react";
 
@@ -210,19 +210,28 @@ function MonthlyTodos({ todos, onDismiss }) {
     ? steps.findIndex(s => (s?.count ?? 0) > 0)
     : -1;
 
-  // Setup mode has a "Switch to chat mode" toggle that swaps the three
-  // checklist steps in-place for three chat-review tiles. Chat mode is
-  // the default; preference persists across reloads once the user
-  // explicitly picks either mode.
-  const [chatMode, setChatMode] = useState(() => {
+  // Setup mode offers three review modes via a dropdown:
+  //   ai        → 2 steps: AI Transaction Review (Transactions page) + Check Review   (default)
+  //   chat      → 3 chat-review tiles
+  //   checklist → classic 1/2/3 setup checklist
+  // Preference persists across reloads once the user picks one.
+  const MODES = [
+    { key: "ai", label: "AI Transaction Review" },
+    { key: "chat", label: "Review Chat Mode" },
+    { key: "checklist", label: "Checklist Mode" },
+  ];
+  const [mode, setMode] = useState(() => {
     try {
       const v = localStorage.getItem("dashboard-todos-mode");
-      return v === null ? true : v === "chat";
-    } catch { return true; }
+      return MODES.some(m => m.key === v) ? v : "ai";
+    } catch { return "ai"; }
   });
+  const chatMode = mode === "chat";
+  const aiMode = mode === "ai";
   const [chatCounts, setChatCounts] = useState(null);
+  const [todoCount, setTodoCount] = useState(null);
   useEffect(() => {
-    if (!chatMode || !currentId) return;
+    if (mode === "checklist" || !currentId) return;
     let cancelled = false;
     api.get(`/companies/${currentId}/reviewv2/chat-review-queue`)
       .then(r => {
@@ -234,15 +243,38 @@ function MonthlyTodos({ todos, onDismiss }) {
         });
       })
       .catch(() => !cancelled && setChatCounts({ no_category: 0, transactions: 0, checks: 0 }));
+    if (aiMode) {
+      api.get(`/companies/${currentId}/transactions?status=unapproved&limit=1`)
+        .then(r => !cancelled && setTodoCount(r.data?.pagination?.total ?? 0))
+        .catch(() => !cancelled && setTodoCount(0));
+    }
     return () => { cancelled = true; };
-  }, [chatMode, currentId]);
-  const toggleChat = () => {
-    setChatMode(v => {
-      const next = !v;
-      try { localStorage.setItem("dashboard-todos-mode", next ? "chat" : "checklist"); } catch {}
-      return next;
-    });
+  }, [mode, aiMode, currentId]);
+  const pickMode = (next) => {
+    setMode(next);
+    try { localStorage.setItem("dashboard-todos-mode", next); } catch {}
   };
+  const aiSteps = aiMode ? [
+    {
+      title:    "AI Transaction Review",
+      subtitle: "Approve what the AI got right, hand anything off to the assistant",
+      count:    todoCount ?? "…",
+      unit:     "to review",
+      cta:      "/accounting/transactions?filter=unapproved",
+      ctaLabel: "Open transactions",
+      icon:     FileText,
+    },
+    {
+      title:    "Check Review",
+      subtitle: "Checks still waiting on a payee or category",
+      count:    chatCounts?.checks ?? "…",
+      unit:     "checks",
+      cta:      "/accounting/review-chat?tab=checks",
+      ctaLabel: "Open",
+      icon:     ReceiptIcon,
+    },
+  ] : null;
+  const aiDoneCount = aiSteps ? aiSteps.filter(st => st.count === 0).length : 0;
   const chatSteps = chatMode ? [
     {
       title:    "No Category",
@@ -278,36 +310,35 @@ function MonthlyTodos({ todos, onDismiss }) {
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">
-            {chatMode
+            {aiMode ? "AI transaction review" : chatMode
               ? "Chat review mode"
               : todos.mode === "setup" ? "Setup checklist" : "Monthly close checklist"}
           </div>
           <div className="font-heading text-lg font-semibold text-slate-900 mt-0.5">
-            {chatMode ? "Answer with AI" : todos.title}
+            {aiMode ? "Review with the assistant" : chatMode ? "Answer with AI" : todos.title}
           </div>
           <div className="text-xs text-slate-500 mt-0.5">
-            {chatMode
-              ? "Same books, chat-first. Pick a section to start."
-              : todos.subtitle}
+            {aiMode
+              ? "Two steps: approve transactions, then clear the checks."
+              : chatMode
+                ? "Same books, chat-first. Pick a section to start."
+                : todos.subtitle}
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           {todos.mode === "setup" && (
-            <button
-              type="button"
-              onClick={toggleChat}
-              className="hidden md:flex items-center gap-1 text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
-              data-testid="dashboard-switch-chat-mode"
-              title={chatMode
-                ? "Go back to the classic 1/2/3 checklist"
-                : "Answer these as a guided AI chat instead of the checklist"}
+            <select
+              value={mode}
+              onChange={(e) => pickMode(e.target.value)}
+              data-testid="dashboard-review-mode-select"
+              title="Choose how you want to review"
+              className="hidden md:block text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-1 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-300"
             >
-              <MessageCircle size={12} />
-              {chatMode ? "Switch to checklist mode" : "Switch to chat mode"}
-            </button>
+              {MODES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
           )}
           <div className="text-[11px] text-slate-500">
-            {chatMode ? chatDoneCount : doneCount} of 3 done
+            {aiMode ? `${aiDoneCount} of 2 done` : `${chatMode ? chatDoneCount : doneCount} of 3 done`}
           </div>
           <button
             type="button"
@@ -324,8 +355,12 @@ function MonthlyTodos({ todos, onDismiss }) {
 
       <div className="relative">
         <div className="absolute left-0 right-0 top-6 h-0.5 bg-slate-100 -z-0" />
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
-          {chatMode ? (
+        <div className={`grid grid-cols-1 ${aiMode ? "md:grid-cols-2" : "md:grid-cols-3"} gap-4 relative`}>
+          {aiMode ? (
+            aiSteps.map((s, i) => (
+              <ChatStep key={i} index={i + 1} step={s} loading={s.count === "…"} />
+            ))
+          ) : chatMode ? (
             chatSteps.map((s, i) => (
               <ChatStep key={i} index={i + 1} step={s} loading={chatCounts === null} />
             ))
@@ -391,7 +426,7 @@ function ChatStep({ index, step, loading }) {
             data-testid={`dashboard-chat-cta-${index}`}
             className="mt-3 inline-flex items-center gap-1 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-3 py-1.5 transition-colors"
           >
-            Open chat
+            {step.ctaLabel || "Open chat"}
             <ArrowRightIcon size={12} />
           </Link>
         ) : (
