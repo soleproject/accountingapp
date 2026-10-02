@@ -2530,18 +2530,17 @@ async def post_upload(
         except Exception:  # noqa: BLE001
             cat_analysis = None
         if cat_analysis:
-            # Post-process: resolve every AI line to a real account
-            # on this company's CoA (auto-creates canonical accounts
-            # like "Taxes & Licenses" when missing). No hallucinated
-            # account names ever reach the ledger.
+            # Post-process: resolve every AI line to a real account on
+            # this company's CoA via the AI-first resolver (shared with
+            # the Pro AI panel). Creates library/GAAP accounts when
+            # nothing existing fits — never hallucinated names.
             try:
-                from curated_receipt_accounts import resolve_line_account
-                for line in (cat_analysis.get("line_items") or []):
-                    acct = await resolve_line_account(batch["company_id"], line)
-                    if acct:
-                        line["account_id"]   = acct.get("id")
-                        line["account_code"] = acct.get("code")
-                        line["account_name"] = acct.get("name")
+                from ai_category_resolver import categorize_receipt_analysis
+                await categorize_receipt_analysis(
+                    batch["company_id"], cat_analysis,
+                    vendor=(meta.get("txn_desc") or ctx.get("description") or ""),
+                    industry=(company.get("industry") or company.get("business_type") or ""),
+                )
             except Exception:  # noqa: BLE001
                 pass
             resp["categorization_analysis"] = cat_analysis

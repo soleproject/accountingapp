@@ -134,13 +134,16 @@ _DEDUPE_SYSTEM = (
     "You are a CPA reviewing a chart of accounts. The owner is about to ADD a new account. Decide whether one of "
     "the EXISTING accounts listed already means the same thing (same economic purpose), so the new one would be a "
     "near-duplicate. Be strict: 'Advertising & Marketing' ≡ 'Marketing', 'Legal & Professional Fees' ⊇ "
-    "'Professional Fees', but 'Food Cost' ≠ 'Contract Labor' and 'Meals' ≠ 'Travel'. Same type alone is NOT a match.\n"
+    "'Professional Fees', but 'Food Cost' ≠ 'Contract Labor' and 'Meals' ≠ 'Travel'. Same type alone is NOT a match, and a "
+    "broad catch-all ('Supplies & Materials', 'Other Expense', 'Miscellaneous') is NOT the same as a specific account "
+    "('Equipment & Tools', 'Software & SaaS'). Only answer same_as when a CPA would consider the two names interchangeable.\n"
     "Return strict JSON: {\"same_as\": <existing id or null>, \"why\": str}"
 )
 
 
 async def _chat_json(system: str, prompt: str, sid: str, model: str | None = None) -> dict:
     import os
+
     from ai_service import MODEL_NAME, _extract_json, _new_chat
     from llm_client import StreamDone, TextDelta, UserMessage
     chat = _new_chat(system, sid, model_name=model or os.environ.get("LLM_MODEL_RESOLVER") or MODEL_NAME, feature="ai-review")
@@ -309,6 +312,123 @@ async def classify_card_intent(message: str, actions: list[dict]) -> dict:
     except (TypeError, ValueError):
         conf = 0.0
     return {"action_id": aid if aid in valid else None, "confidence": conf}
+
+
+_RECEIPT_LINES_SYSTEM = (
+    "You are a CPA categorizing the line items of ONE business receipt (money OUT) onto the client's chart of "
+    "accounts. For every line decide where it belongs.\n"
+    "Rules:\n"
+    "• STRONGLY prefer an EXISTING account whose MEANING matches, even if worded differently. Never pick an account "
+    "just because it is the same type — 'Food Cost (COGS)' is NOT where lumber or a drill goes. Read each account's "
+    "PURPOSE from its name.\n"
+    "• Sales tax PAID on this purchase is an EXPENSE line (Taxes & Licenses / Sales Tax Paid…), never lumped with the "
+    "goods and NEVER 'Sales Tax Payable' or any liability (that is tax the business collected from its own customers). "
+    "If no tax expense account exists, propose new_account 'Sales Tax Paid' (expense, 6xxx). Shipping/freight goes to a "
+    "shipping account if one exists, else with the goods.\n"
+    "• Only when nothing existing fits, propose NEW: first a key from the STANDARD LIBRARY as `semantic`; only if the "
+    "library has nothing suitable, a fully specified `new_account` (GAAP name, code 5xxx COGS / 6xxx–8xxx expense / "
+    "1xxx asset for durable equipment, type, subtype, detail_type).\n"
+    "• A durable item used for more than a year and costing over ~$2,500 is a FIXED ASSET, not an expense.\n"
+    "Return strict JSON: {\"lines\": [{\"idx\": int, \"existing_account_code\": <code of an existing account or null>, \"semantic\": <key or null>, "
+    "\"new_account\": {\"name\",\"code\",\"type\",\"subtype\",\"detail_type\"} or null, \"confidence\": 0-1}]}"
+)
+
+
+async def _uncategorized_expense(cid: str, accounts: list[dict]) -> dict:
+    hit = next((a for a in accounts if str(a.get("code")) in ("6999", "9999") or _norm_name(a.get("name")) == "uncategorized expense"), None)
+    if hit:
+        return hit
+    return await create_account_from_proposal(cid, {"name": "Uncategorized Expense", "code": "6999", "type": "expense",
+                                                    "subtype": "operating_expense", "detail_type": "operating_expense"})
+
+
+async def categorize_receipt_lines(cid: str, lines: list[dict], vendor: str = "", industry: str = "") -> list[dict | None]:
+    """AI-first: vision's exact CoA picks are trusted; everything else goes
+    through one batched LLM call (CoA + library), then semantic dedupe and
+    account creation. Returns account docs aligned to `lines`."""
+    accounts = await db.accounts.find({"company_id": cid, "active": {"$ne": False}}, {"_id": 0}).to_list(600)
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
+    template = (company or {}).get("industry_template") or "generic"
+    by_id = {a["id"]: a for a in accounts}
+    by_code = {str(a.get("code")): a for a in accounts if a.get("code")}
+    by_name = {_norm_name(a.get("name")): a for a in accounts}
+    out: list[dict | None] = [None] * len(lines)
+
+    pending = []
+    for i, ln in enumerate(lines):
+        code, name = str(ln.get("account_code") or ""), _norm_name(ln.get("account_name") or "")
+        hit = by_code.get(code) if code else None
+        if hit and name and _norm_name(hit.get("name")) != name:
+            hit = by_name.get(name) or hit
+        hit = hit or (by_name.get(name) if name else None)
+        if hit and direction_ok(hit.get("type"), "money_out"):
+            out[i] = hit
+        else:
+            pending.append(i)
+    if not pending:
+        return out
+
+    pool = [a for a in accounts if direction_ok(a.get("type"), "money_out")]
+    line_txt = "\n".join(
+        f"  - idx={i} description={lines[i].get('description')!r} amount={lines[i].get('amount')}"
+        + (f" hint={lines[i].get('category_hint')!r}" if lines[i].get("category_hint") else "")
+        + (f" vision_suggested={lines[i].get('account_name')!r}" if lines[i].get("account_name") else "")
+        for i in pending)
+    prompt = (f"Receipt from: {vendor or 'unknown vendor'}" + (f" · buyer industry: {industry}" if industry else "") +
+              f"\nLines to categorize:\n{line_txt}\n\nChart of accounts:\n{_acct_lines(pool)}\n\n"
+              f"STANDARD LIBRARY (use a key as `semantic` when proposing new):\n{_library_lines('money_out', '')}\n\nReturn the JSON.")
+    sid = hashlib.md5(f"rl-{cid}-{line_txt}".encode(), usedforsecurity=False).hexdigest()[:12]
+    data = await _chat_json(_RECEIPT_LINES_SYSTEM, prompt, f"receipt-lines-{sid}")
+    results = {int(r.get("idx")): r for r in (data.get("lines") or []) if isinstance(r, dict) and str(r.get("idx", "")).lstrip("-").isdigit()}
+
+    created: dict[str, dict] = {}  # proposal key → account
+    for i in pending:
+        r = results.get(i) or {}
+        ref = str(r.get("existing_account_code") or r.get("existing_account_id") or "")
+        ex = by_code.get(ref) or by_id.get(ref)
+        if ex and direction_ok(ex.get("type"), "money_out"):
+            out[i] = ex
+            continue
+        sem = r.get("semantic") if r.get("semantic") in csa.CANONICAL_SEMANTIC_ACCOUNTS else None
+        na = r.get("new_account") if isinstance(r.get("new_account"), dict) and r["new_account"].get("name") else None
+        if sem:
+            key, proposal = f"sem:{sem}", _proposal_from_spec(sem, accounts, template)
+        elif na and direction_ok(na.get("type") or "expense", "money_out"):
+            proposal = {"name": na["name"], "code": str(na.get("code") or ""), "type": na.get("type") or "expense",
+                        "subtype": na.get("subtype") or "", "detail_type": na.get("detail_type") or "", "semantic": None}
+            normalize_account_payload(proposal)
+            key = f"new:{_norm_name(proposal['name'])}"
+        else:
+            out[i] = await _uncategorized_expense(cid, accounts)
+            continue
+        if key not in created:
+            linked = next((a for a in accounts if sem and a.get("linked_semantic") == sem), None)
+            dup = linked or await _llm_dedupe(proposal, accounts, "money_out", "")
+            if dup:
+                created[key] = dup
+            else:
+                acct = await create_account_from_proposal(cid, proposal, template=template)
+                created[key] = acct
+                accounts.append(acct)
+        out[i] = created[key]
+    return out
+
+
+async def categorize_receipt_analysis(cid: str, analysis: dict, vendor: str = "", industry: str = "") -> dict:
+    """Stamp real account id/code/name onto every analysis line and rebuild
+    the per-account rollup. Mutates and returns `analysis`."""
+    from client_review_engine import rollup_suggested_categories
+    for key in ("line_items",):
+        lines = analysis.get(key) or []
+        if not lines:
+            continue
+        accts = await categorize_receipt_lines(cid, lines, vendor, industry)
+        for ln, a in zip(lines, accts):
+            if a:
+                ln["account_id"], ln["account_code"], ln["account_name"] = a.get("id"), a.get("code"), a.get("name")
+        if "suggested_categories" in analysis:
+            analysis["suggested_categories"] = rollup_suggested_categories(lines)
+    return analysis
 
 
 def _txn_brief(txn: dict | None) -> dict | None:

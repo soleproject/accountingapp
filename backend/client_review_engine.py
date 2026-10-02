@@ -824,67 +824,30 @@ this shape:
 {
   "narrative": "1-2 sentence plain-English readout ("Home Depot run — lumber, concrete, and a Milwaukee driver for job supplies. Sales tax billed separately.").",
   "line_items": [
-    {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber",     "line_kind": "matched"},
-    {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete",   "line_kind": "matched"},
-    {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": "5200", "account_name": "Small Tools & Equipment","line_kind": "matched"},
-    {"description": "SALES TAX",      "amount":  34.14, "account_code": "6500", "account_name": "Taxes & Licenses",       "line_kind": "tax"}
+    {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber",     "category_hint": null},
+    {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete",   "category_hint": null},
+    {"description": "MILWAUKEE M18",  "amount":  99.00, "account_code": null,   "account_name": null,                     "category_hint": "cordless power tool for job work"},
+    {"description": "SALES TAX",      "amount":  34.14, "account_code": "6500", "account_name": "Taxes & Licenses",       "category_hint": "sales tax"}
   ],
   "totals": {"subtotal": 449.15, "tax": 34.14, "grand_total": 483.29}
 }
 
 RULES:
-* Every line MUST include a `line_kind` — a closed enum that
-  guarantees zero hallucination on the server side. Use exactly
-  one of these values:
-    - "tax"               (sales tax, use tax, permits, licenses)
-    - "shipping"          (freight, postage, delivery)
-    - "fuel"              (gas, diesel)
-    - "vehicle"           (repairs on a vehicle, tires, oil change)
-    - "repairs"           (equipment / building repairs)
-    - "meals"             (business meals, dining)
-    - "office_supplies"   (paper, pens, printer ink)
-    - "software"          (SaaS, subscriptions)
-    - "utilities"         (electricity, water, gas)
-    - "telecom"           (internet, phone, cell)
-    - "insurance"
-    - "rent"
-    - "professional_fees" (legal, accounting, consulting)
-    - "bank_fees"         (bank charges, merchant fees)
-    - "travel"            (flights, lodging, rideshare)
-    - "advertising"       (marketing, ads)
-    - "materials"         (raw materials, lumber, concrete, drywall,
-                           paint, fertilizer, feed — anything the
-                           business RESELLS or consumes on a job)
-    - "job_supplies"      (nails, screws, tape, cleaning rags,
-                           gloves, trash bags — consumables that
-                           support job execution but aren't the main
-                           material)
-    - "small_tools"       (drivers, hand tools, saws, drills — items
-                           the business uses to do the work)
-    - "cogs"              (generic cost of goods sold when the item
-                           doesn't fit materials / job_supplies /
-                           small_tools)
-    - "uncategorized_expense" (couldn't place — DO NOT invent)
-    - "matched"           (specific industry account you're confident
-                          about — e.g. Food Cost for a restaurant,
-                          Feed for agriculture, Chemicals for a
-                          landscaper — where the CoA has that
-                          specific bucket)
-* Use `matched` ONLY when the client's CoA (provided below)
-  actually contains a specific account that fits — pass its EXACT
-  code + name. When the CoA lacks that specific bucket, pick the
-  closest canonical `line_kind` above (e.g. materials/tax/shipping)
-  and the server will resolve the real account.
+* Every line SHOULD carry `account_code` + `account_name` copied EXACTLY
+  from the client's chart of accounts (provided below) when an account
+  there genuinely fits the item. If nothing on the chart fits, set both
+  to null and instead give a short plain-English `category_hint`
+  describing what the item is for (e.g. "lumber for a job",
+  "sales tax", "hand tool", "software subscription"). The server
+  resolves hints with a semantic resolver — never invent account names.
 * Aggregate identical SKUs (same description + unit price) into
   ONE line item — the ext price is the sum. Skip zero-value lines.
-* Sales tax: ALWAYS emit as its own line item with `"line_kind": "tax"`
-  and map it to a dedicated tax expense account from the CoA.
-  Prefer (in order): "Sales Tax Paid", "Sales Tax Expense",
-  "Taxes & Licenses", "Taxes Paid", "State Sales Tax", "Use Tax",
-  or the closest generic tax-flavored expense account. NEVER lump
+* Sales tax: ALWAYS emit as its own line item (`category_hint`: "sales tax")
+  and map it to a dedicated tax expense account from the CoA when one
+  exists ("Sales Tax Paid", "Taxes & Licenses", "Use Tax", …). NEVER lump
   sales tax into the same category as the underlying goods —
   bookkeepers report sales tax paid separately for reconciliation.
-  Shipping = its own line with `"line_kind": "shipping"`, mapped to
+  Shipping = its own line (`category_hint`: "shipping / freight"), mapped to
   "Shipping & Delivery" / "Freight" / "Postage" if available,
   otherwise to the same account as the underlying goods.
 * `line_items[].amount` MUST sum to `totals.grand_total` within
@@ -892,6 +855,23 @@ RULES:
   if not, sum the item extendeds.
 * No commentary outside the JSON. No markdown fences.
 """
+
+
+def rollup_suggested_categories(lines: list[dict]) -> list[dict]:
+    """Per-account subtotals for the grouped receipt UI."""
+    buckets: dict[str, dict] = {}
+    for idx, it in enumerate(lines):
+        key = f"{it.get('account_code') or ''}|{it.get('account_name') or ''}"
+        b = buckets.setdefault(key, {
+            "account_id":   it.get("account_id"),
+            "account_code": it.get("account_code"),
+            "account_name": it.get("account_name") or "Uncategorized",
+            "amount":       0.0,
+            "line_indices": [],
+        })
+        b["amount"] = round(b["amount"] + float(it.get("amount") or 0), 2)
+        b["line_indices"].append(idx)
+    return sorted(buckets.values(), key=lambda b: -b["amount"])
 
 
 async def analyze_receipt_for_categorization(
@@ -989,31 +969,17 @@ async def analyze_receipt_for_categorization(
         if amt <= 0:
             continue
         clean.append({
-            "description":  str(it.get("description") or "")[:80] or "Item",
-            "amount":       amt,
-            "account_code": str(it.get("account_code") or "")[:12] or None,
-            "account_name": str(it.get("account_name") or "")[:64] or None,
-            "kind":         (it.get("kind") or "item").lower()[:16],
+            "description":   str(it.get("description") or "")[:80] or "Item",
+            "amount":        amt,
+            "account_code":  str(it.get("account_code") or "")[:12] or None,
+            "account_name":  str(it.get("account_name") or "")[:64] or None,
+            "category_hint": str(it.get("category_hint") or it.get("line_kind") or "")[:80] or None,
+            "kind":          (it.get("kind") or "item").lower()[:16],
         })
     if not clean:
         return None
     parsed["line_items"] = clean
-
-    # Roll up per-account subtotals for the pretty grouped UI.
-    buckets: dict[str, dict] = {}
-    for idx, it in enumerate(clean):
-        key = f"{it.get('account_code') or ''}|{it.get('account_name') or ''}"
-        b = buckets.setdefault(key, {
-            "account_code": it.get("account_code"),
-            "account_name": it.get("account_name") or "Uncategorized",
-            "amount":       0.0,
-            "line_indices": [],
-        })
-        b["amount"] = round(b["amount"] + it["amount"], 2)
-        b["line_indices"].append(idx)
-    parsed["suggested_categories"] = sorted(
-        buckets.values(), key=lambda b: -b["amount"],
-    )
+    parsed["suggested_categories"] = rollup_suggested_categories(clean)
 
     totals = parsed.get("totals") or {}
     if not isinstance(totals, dict):

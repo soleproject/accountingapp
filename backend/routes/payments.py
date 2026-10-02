@@ -638,36 +638,30 @@ async def analyze_receipt_vision(
         }
 
     # ── Post-process: resolve every AI line to a real account ──────
-    # The AI's account_code / account_name is a suggestion, not
-    # gospel — the client_review_engine prompt now returns a
-    # `line_kind` enum per line, and we use `curated_receipt_accounts`
-    # to map each kind to a real account on this company's CoA (auto-
-    # creating canonical accounts like Taxes & Licenses / Shipping &
-    # Delivery when they don't exist yet). Guarantees zero
-    # hallucinated account names survive.
+    # The AI's account_code / account_name is a suggestion. The AI-first
+    # resolver (shared with the Pro AI panel) trusts exact CoA picks and
+    # routes everything else through one batched LLM call + semantic
+    # dedupe, creating library/GAAP accounts only when nothing fits.
     if analysis:
         try:
-            from curated_receipt_accounts import resolve_line_account
-            for arm_key in ("line_items", ):
-                arm = analysis.get(arm_key) or []
-                for line in arm:
-                    acct = await resolve_line_account(cid, line)
-                    if acct:
-                        line["account_id"]   = acct.get("id")
-                        line["account_code"] = acct.get("code")
-                        line["account_name"] = acct.get("name")
-            # Same treatment for the categorization arm the FE renders.
-            cat_arm = (analysis.get("categorization") or {}).get("line_items") or []
-            for line in cat_arm:
-                acct = await resolve_line_account(cid, line)
-                if acct:
-                    line["account_id"]   = acct.get("id")
-                    line["account_code"] = acct.get("code")
-                    line["account_name"] = acct.get("name")
+            from ai_category_resolver import categorize_receipt_analysis
+            cat_arm = analysis.get("categorization")
+            if cat_arm:
+                await categorize_receipt_analysis(cid, cat_arm, vendor=inp.merchant or "", industry=industry or "")
+                # Re-splice resolved accounts onto the merged split lines
+                # (same receipt, same order) instead of resolving twice.
+                resolved = cat_arm.get("line_items") or []
+                by_desc = {(x.get("description") or "").lower(): x for x in resolved}
+                for i, ln in enumerate(analysis.get("line_items") or []):
+                    src = by_desc.get((ln.get("description") or "").lower()) or (resolved[i] if i < len(resolved) else None)
+                    if src and src.get("account_id"):
+                        ln["account_id"], ln["account_code"], ln["account_name"] = src["account_id"], src.get("account_code"), src.get("account_name")
+            else:
+                await categorize_receipt_analysis(cid, analysis, vendor=inp.merchant or "", industry=industry or "")
         except Exception:  # noqa: BLE001 — never break the scan on resolver error
             import logging
             logging.getLogger(__name__).exception(
-                "curated account resolver failed for company %s", cid)
+                "receipt account resolver failed for company %s", cid)
 
     return {"analysis": analysis or None}
 
