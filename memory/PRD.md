@@ -725,3 +725,4 @@ need to type into the chat box to invoke the matching help flow.
 - Added live search box to `SimilarApproveModal.jsx` (filters by description/date/amount/category); header tick-all acts on visible rows only, hidden ticks preserved; button counts = total ticked; empty state.
 - P0 Theme Coloring bug still OPEN (deferred 15 sessions) — propose fixing next.
 - Added amount filters to the popup: All / Money out / Money in toggle + $Min–$Max range (absolute amount); 'Clear' resets all filters. Verified in-browser with mock data.
+- Similar Description popup now groups with the same `_desc_group_key` normalizer as Step 3B (`_similar_desc_group`): account numbers kept, filler words dropped → 6278 vs 7984 are separate groups, title = 3B label. Rule match_value now = raw memo up to the noise marker (`_desc_rule_text`, e.g. 'online banking transfer to chk 6278') so `merchant_contains` genuinely matches and stays account-specific. AI chat card uses the same payload.

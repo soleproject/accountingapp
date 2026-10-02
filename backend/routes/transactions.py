@@ -2755,6 +2755,33 @@ def _desc_key(text: str | None) -> str:
     return " ".join(words[:6])
 
 
+def _similar_desc_group(text: str | None) -> tuple[str, str]:
+    """Group key + label for the "similar description" popup. Same
+    normalizer as Step 3B (No-Contact Review) so both flows split
+    'transfer to CHK 6278' from 'transfer to CHK 7984'; falls back to the
+    digit-stripped key when 3B would call the row a one-off."""
+    key, label = _desc_group_key(text or "")
+    if key == "__misc__":
+        k = _desc_key(text)
+        return k, (k or "similar description")
+    return key, label
+
+
+def _desc_rule_text(text: str | None) -> str:
+    """Rule-safe substring of a memo for `merchant_contains`: the raw text
+    (lowercased) up to the first noise marker, so it still contains the
+    account number and genuinely appears in every sibling row.
+    'Online Banking transfer to CHK 6278 Confirmation# XXXXX40512'
+    → 'online banking transfer to chk 6278'."""
+    lowered = (text or "").lower()
+    for marker in _NOISE_MARKERS:
+        idx = lowered.find(marker)
+        if idx > 0:
+            lowered = lowered[:idx]
+            break
+    return lowered.strip(" -:#*,.")
+
+
 UNCATEGORIZED_CODES = {"9999", "6999", "4999"}
 
 
@@ -3398,8 +3425,11 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
     contact_id = txn.get("contact_id")
     category_id = txn.get("category_account_id")
     contact_name = txn.get("contact_name")
-    # No contact → fall back to "same description" siblings (normalized memo).
-    desc_key = None if contact_id else _desc_key(txn.get("merchant") or txn.get("description"))
+    # No contact → fall back to "same description" siblings, grouped exactly
+    # like Step 3B (account numbers kept, filler words dropped).
+    raw_desc = txn.get("merchant") or txn.get("description")
+    desc_key, desc_label = (None, None) if contact_id else _similar_desc_group(raw_desc)
+    rule_text = None if contact_id else (_desc_rule_text(raw_desc) or desc_key)
     if category_id and (contact_id or desc_key):
         # Find every other transaction for this contact (or with the same
         # normalized description) that hasn't been human-reviewed yet.
@@ -3410,8 +3440,8 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
         else:
             pool_q = {"company_id": cid, "contact_id": {"$in": [None, ""]}, "human_reviewed": {"$ne": True}, "id": {"$ne": tid}}
             pool = await db.transactions.find(pool_q).sort([("date", -1), ("_id", -1)]).to_list(3000)
-            candidates = [c for c in pool if _desc_key(c.get("merchant") or c.get("description")) == desc_key][:500]
-            contact_name = " ".join(_DESC_NOISE_RE.sub(" ", txn.get("merchant") or txn.get("description") or "").split())[:48] or "similar description"
+            candidates = [c for c in pool if _similar_desc_group(c.get("merchant") or c.get("description"))[0] == desc_key][:500]
+            contact_name = desc_label
         # Filter out any in a closed period — bulk approval shouldn't silently
         # skip them; the UI will show only the actionable count.
         actionable: list[dict] = []
@@ -3424,7 +3454,7 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
                 "contact_id": contact_id,
                 "contact_name": contact_name,
                 "match_kind": "contact" if contact_id else "description",
-                "match_value": contact_id or desc_key,
+                "match_value": contact_id or rule_text,
                 "category_account_id": category_id,
                 "category_account_code": txn.get("category_account_code"),
                 "category_account_name": txn.get("category_account_name"),
@@ -3452,7 +3482,7 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
         # doesn't create a duplicate.
         rule_exists = bool(await db.rules.find_one(
             {"company_id": cid, "match_type": "contact_id", "match_value": contact_id} if contact_id
-            else {"company_id": cid, "match_type": "merchant_contains", "match_value": desc_key}))
+            else {"company_id": cid, "match_type": "merchant_contains", "match_value": rule_text}))
 
     await _invalidate_dash(cid)
     return {"ok": True, "approved": approved_info, "similar": similar, "rule_exists": rule_exists}
