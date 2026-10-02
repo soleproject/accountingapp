@@ -364,7 +364,7 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
     """
     from client_review import (  # local import to avoid cycles at boot
         ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
-        ITEM_CHECK_NO_CONTACT, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+        ITEM_CHECK_NO_CONTACT, ITEM_OWNER_DRAW, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
     )
     buckets: dict[str, list[dict]] = {
         "liability_payments": [],
@@ -406,7 +406,7 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
             row["resolved_txn_ids"] = it.get("resolved_txn_ids") or []
         if t == ITEM_LIABILITY_SPLIT:
             buckets["liability_payments"].append(row)
-        elif t == ITEM_CHECK_NO_CONTACT:
+        elif t in (ITEM_CHECK_NO_CONTACT, ITEM_OWNER_DRAW):
             buckets["checks_no_payee"].append(row)
         elif t == ITEM_MISSING_RECEIPT:
             buckets["receipt_followup"].append(row)

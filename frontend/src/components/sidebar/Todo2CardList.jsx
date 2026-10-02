@@ -124,6 +124,17 @@ const TIER_ORDER = { pro: 0, assistant: 1, ai: 2 };
 // Per-catalog filter params so the destination page opens ALREADY
 // scoped to the items the card represents. If a page doesn't accept
 // a filter, the entry stays null and the page opens unfiltered.
+// Quick Check-in buckets that open the live check-in in-shell, scoped
+// to their item types (see pages/EmbeddedCheckin.jsx CHECKIN_SCOPES).
+const EMBEDDED_CHECKIN_ROUTES = {
+  liability_payments:         "/accounting/liability-payments",
+  cleanup_liability_payments: "/accounting/liability-payments",
+  receipt_followup:           "/accounting/receipt-followup",
+  cleanup_receipt_followup:   "/accounting/receipt-followup",
+  checks_no_payee:            "/accounting/checks-review",
+  cleanup_checks_no_payee:    "/accounting/checks-review",
+};
+
 const CARD_FILTERS = {
   paying_bills:          { outstanding: "1" },   // /bills — balance_due>0
   following_up_invoices: { overdue: "1" },       // /invoices — past-due only
@@ -428,12 +439,8 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       }
       return;
     }
-    if (item.key === "liability_payments" || item.key === "cleanup_liability_payments") {
-      navigate("/accounting/liability-payments");
-      return;
-    }
-    if (item.key === "receipt_followup" || item.key === "cleanup_receipt_followup") {
-      navigate("/accounting/receipt-followup");
+    if (EMBEDDED_CHECKIN_ROUTES[item.key]) {
+      navigate(EMBEDDED_CHECKIN_ROUTES[item.key]);
       return;
     }
     // Prefer the item's own area link, appending any per-card filter
@@ -468,8 +475,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         ? "/accounting/review-chat"
         : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
     }
-    if (item.key === "liability_payments" || item.key === "cleanup_liability_payments") return "/accounting/liability-payments";
-    if (item.key === "receipt_followup" || item.key === "cleanup_receipt_followup") return "/accounting/receipt-followup";
+    if (EMBEDDED_CHECKIN_ROUTES[item.key]) return EMBEDDED_CHECKIN_ROUTES[item.key];
     if (!item.area_link) return "/accounting/todo";
     return item.area_link.split("?")[0];
   };
