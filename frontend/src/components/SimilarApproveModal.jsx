@@ -8,7 +8,7 @@ const money = (n) => (typeof n === "number" ? n.toLocaleString("en-US", { style:
 // Shown right after a row is approved when the same vendor still has
 // unapproved rows. Mirrors the AI-chat card: ticks sync both ways, and
 // either side (or voice) can run the approval.
-export function SimilarApproveModal({ currentId, similar, ruleExists, onClose }) {
+export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, onClose }) {
   const items = similar.items || similar.sample || [];
   const [ticked, setTicked] = useState(() => new Set(items.map(i => i.id)));
   const [busy, setBusy] = useState(false);
@@ -41,8 +41,32 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, onClose })
   };
   const decline = () => { emitAction("bulk-approve-done", { msg: "OK — just the one approved.", origin: "modal", declined: true }); };
 
+  // Quick-action strip pinned beside the pointer that clicked the check,
+  // so the common "yes, all of them" path is one short move away.
+  const strip = anchor ? (() => {
+    const w = ruleExists ? 230 : 440, h = 44;
+    const left = Math.max(8, Math.min(anchor.x - w + 20, window.innerWidth - w - 8));
+    const top = anchor.y + 14 + h > window.innerHeight ? anchor.y - h - 14 : anchor.y + 14;
+    return { left, top };
+  })() : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="similar-approve-modal">
+      {strip && (
+        <div className="fixed z-[60] flex items-center gap-2 rounded-full bg-white border border-fuchsia-200 shadow-2xl px-2 py-1.5"
+             style={{ left: strip.left, top: strip.top }} data-testid="similar-approve-quick-strip">
+          <button type="button" disabled={busy || !ticked.size} onClick={() => run(false)} data-testid="similar-approve-quick-apply"
+                  className="inline-flex items-center gap-1.5 text-[13px] font-semibold px-3.5 py-1.5 rounded-full bg-fuchsia-600 text-white hover:bg-fuchsia-700 disabled:opacity-50 whitespace-nowrap">
+            <Check size={14} /> {busy ? "Applying…" : `Categorize & approve ${ticked.size}`}
+          </button>
+          {!ruleExists && (
+            <button type="button" disabled={busy || !ticked.size} onClick={() => run(true)} data-testid="similar-approve-quick-apply-rule"
+                    className="text-[13px] font-semibold px-3.5 py-1.5 rounded-full border border-fuchsia-300 bg-white text-fuchsia-700 hover:bg-fuchsia-50 disabled:opacity-50 whitespace-nowrap">
+              Approve {ticked.size} + create rule
+            </button>
+          )}
+        </div>
+      )}
       <div className="w-[min(680px,94vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-slate-100">
           <div>

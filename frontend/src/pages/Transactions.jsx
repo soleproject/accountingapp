@@ -501,7 +501,7 @@ function NarrowTxnCardList({
               <button
                 title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                 data-testid={TID.txnApprove}
-                onClick={() => toggleApprove(t)}
+                onClick={(e) => toggleApprove(t, e)}
                 className={
                   t.human_reviewed
                     ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
@@ -2256,7 +2256,7 @@ export default function Transactions() {
     }
   };
 
-  const approve = async (id) => {
+  const approve = async (id, anchor = null) => {
     let r;
     try {
       r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
@@ -2267,7 +2267,7 @@ export default function Transactions() {
     load();
     const { similar, rule_exists } = r.data || {};
     if (similar?.count) {
-      setSimilarApprove({ similar, ruleExists: !!rule_exists });
+      setSimilarApprove({ similar, ruleExists: !!rule_exists, anchor });
       emitAction("ai-bulk-approve-prompt", { similar, rule_exists: !!rule_exists, ids: (similar.items || []).map(i => i.id) });
       emitAction("ai-open");
     }
@@ -2276,7 +2276,7 @@ export default function Transactions() {
     await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
     load();
   };
-  const toggleApprove = (t) => {
+  const toggleApprove = (t, e) => {
     if (t.human_reviewed) return unapprove(t.id);
     if (isUncategorizedTxn(t)) {
       toast.error("Pick a category first — Uncategorized Expense/Income can't be approved.");
@@ -2284,7 +2284,7 @@ export default function Transactions() {
       emitAction("ai-open");
       return;
     }
-    return approve(t.id);
+    return approve(t.id, e ? { x: e.clientX, y: e.clientY } : null);
   };
   const recategorize = async (id) => {
     setBusy(true);
@@ -3283,7 +3283,7 @@ export default function Transactions() {
                     <button
                       title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                       data-testid={TID.txnApprove}
-                      onClick={() => toggleApprove(t)}
+                      onClick={(e) => toggleApprove(t, e)}
                       className={
                         t.human_reviewed
                           ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
@@ -3469,7 +3469,7 @@ export default function Transactions() {
       {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
       {similarApprove && (
         <SimilarApproveModal currentId={currentId} similar={similarApprove.similar} ruleExists={similarApprove.ruleExists}
-                             onClose={() => setSimilarApprove(null)} />
+                             anchor={similarApprove.anchor} onClose={() => setSimilarApprove(null)} />
       )}
       {xferPreview && (
         <Modal title={`Found ${xferPreview.length} internal-transfer pair${xferPreview.length === 1 ? "" : "s"}`}
