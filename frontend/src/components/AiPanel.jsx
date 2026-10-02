@@ -59,6 +59,83 @@ function inferAccountTypeFromName(name) {
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
 // a busy label, and an onConfirm/onDismiss pair.
+// Recommendation card for the meaning-first resolver: one primary action
+// (use existing / create & categorize), optional "also N similar", up to
+// two alternative existing accounts, and an owner-draw escape hatch.
+function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClearSimilar }) {
+  const [busy, setBusy] = useState(false);
+  const { rec, similar, alternatives, direction, similarMode } = card;
+  const ticked = similarMode?.active ? (similarMode.ticked || []) : null;
+  const a = rec.account;
+  const isNew = rec.kind === "new";
+  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply(args); } finally { setBusy(false); } };
+  const primaryArgs = isNew ? { newAccount: a } : { accountId: a.id };
+  return (
+    <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-2" data-testid="category-recommend-card">
+      <div className="text-[12px] text-slate-700 flex flex-wrap gap-x-2 gap-y-0.5">
+        <span className="font-semibold text-slate-900">{a.code || "new"} {a.name}</span>
+        <span className="text-slate-500">· {[...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ")}</span>
+        {a.parent_name && <span className="text-slate-500">· under {a.parent_name}</span>}
+        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? "new account" : "existing"}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" disabled={busy} onClick={() => run(primaryArgs)} data-testid="category-recommend-apply"
+                className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+          {busy ? "Applying…" : isNew ? "Create account & categorize" : "Use this"}
+        </button>
+        {similar > 0 && (
+          <button type="button" disabled={busy || !!ticked} onClick={() => onShowSimilar?.(card)} data-testid="category-recommend-show-similar"
+                  className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            Show {similar} similar
+          </button>
+        )}
+        {ticked && (
+          <>
+            <button type="button" disabled={busy || ticked.length === 0} onClick={() => run({ ...primaryArgs, txnIds: ticked })}
+                    data-testid="category-recommend-apply-ticked"
+                    className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50">
+              Apply to {ticked.length}
+            </button>
+            <button type="button" disabled={busy} onClick={() => onClearSimilar?.(card)} data-testid="category-recommend-clear-similar"
+                    className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+              Clear
+            </button>
+          </>
+        )}
+        {similar > 0 && (
+          <button type="button" disabled={busy} onClick={() => run({ ...primaryArgs, withSimilar: true })} data-testid="category-recommend-apply-similar"
+                  className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+            Also {similar} similar + save rule
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={onDismiss} data-testid="category-recommend-dismiss"
+                className="text-[12px] px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+          Not this
+        </button>
+      </div>
+      {(alternatives?.length > 0 || (direction === "money_out" && !/owner/i.test(a.name))) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+          <span>Or:</span>
+          {alternatives.map(alt => (
+            <button key={alt.id} type="button" disabled={busy} onClick={() => run({ accountId: alt.id })}
+                    data-testid={`category-recommend-alt-${alt.id}`}
+                    className="px-2 py-0.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">
+              {alt.code} {alt.name}
+            </button>
+          ))}
+          {direction === "money_out" && !/owner/i.test(a.name) && (
+            <button type="button" disabled={busy} onClick={() => run({ newAccount: { semantic: "owner_draw", name: "Owner's Draw", type: "equity" } })}
+                    data-testid="category-recommend-owner-draw"
+                    className="px-2 py-0.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">
+              Not a business expense (Owner's Draw)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InlineConfirmCard({ testId, tone = "fuchsia", confirmLabel = "Yes, do it", cancelLabel = "No, thanks", busyLabel = "Applying…", onConfirm, onDismiss }) {
   const [busy, setBusy] = useState(false);
   const [handled, setHandled] = useState(false);
@@ -438,6 +515,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     window.addEventListener("mouseup", onUp);
   };
   const [messages, setMessages] = useState([]);
+  const messagesRef = useRef([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   // Route awareness — the "Review | Chat" toggle at the top of the
@@ -664,8 +743,6 @@ export default function AiPanel({ collapsed, onToggle }) {
     }
     if (!msg) return;
 
-    pendingIntentRef.current = { kind: "cleanup-inquiry", action: a };
-
     // For contact-in-uncat, probe the amount distribution — if it's bimodal,
     // surface the natural split as a quick-action chip so the user doesn't
     // have to eyeball the amounts themselves.
@@ -694,7 +771,17 @@ export default function AiPanel({ collapsed, onToggle }) {
       } catch { /* non-fatal */ }
     }
 
-    setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
+    // The reply always answers the prompt the user can SEE. Set the
+    // pending intent at the same instant the bubble is appended (after
+    // any awaits above) so an inquiry for another contact that fired
+    // mid-await can't silently re-point the user's next answer.
+    const inquiry = { kind: "cleanup-inquiry", action: a };
+    pendingIntentRef.current = inquiry;
+    // A stale "Focused transaction" pin from another contact only adds
+    // noise next to a vendor prompt — drop it.
+    if (focus && focus.contact_name && focus.contact_name !== a.contact_name) setFocus(null);
+    setMessages(m => [...m, { role: "assistant", content: msg, splitHint, showSkip: true, inquiry,
+                              skipContact: { id: a.contact_id, name: a.contact_name, kind: a.kind } }]);
     // Barge in on any still-playing previous vendor's message when the
     // user manually clicks Skip / Next on the AI Cleanup Copilot — same
     // "manual advance stops the AI mid-sentence" behavior as onboarding.
@@ -757,6 +844,18 @@ export default function AiPanel({ collapsed, onToggle }) {
   useActionListener("ai-chat-say", (payload) => {
     const msg = (payload?.message || "").trim();
     if (msg) setMessages(m => [...m, { role: "assistant", content: msg }]);
+  });
+
+  // "Show N similar" lifecycle — Transactions page reports the ticked ids
+  // while the similar view is active, and tells us when it's been cleared.
+  useActionListener("similar-selection-changed", (payload) => {
+    const ids = payload?.ids || [];
+    setMessages(m => m.map(mm => mm.card?.similarMode?.active
+      ? { ...mm, card: { ...mm.card, similarMode: { active: true, ticked: ids } } } : mm));
+  });
+  useActionListener("similar-view-cleared", () => {
+    setMessages(m => m.map(mm => mm.card?.similarMode?.active
+      ? { ...mm, card: { ...mm.card, similarMode: null } } : mm));
   });
 
   // Same as `ai-chat-say` but attaches a clickable CTA to the bubble
@@ -1566,6 +1665,78 @@ export default function AiPanel({ collapsed, onToggle }) {
   // barge-in handler) can read it without React StrictMode double-invoke.
   useEffect(() => { inputRef.current = input; }, [input]);
 
+  // ---- Category recommendation card: shared handlers (buttons + voice/text) ----
+  const dismissCard = (i) => setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2));
+  const showSimilarForCard = (i, card) => {
+    const ids = [...new Set([card.txnId, ...(card.similarIds || [])].filter(Boolean))];
+    const payload = { ids, label: card.similarLabel || "", count: card.similar || 0, returnTo: location.pathname };
+    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: { ...mm2.card, similarMode: { active: true, ticked: ids } } } : mm2));
+    sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
+    if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
+    else navigate("/accounting/transactions");
+  };
+  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds }) => {
+    try {
+      let ids = txnIds || (card.txnId ? [card.txnId] : []);
+      if (withSimilar && card.txn) {
+        const q = card.txn.contact_id ? `contact_id=${card.txn.contact_id}` : `q=${encodeURIComponent(card.txn.merchant || "")}`;
+        const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
+        ids = [...new Set([...ids, ...(r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id)])];
+      }
+      const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
+        txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
+        create_rule: !!withSimilar && !!card.txn?.contact_id, contact_id: card.txn?.contact_id || null,
+      });
+      const acct = res.data.account;
+      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
+      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
+      if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+      if (card.similarMode?.active) emitAction("similar-clear");
+      emitAction("txns:changed");
+      if (card.txnId && inquiryTxnRef.current === card.txnId) resolveInquiry();
+    } catch {
+      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
+    }
+  };
+  // Voice/text → card button. The LLM picks which visible button the
+  // utterance means (or none → normal chat flow). Returns true if handled.
+  const routeToCategoryCard = async (userMsg) => {
+    const msgs = messagesRef.current;
+    const i = msgs.map(mm => mm.card?.kind === "category-recommend").lastIndexOf(true);
+    if (i < 0) return false;
+    const card = msgs[i].card;
+    const a = card.rec.account;
+    const isNew = card.rec.kind === "new";
+    const ticked = card.similarMode?.active ? (card.similarMode.ticked || []) : null;
+    const actions = [
+      { id: "use_this", label: isNew ? "Create account & categorize" : "Use this", hint: `categorize the focused transaction as ${a.code || ""} ${a.name}` },
+      ...(card.similar > 0 && !ticked ? [{ id: "show_similar", label: `Show ${card.similar} similar`, hint: "filter the transactions table to the similar rows, apply nothing" }] : []),
+      ...(card.similar > 0 ? [{ id: "apply_similar_rule", label: `Also ${card.similar} similar + save rule`, hint: "categorize focused + all similar rows and create a rule for future imports" }] : []),
+      ...(ticked ? [{ id: "apply_ticked", label: `Apply to ${ticked.length}`, hint: "categorize only the ticked rows in the table, no rule" },
+                    { id: "clear_similar", label: "Clear", hint: "close the similar view and go back to the previous list" }] : []),
+      { id: "not_this", label: "Not this", hint: "dismiss / reject the recommendation" },
+      ...(card.alternatives || []).map(alt => ({ id: `alt:${alt.id}`, label: `${alt.code} ${alt.name}`, hint: `use alternative account ${alt.name} instead` })),
+      ...(card.direction === "money_out" && !/owner/i.test(a.name) ? [{ id: "owner_draw", label: "Not a business expense (Owner's Draw)", hint: "personal spending, book to Owner's Draw" }] : []),
+    ];
+    let pick = null;
+    try {
+      const { data } = await api.post(`/companies/${currentId}/ai/card-intent`, { message: userMsg, actions });
+      if (data?.action_id && (data.confidence ?? 0) >= 0.6) pick = actions.find(x => x.id === data.action_id) || null;
+    } catch { return false; }
+    if (!pick) return false;
+    setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: `On it — **${pick.label}**.` }]);
+    const primary = isNew ? { newAccount: a } : { accountId: a.id };
+    if (pick.id === "use_this") await applyCategoryCard(i, card, primary);
+    else if (pick.id === "show_similar") showSimilarForCard(i, card);
+    else if (pick.id === "apply_similar_rule") await applyCategoryCard(i, card, { ...primary, withSimilar: true });
+    else if (pick.id === "apply_ticked") await applyCategoryCard(i, card, { ...primary, txnIds: ticked });
+    else if (pick.id === "clear_similar") emitAction("similar-clear");
+    else if (pick.id === "not_this") dismissCard(i);
+    else if (pick.id === "owner_draw") await applyCategoryCard(i, card, { newAccount: { semantic: "owner_draw", name: "Owner's Draw", type: "equity" } });
+    else if (pick.id.startsWith("alt:")) await applyCategoryCard(i, card, { accountId: pick.id.slice(4) });
+    return true;
+  };
+
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
     // In open-mic mode we deliberately keep the recognizer alive across
@@ -1641,6 +1812,11 @@ export default function AiPanel({ collapsed, onToggle }) {
       setVoiceReview(null);
       return;
     }
+
+    // ── Category card: voice/text → button ─────────────────────
+    // "use it", "show the three similar ones", "apply to those", "not that
+    // one — owner's draw"… an LLM maps the utterance to a visible button.
+    if (await routeToCategoryCard(userMsg)) return;
 
     // "Stop" / "quiet" / "shut up" / "be quiet" / "silence" / "hush" / "cancel
     // speech" — kills any current TTS utterance immediately. Doesn't send to
@@ -1720,6 +1896,43 @@ export default function AiPanel({ collapsed, onToggle }) {
         return;
       }
     }
+    // ------ Meaning-first category recommendation --------------------
+    // Shared by the focused-transaction path and the free-text fallback.
+    // Returns true when a recommendation card was shown.
+    async function recommendCategory(text, txnId) {
+      try {
+        const { data } = await api.post(`/companies/${currentId}/ai/resolve-category`, { message: text, txn_id: txnId || null });
+        const rec = data?.recommendation;
+        if (!rec?.account) {
+          const say = data?.ask ? data.ask : data?.direction === "money_out"
+            ? "This is money going OUT, so it can't be a sale or customer payment. Was it something you bought (what?), a refund you gave a customer, a transfer to another account, or money you took for yourself?"
+            : data?.direction === "money_in"
+              ? "This is money coming IN, so it can't be an expense. Was it a customer paying you (for what?), a refund from a vendor, a transfer from another account, or money you put in yourself?"
+              : "I couldn't work out where that belongs yet — tell me what the money was for in a few words (e.g. “office supplies”, “a customer paying an invoice”, “paid myself”).";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return true;
+        }
+        const a = rec.account;
+        const label = `${a.code || "new"} ${a.name}`;
+        const who = data.txn?.merchant ? `**${data.txn.merchant}**${typeof data.txn.amount === "number" ? ` (${data.txn.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})` : ""} → ` : "";
+        const typeLine = [...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ");
+        const say = rec.kind === "existing"
+          ? `${who}**${label}** (already on your chart). ${rec.why}`
+          : `${who}nothing on your chart fits, so I'd add **${label}** — ${typeLine}${a.parent_name ? `, under ${a.parent_name}` : ""}. ${rec.why}`;
+        setMessages(m => [...m, {
+          role: "assistant", content: say,
+          card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,
+                  similar: data.similar_count || 0, similarIds: data.similar_ids || [], similarLabel: data.similar_label || data.txn?.merchant || "",
+                  alternatives: data.alternatives || [], direction: data.direction },
+        }]);
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     // ------ Cleanup-Copilot inquiry interceptor -----------------------
     // The Transactions page emits `cleanup-inquiry` when the user clicks
     // "Fix now" on the hero band. The AI asked "what are these X <contact>
@@ -1727,7 +1940,14 @@ export default function AiPanel({ collapsed, onToggle }) {
     // as a category description, resolve/create the account, and show a
     // bulk-approve confirmation card.
     if (pendingIntentRef.current?.kind === "cleanup-inquiry") {
-      const inq = pendingIntentRef.current;
+      // Source of truth = the newest vendor prompt in the transcript. If
+      // the ref drifted (prompt for contact B fired after A's bubble was
+      // already the latest), trust the bubble the user is replying to.
+      const lastPrompt = [...messagesRef.current].reverse().find(mm => mm.role === "assistant" && mm.inquiry);
+      const inq = (lastPrompt?.inquiry?.action?.contact_id
+                   && lastPrompt.inquiry.action.contact_id !== pendingIntentRef.current?.action?.contact_id)
+        ? lastPrompt.inquiry
+        : pendingIntentRef.current;
       pendingIntentRef.current = null;
       setMessages(m => [...m, { role: "user", content: userMsg }]);
       const rawText = userMsg;
@@ -1843,7 +2063,8 @@ export default function AiPanel({ collapsed, onToggle }) {
               groups, create_rules: false }
           );
           const say = `Approved **${res.data?.updated || 0}** ${inq.action.contact_name} rows with their current categorization.${uncatCount ? ` (${uncatCount} without a category were left alone.)` : ""}`;
-          setMessages(mm => [...mm, { role: "assistant", content: say }]);
+          setMessages(mm => [...mm, { role: "assistant", content: say,
+            undo: { txnIds: catRows.map(t => t.id), contactName: inq.action.contact_name } }]);
           if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
           emitAction("txns:changed");
           emitAction("cleanup-completed", {
@@ -2005,6 +2226,21 @@ export default function AiPanel({ collapsed, onToggle }) {
       }
       // Note: if intent === "question", we intentionally fall through to the
       // regular chat stream below.
+    }
+
+    // ---- Pinned-transaction free text → category recommendation ----
+    // The user answered "what was this for?" in their own words and no
+    // explicit command matched. Short, non-question text about a pinned
+    // transaction is a description — resolve its meaning.
+    {
+      const pinnedTxnId = inquiryTxnRef.current || (focusPinned && focus?.id) || null;
+      const words = userMsg.trim().split(/\s+/).length;
+      if (pinnedTxnId && words <= 16 && !/\?\s*$/.test(userMsg)
+          && !/^(?:what|why|how|when|where|who|which|show|open|go to|create an? invoice|read)\b/i.test(userMsg.trim())) {
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        if (await recommendCategory(userMsg, pinnedTxnId)) return;
+        setMessages(m => m.slice(0, -1));
+      }
     }
 
     // ---- Ambiguous account-type resolver ----
@@ -2775,8 +3011,11 @@ export default function AiPanel({ collapsed, onToggle }) {
     // --- Remote intent: recategorize the focused transaction to a named account. ---
     if (cmd.handled && cmd.remote === "recategorize-focused") {
       setMessages(m => [...m, { role: "user", content: userMsg }]);
+      // Meaning-first: resolve the user's words (not a literal account
+      // name) against the chart, else propose a complete GAAP account.
+      if (await recommendCategory(userMsg, cmd.txnId)) return;
       try {
-        // Look up an account whose name/code matches the spoken target.
+        // Fallback (resolver unavailable): literal name/code match.
         const r = await api.get(`/companies/${currentId}/accounts`);
         const accts = r.data.accounts || [];
         const needle = cmd.targetName.toLowerCase();
@@ -3556,6 +3795,28 @@ export default function AiPanel({ collapsed, onToggle }) {
                 ))}
               </div>
             )}
+            {m.undo && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  data-testid="chat-undo-approve"
+                  onClick={async () => {
+                    try {
+                      const r = await api.post(`/companies/${currentId}/transactions/bulk-unapprove`, m.undo.txnIds);
+                      const n = r.data?.count || 0;
+                      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, undo: null } : mm2)
+                        .concat([{ role: "assistant", content: `Undone — **${n}** ${m.undo.contactName} rows are back in review with their categories unchanged.` }]));
+                      emitAction("txns:changed");
+                    } catch {
+                      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't undo that approval." }]);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-full border bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                >
+                  Undo approval
+                </button>
+              </div>
+            )}
             {m.card?.kind === "bulk-approve-confirm" && (
               <BulkApproveCard
                 similar={m.card.similar}
@@ -3594,6 +3855,15 @@ export default function AiPanel({ collapsed, onToggle }) {
                   pendingIntentRef.current = null;
                   setMessages(mm => [...mm, { role: "assistant", content: "OK — no new account created." }]);
                 }}
+              />
+            )}
+            {m.card?.kind === "category-recommend" && (
+              <CategoryRecommendCard
+                card={m.card}
+                onShowSimilar={(card) => showSimilarForCard(i, card)}
+                onClearSimilar={() => emitAction("similar-clear")}
+                onApply={(args) => applyCategoryCard(i, m.card, args)}
+                onDismiss={() => dismissCard(i)}
               />
             )}
             {m.card?.kind === "create-account-then-recategorize" && (

@@ -812,8 +812,11 @@ CPA_REVIEWER_SYSTEM = (
     "         4000-4999 = Revenue, 5000-5999 = COGS, 6000-9999 = Expenses.\n"
     "   • Name new accounts with STANDARD accounting terminology — never vendor-specific, never colloquial.\n"
     "     'Marketing - Q4 Campaign' is fine. 'Aggressive Marketing Spend' is NOT. 'they look good' is NEVER.\n"
-    "   • If the user's phrasing looks like filler ('these are okay', 'looks fine', 'good'), that's NOT a\n"
-    "     categorization — return intent=approve_existing instead.\n\n"
+    "   • If the user's phrasing is ONLY filler ('these are okay', 'looks fine', 'good'), that's NOT a\n"
+    "     categorization — return intent=approve_existing instead. But 'these are <noun>' where the noun is a\n"
+    "     kind of spend or income IS a categorization: 'these are donations' → Charitable Contributions (money\n"
+    "     out) or Donation Income (money in); 'these are tithes' / 'charity' / 'giving' → Charitable\n"
+    "     Contributions; 'these are refunds' → Sales Returns & Refunds; 'these are transfers' → Transfer.\n\n"
     "2. approve_existing — user is telling you to leave the transactions with their current categories\n"
     "   (just mark them reviewed). Examples: 'they look good the way they are', 'looks fine', 'these are ok',\n"
     "   'keep them as-is', 'accept the current categories', 'approve them all'.\n"
@@ -831,17 +834,51 @@ CPA_REVIEWER_SYSTEM = (
     "   Resolution: { \"clarifying_question\": \"...\" }\n\n"
     "CRITICAL SAFEGUARDS:\n"
     "- NEVER create an account whose name contains filler phrases: 'they look', 'looks good', 'let's', 'ok',\n"
-    "  'fine', 'yes', 'no', 'maybe', 'these are', 'this is', 'that was', 'we should', 'i think', 'like'.\n"
+    "  'fine', 'yes', 'no', 'maybe', 'this is', 'that was', 'we should', 'i think', 'like'. Strip lead-ins\n"
+    "  like 'these are' / 'this is' and name the account after the noun that follows.\n"
     "- NEVER return intent=categorize if the user's message is < 3 letters AND doesn't match a common\n"
     "  category shorthand ('rent', 'gas', 'food' are OK; 'ok', 'yes' are approve_existing / question).\n"
-    "- When in doubt between categorize and approve_existing, prefer approve_existing — recategorizing\n"
-    "  based on a bad interpretation is far more damaging than approving in place.\n"
+    "- approve_existing ONLY when the message is an explicit sign-off ('approve', 'yes', 'looks good',\n"
+    "  'keep as-is') and names NO kind of spend/income. If the message names anything the money was FOR\n"
+    "  ('donations', 'rent', 'software', 'her consulting'), it is categorize — never approve_existing.\n"
+    "  When torn between categorize and approve_existing, return unclear and ask.\n"
     "- BUT: if the user mentions a clear PROFESSION or BUSINESS RELATIONSHIP (marketing guru, lawyer,\n"
     "  landlord, CPA, contractor, etc.), that IS a categorize — do NOT ask a clarifying question.\n"
     "  Map the profession to the nearest GAAP expense line and return intent=categorize with a\n"
     "  single bucket (predicate=null, i.e. applies to all rows).\n"
     "- When in doubt between categorize and unclear, prefer unclear — a clarifying question is cheap."
 )
+
+
+# Explicit sign-off wording. Deliberately strict: a reply has to be ABOUT
+# approving, not merely contain a positive word.
+_APPROVAL_RE = re.compile(
+    r"^\s*(?:yes|yep|yeah|yup|ok|okay|sure|correct|right|approve[d]?|approve (?:them|these|all|it)(?: all)?|"
+    r"(?:they|these|those)(?:'re| are| look)?\s+(?:all\s+)?(?:fine|good|ok|okay|correct|right)(?: the way they are| as[- ]is)?|"
+    r"looks?\s+(?:good|fine|right|correct)(?: to me)?|all good|sounds good|good to go|"
+    r"keep (?:them|it|these)(?: all)?(?: as[- ]is| the same| as they are)?|leave (?:them|it|these)(?: alone| as[- ]is)?|"
+    r"accept(?: them| these| all| the current categor(?:y|ies))?|sign(?:ed)? off|go ahead|do it|confirm(?:ed)?)"
+    r"[\s.!,]*$",
+    re.IGNORECASE,
+)
+
+
+def is_explicit_approval(text: str) -> bool:
+    return bool(_APPROVAL_RE.match(text or ""))
+
+
+_LEAD_IN_RE = re.compile(
+    r"^\s*(?:(?:these|those|they|this|that|it)\s+(?:are|is|were|was)\s+(?:all\s+|just\s+|mostly\s+)?|"
+    r"(?:it's|its|that's|they're)\s+(?:all\s+|just\s+)?|(?:all|just|mostly)\s+)",
+    re.IGNORECASE,
+)
+
+
+def _category_noun(text: str) -> str:
+    """'these are donations' → 'donations'. Used only to phrase the
+    clarifying question — never to create an account."""
+    t = _LEAD_IN_RE.sub("", (text or "").strip()).strip(" .!?,")
+    return t[:40] if 2 <= len(t) <= 40 else ""
 
 
 async def cpa_review(
@@ -928,6 +965,29 @@ async def cpa_review(
     except Exception:
         conf = 0.5
 
+    # Deterministic approval gate. Bulk-approving hundreds of rows on a
+    # misread ("these are donations" → approve) is the worst outcome, so
+    # approve_existing is only honoured when the user's words are an
+    # explicit sign-off. Anything else that the LLM called approval
+    # becomes a clarifying question instead of an action.
+    if intent == "approve_existing" and not is_explicit_approval(user_message):
+        noun = _category_noun(user_message)
+        intent = "unclear"
+        ask = (f"Did you mean these {contact_name} rows are “{noun}” — so I should categorize them that way — "
+               f"or should I approve them with their current categories? Say “approve” to keep them as-is."
+               if noun else
+               f"I want to be sure before I bulk-approve {contact_name}: say “approve” to keep the current "
+               f"categories, or tell me what these transactions are for.")
+        data["say"] = ask
+        resolution = {"clarifying_question": ask, "gate": "approval_requires_explicit_wording"}
+    elif intent == "approve_existing" and not any(
+            (c.get("count") or 0) and c.get("code") and "uncategorized" not in str(c.get("name") or "").lower()
+            for c in (current_categories or [])):
+        intent = "unclear"
+        ask = f"None of the {contact_name} rows have a category yet, so there's nothing to approve in place — what are these transactions for?"
+        data["say"] = ask
+        resolution = {"clarifying_question": ask, "gate": "nothing_to_approve"}
+
     # Server-side safety net: even if the LLM returned intent=categorize with
     # a filler-phrase account name, downgrade to approve_existing. We check
     # for names whose ENTIRE stripped content is filler (whole-name match), or
@@ -942,7 +1002,7 @@ async def cpa_review(
         _whole_filler = {
             "they look good", "they look good the way they are",
             "looks good", "looks fine", "let's", "let us", "same",
-            "okay", "ok", "fine", "yes", "no", "maybe", "these are",
+            "okay", "ok", "fine", "yes", "no", "maybe",
             "this is", "that was", "we should", "i think", "good",
             "leave it", "keep it", "as is", "as-is", "approve", "accept",
             "they're fine", "these are fine", "all good", "sounds good",
