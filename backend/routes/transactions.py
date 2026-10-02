@@ -1850,7 +1850,8 @@ async def update_transaction(cid: str, tid: str, inp: TransactionUpdate, user: d
                     upd["category_account_id"] = child["id"]
             upd["category_account_code"] = acct["code"]
             upd["category_account_name"] = acct["name"]
-        upd["human_reviewed"] = True
+        # Picking a category resolves the AI flag but is NOT an approval —
+        # the row stays in To-do until the user clicks the green check.
         upd["needs_review"] = False
     # Splits payload — user edited the transaction and either changed the
     # split lines or converted a single-category txn into a multi-category
