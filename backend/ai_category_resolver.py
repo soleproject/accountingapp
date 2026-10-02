@@ -139,11 +139,11 @@ _DEDUPE_SYSTEM = (
 )
 
 
-async def _chat_json(system: str, prompt: str, sid: str) -> dict:
+async def _chat_json(system: str, prompt: str, sid: str, model: str | None = None) -> dict:
     import os
     from ai_service import MODEL_NAME, _extract_json, _new_chat
     from llm_client import StreamDone, TextDelta, UserMessage
-    chat = _new_chat(system, sid, model_name=os.environ.get("LLM_MODEL_RESOLVER") or MODEL_NAME, feature="ai-review")
+    chat = _new_chat(system, sid, model_name=model or os.environ.get("LLM_MODEL_RESOLVER") or MODEL_NAME, feature="ai-review")
     raw = ""
     try:
         async for ev in chat.stream_message(UserMessage(text=prompt)):
@@ -283,6 +283,32 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
         if acct.get("semantic"):
             rec["semantic"] = acct["semantic"]
     return {**base, "recommendation": rec, "alternatives": alts, "not_business": not_business}
+
+
+_CARD_INTENT_SYSTEM = (
+    "A user is looking at a recommendation card in an accounting app. The card has buttons (listed with an id, "
+    "the visible label, and what pressing it does). Decide whether the user's message is asking to press ONE of "
+    "those buttons — by name, by meaning, by number ('the three similar ones' → Show 3 similar), or by intent "
+    "('yes do it' → the primary button; 'no' / 'wrong' → Not this; 'that was personal' → Owner's Draw).\n"
+    "If the message is instead a NEW description of what the transaction was, a question, or anything that is not "
+    "a button press, return action_id=null.\n"
+    "Return strict JSON: {\"action_id\": <id or null>, \"confidence\": 0-1}"
+)
+
+
+async def classify_card_intent(message: str, actions: list[dict]) -> dict:
+    import os
+    lines = "\n".join(f"  - id={a.get('id')} label={a.get('label')!r} does: {a.get('hint', '')}" for a in actions)
+    prompt = f"Buttons:\n{lines}\n\nUser said: {message!r}\n\nReturn the JSON."
+    sid = hashlib.md5(f"ci-{message}-{len(actions)}".encode(), usedforsecurity=False).hexdigest()[:12]
+    data = await _chat_json(_CARD_INTENT_SYSTEM, prompt, f"card-intent-{sid}", model=os.environ.get("LLM_MODEL_FAST"))
+    valid = {a.get("id") for a in actions}
+    aid = data.get("action_id")
+    try:
+        conf = float(data.get("confidence") or 0)
+    except (TypeError, ValueError):
+        conf = 0.0
+    return {"action_id": aid if aid in valid else None, "confidence": conf}
 
 
 def _txn_brief(txn: dict | None) -> dict | None:

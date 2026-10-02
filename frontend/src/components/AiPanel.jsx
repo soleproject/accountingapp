@@ -1665,6 +1665,78 @@ export default function AiPanel({ collapsed, onToggle }) {
   // barge-in handler) can read it without React StrictMode double-invoke.
   useEffect(() => { inputRef.current = input; }, [input]);
 
+  // ---- Category recommendation card: shared handlers (buttons + voice/text) ----
+  const dismissCard = (i) => setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2));
+  const showSimilarForCard = (i, card) => {
+    const ids = [...new Set([card.txnId, ...(card.similarIds || [])].filter(Boolean))];
+    const payload = { ids, label: card.similarLabel || "", count: card.similar || 0, returnTo: location.pathname };
+    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: { ...mm2.card, similarMode: { active: true, ticked: ids } } } : mm2));
+    sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
+    if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
+    else navigate("/accounting/transactions");
+  };
+  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds }) => {
+    try {
+      let ids = txnIds || (card.txnId ? [card.txnId] : []);
+      if (withSimilar && card.txn) {
+        const q = card.txn.contact_id ? `contact_id=${card.txn.contact_id}` : `q=${encodeURIComponent(card.txn.merchant || "")}`;
+        const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
+        ids = [...new Set([...ids, ...(r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id)])];
+      }
+      const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
+        txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
+        create_rule: !!withSimilar && !!card.txn?.contact_id, contact_id: card.txn?.contact_id || null,
+      });
+      const acct = res.data.account;
+      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
+      setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
+      if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+      if (card.similarMode?.active) emitAction("similar-clear");
+      emitAction("txns:changed");
+      if (card.txnId && inquiryTxnRef.current === card.txnId) resolveInquiry();
+    } catch {
+      setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
+    }
+  };
+  // Voice/text → card button. The LLM picks which visible button the
+  // utterance means (or none → normal chat flow). Returns true if handled.
+  const routeToCategoryCard = async (userMsg) => {
+    const msgs = messagesRef.current;
+    const i = msgs.map(mm => mm.card?.kind === "category-recommend").lastIndexOf(true);
+    if (i < 0) return false;
+    const card = msgs[i].card;
+    const a = card.rec.account;
+    const isNew = card.rec.kind === "new";
+    const ticked = card.similarMode?.active ? (card.similarMode.ticked || []) : null;
+    const actions = [
+      { id: "use_this", label: isNew ? "Create account & categorize" : "Use this", hint: `categorize the focused transaction as ${a.code || ""} ${a.name}` },
+      ...(card.similar > 0 && !ticked ? [{ id: "show_similar", label: `Show ${card.similar} similar`, hint: "filter the transactions table to the similar rows, apply nothing" }] : []),
+      ...(card.similar > 0 ? [{ id: "apply_similar_rule", label: `Also ${card.similar} similar + save rule`, hint: "categorize focused + all similar rows and create a rule for future imports" }] : []),
+      ...(ticked ? [{ id: "apply_ticked", label: `Apply to ${ticked.length}`, hint: "categorize only the ticked rows in the table, no rule" },
+                    { id: "clear_similar", label: "Clear", hint: "close the similar view and go back to the previous list" }] : []),
+      { id: "not_this", label: "Not this", hint: "dismiss / reject the recommendation" },
+      ...(card.alternatives || []).map(alt => ({ id: `alt:${alt.id}`, label: `${alt.code} ${alt.name}`, hint: `use alternative account ${alt.name} instead` })),
+      ...(card.direction === "money_out" && !/owner/i.test(a.name) ? [{ id: "owner_draw", label: "Not a business expense (Owner's Draw)", hint: "personal spending, book to Owner's Draw" }] : []),
+    ];
+    let pick = null;
+    try {
+      const { data } = await api.post(`/companies/${currentId}/ai/card-intent`, { message: userMsg, actions });
+      if (data?.action_id && (data.confidence ?? 0) >= 0.6) pick = actions.find(x => x.id === data.action_id) || null;
+    } catch { return false; }
+    if (!pick) return false;
+    setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: `On it — **${pick.label}**.` }]);
+    const primary = isNew ? { newAccount: a } : { accountId: a.id };
+    if (pick.id === "use_this") await applyCategoryCard(i, card, primary);
+    else if (pick.id === "show_similar") showSimilarForCard(i, card);
+    else if (pick.id === "apply_similar_rule") await applyCategoryCard(i, card, { ...primary, withSimilar: true });
+    else if (pick.id === "apply_ticked") await applyCategoryCard(i, card, { ...primary, txnIds: ticked });
+    else if (pick.id === "clear_similar") emitAction("similar-clear");
+    else if (pick.id === "not_this") dismissCard(i);
+    else if (pick.id === "owner_draw") await applyCategoryCard(i, card, { newAccount: { semantic: "owner_draw", name: "Owner's Draw", type: "equity" } });
+    else if (pick.id.startsWith("alt:")) await applyCategoryCard(i, card, { accountId: pick.id.slice(4) });
+    return true;
+  };
+
   const send = async () => {
     if (!input.trim() || streaming || !currentId) return;
     // In open-mic mode we deliberately keep the recognizer alive across
@@ -1740,6 +1812,11 @@ export default function AiPanel({ collapsed, onToggle }) {
       setVoiceReview(null);
       return;
     }
+
+    // ── Category card: voice/text → button ─────────────────────
+    // "use it", "show the three similar ones", "apply to those", "not that
+    // one — owner's draw"… an LLM maps the utterance to a visible button.
+    if (await routeToCategoryCard(userMsg)) return;
 
     // "Stop" / "quiet" / "shut up" / "be quiet" / "silence" / "hush" / "cancel
     // speech" — kills any current TTS utterance immediately. Doesn't send to
@@ -3783,39 +3860,10 @@ export default function AiPanel({ collapsed, onToggle }) {
             {m.card?.kind === "category-recommend" && (
               <CategoryRecommendCard
                 card={m.card}
-                onShowSimilar={(card) => {
-                  const ids = [...new Set([card.txnId, ...(card.similarIds || [])].filter(Boolean))];
-                  const payload = { ids, label: card.similarLabel || "", count: card.similar || 0, returnTo: location.pathname };
-                  setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: { ...mm2.card, similarMode: { active: true, ticked: ids } } } : mm2));
-                  sessionStorage.setItem("axiom_similar_view", JSON.stringify(payload));
-                  if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
-                  else navigate("/accounting/transactions");
-                }}
+                onShowSimilar={(card) => showSimilarForCard(i, card)}
                 onClearSimilar={() => emitAction("similar-clear")}
-                onApply={async ({ withSimilar, accountId, newAccount, txnIds }) => {
-                  try {
-                    let ids = txnIds || (m.card.txnId ? [m.card.txnId] : []);
-                    if (withSimilar && m.card.txn) {
-                      const q = m.card.txn.contact_id ? `contact_id=${m.card.txn.contact_id}` : `q=${encodeURIComponent(m.card.txn.merchant || "")}`;
-                      const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
-                      ids = [...new Set([...ids, ...(r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id)])];
-                    }
-                    const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
-                      txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
-                      create_rule: !!withSimilar && !!m.card.txn?.contact_id, contact_id: m.card.txn?.contact_id || null,
-                    });
-                    const acct = res.data.account;
-                    const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
-                    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
-                    if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
-                    if (m.card.similarMode?.active) emitAction("similar-clear");
-                    emitAction("txns:changed");
-                    if (m.card.txnId && inquiryTxnRef.current === m.card.txnId) resolveInquiry();
-                  } catch {
-                    setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
-                  }
-                }}
-                onDismiss={() => setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2))}
+                onApply={(args) => applyCategoryCard(i, m.card, args)}
+                onDismiss={() => dismissCard(i)}
               />
             )}
             {m.card?.kind === "create-account-then-recategorize" && (

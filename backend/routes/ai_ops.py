@@ -144,6 +144,19 @@ class ApplyCategoryIn(BaseModel):
     contact_id: Optional[str] = None
 
 
+class CardIntentIn(BaseModel):
+    message: str
+    actions: List[dict]
+
+
+@router.post("/companies/{cid}/ai/card-intent")
+async def ai_card_intent(cid: str, inp: CardIntentIn, user: dict = Depends(get_current_user)):
+    """Which visible card button (if any) does this utterance mean?"""
+    await require_company(user, cid)
+    from ai_category_resolver import classify_card_intent
+    return await classify_card_intent(inp.message, inp.actions)
+
+
 @router.post("/companies/{cid}/ai/resolve-category/apply")
 async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict = Depends(get_current_user)):
     """Confirm step: create the proposed account if needed (all fields), then
