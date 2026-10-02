@@ -428,6 +428,10 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       }
       return;
     }
+    if (item.key === "liability_payments" || item.key === "cleanup_liability_payments") {
+      navigate("/accounting/liability-payments");
+      return;
+    }
     // Prefer the item's own area link, appending any per-card filter
     // params so the destination page opens scoped to the work the
     // sidebar card represents (e.g. Bills → outstanding only).
@@ -455,10 +459,12 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   // pathname, no query, so filter params don't break the match.
   const targetPathFor = (item) => {
     if (item.key === "reviewing_transactions") {
+      if (aiReview) return "/accounting/transactions";
       return reviewMode === "chat"
         ? "/accounting/review-chat"
         : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
     }
+    if (item.key === "liability_payments" || item.key === "cleanup_liability_payments") return "/accounting/liability-payments";
     if (!item.area_link) return "/accounting/todo";
     return item.area_link.split("?")[0];
   };

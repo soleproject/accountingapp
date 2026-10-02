@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
 const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
@@ -57,9 +57,15 @@ const ITEM_TYPE_LABELS = {
 //  14 — IRS Travel (lodging receipt required at any amount per §274)
 const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10, 11, 14]);
 
-export default function ClientReviewPage() {
-  const { token } = useParams();
+export default function ClientReviewPage({ embedded = false, token: tokenProp = null, itemTypes = null, embeddedTitle = null }) {
+  const { token: tokenParam } = useParams();
+  const token = tokenProp || tokenParam;
   const [searchParams, setSearchParams] = useSearchParams();
+  // Embedded (in-shell) mode only shows the item types the host page asked for.
+  const scopeItems = (data) => {
+    if (!itemTypes || !data) return data;
+    return { ...data, items: (data.items || []).filter((i) => itemTypes.includes(i.item_type)) };
+  };
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [error, setError] = useState(null);
@@ -73,7 +79,7 @@ export default function ClientReviewPage() {
   const [reminderMode, setReminderMode] = useState(null); // "follow_up" | "item"
   // Pro mode: opened from the Cockpit (?via=pro) with a logged-in pro
   // session. Answers are attributed to the pro in the audit trail.
-  const proToken = searchParams.get("via") === "pro" ? localStorage.getItem("axiom_token") : null;
+  const proToken = (embedded || searchParams.get("via") === "pro") ? localStorage.getItem("axiom_token") : null;
   const attributeToPro = (itemId) => {
     if (!proToken || !itemId) return;
     axios.post(`${API}/${token}/items/${itemId}/attribute`, {}, {
@@ -187,6 +193,7 @@ export default function ClientReviewPage() {
       try {
         const r = await axios.get(`${API}/${token}`);
         if (cancelled) return;
+        r.data = scopeItems(r.data);
         setSession(r.data);
         // Pick the first not-yet-finalized item
         // ?item=<id> (pro jumping in from the Cockpit) wins, even if parked.
@@ -414,6 +421,7 @@ export default function ClientReviewPage() {
       // Refetch the whole batch so the item's answered fields clear
       // and the chat rehydrates in "gathering" state.
       const r = await axios.get(`${API}/${token}`);
+      r.data = scopeItems(r.data);
       setSession(r.data);
       const reopened = (r.data?.items || []).find(
         (i) => i.item_id === currentItem.item_id
@@ -1028,7 +1036,16 @@ export default function ClientReviewPage() {
   if (error) {
     return <FullPageStatus icon={<HelpCircle size={22} />} text={error} />;
   }
-  if (session?.status === "completed" || allDone) {
+  if (session?.status === "completed" || allDone || (embedded && totalCount === 0)) {
+    if (embedded) {
+      return (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-6 py-10 text-center" data-testid="embedded-review-all-done">
+          <CheckCircle2 size={26} className="mx-auto text-emerald-600 mb-2" />
+          <div className="text-base font-semibold text-slate-900">{embeddedTitle || "All caught up"}</div>
+          <div className="text-sm text-slate-600 mt-1">Nothing is waiting on the client right now.</div>
+        </div>
+      );
+    }
     return <SummaryScreen session={session} onComplete={complete} />;
   }
   if (doneForNow && activeIdx >= totalCount) {
@@ -1040,7 +1057,7 @@ export default function ClientReviewPage() {
     .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[#F5F7FA] flex flex-col" data-testid="client-review-page">
+    <div className={`${embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
       {/* Header */}
       <header className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
         <div className="max-w-2xl mx-auto flex items-center gap-3">
