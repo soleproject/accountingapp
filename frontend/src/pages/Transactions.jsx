@@ -378,7 +378,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
       <button
         data-testid={TID.txnAddBtn}
         onClick={onQuick}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
       >
         <Plus size={13} /> Manual Transaction
       </button>
@@ -389,7 +389,7 @@ function NewTransactionMenu({ onQuick, advanced }) {
       <button
         data-testid="txn-new-menu-btn"
         onClick={() => setOpen(v => !v)}
-        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs"
       >
         <Plus size={13} /> New transaction
       </button>
@@ -2640,7 +2640,7 @@ export default function Transactions() {
                   key={k}
                   data-testid={k === "review" ? TID.txnFilterReview : `txn-filter-${k}`}
                   onClick={() => { setFilter(k); setPage(1); }}
-                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+                  className={`px-3 py-1.5 text-xs font-medium border-r border-slate-200 last:border-r-0 ${filter === k ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
                 >
                   {label}
                   {filter === k && (
@@ -2772,7 +2772,7 @@ export default function Transactions() {
             role="tab"
             aria-selected={view === "list"}
             onClick={() => setView("list")}
-            className={`px-2 py-1.5 flex items-center ${view === "list" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`px-2 py-1.5 flex items-center ${view === "list" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
           >
             <ListIcon size={14} />
           </button>
@@ -2782,7 +2782,7 @@ export default function Transactions() {
             role="tab"
             aria-selected={view === "rollup"}
             onClick={() => setView("rollup")}
-            className={`px-2 py-1.5 flex items-center border-l border-slate-200 ${view === "rollup" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`px-2 py-1.5 flex items-center border-l border-slate-200 ${view === "rollup" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}
           >
             <LayoutGrid size={14} />
           </button>
@@ -2836,7 +2836,7 @@ export default function Transactions() {
           onClick={() => setAdvancedOpen((v) => !v)}
           className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border ${
             advancedOpen || advancedActive
-              ? "border-slate-900 bg-slate-900 text-white"
+              ? "border-blue-600 bg-blue-600 text-white"
               : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"
           }`}
           title="Toggle advanced filters (accounts, categories, contacts, amount range)"
