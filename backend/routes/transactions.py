@@ -2742,6 +2742,20 @@ async def list_all_open_invoices(
     ]}
 
 
+UNCATEGORIZED_CODES = {"9999", "6999", "4999"}
+
+
+def _reject_uncategorized(txn: dict | None) -> None:
+    """Approving an Uncategorized Expense/Income row would lock a non-answer
+    into the books — make the user pick a real category first."""
+    if not txn:
+        return
+    code = str(txn.get("category_account_code") or "")
+    name = (txn.get("category_account_name") or "").lower()
+    if not txn.get("category_account_id") or code in UNCATEGORIZED_CODES or "uncategorized" in name:
+        raise HTTPException(400, "Pick a category before approving — Uncategorized Expense/Income can't be approved.")
+
+
 @router.post("/companies/{cid}/transactions/{tid}/approve")
 async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_current_user)):
     """Mark human-reviewed & posted."""
@@ -2749,6 +2763,7 @@ async def approve_transaction(cid: str, tid: str, user: dict = Depends(get_curre
     existing = await db.transactions.find_one({"id": tid, "company_id": cid})
     if existing:
         await assert_open(cid, existing.get("date"))
+    _reject_uncategorized(existing)
     await db.transactions.update_one({"id": tid, "company_id": cid},
         {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}})
     # Track approval count on merchant for rule suggestion + upsert merchant cache
@@ -3350,6 +3365,7 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
     if not existing:
         raise HTTPException(404, "Transaction not found")
     await assert_open(cid, existing.get("date"))
+    _reject_uncategorized(existing)
     await db.transactions.update_one(
         {"id": tid, "company_id": cid},
         {"$set": {"human_reviewed": True, "needs_review": False, "posted": True, "updated_at": now_iso()}},

@@ -41,6 +41,10 @@ import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import { useAuth } from "@/lib/auth";
 
+const UNCAT_CODES = new Set(["9999", "6999", "4999"]);
+const isUncategorizedTxn = (t) =>
+  !t?.category_account_id || UNCAT_CODES.has(String(t.category_account_code || "")) || /uncategorized/i.test(t?.category_account_name || "");
+
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
 
 /** "New" dropdown that surfaces both the quick-modal manual entry
@@ -493,13 +497,15 @@ function NarrowTxnCardList({
             />
             <div className="flex items-center gap-1 shrink-0">
               <button
-                title={t.human_reviewed ? "Unapprove" : "Approve"}
+                title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                 data-testid={TID.txnApprove}
                 onClick={() => toggleApprove(t)}
                 className={
                   t.human_reviewed
                     ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                    : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                    : isUncategorizedTxn(t)
+                      ? "p-1 rounded text-slate-300 hover:bg-slate-100 cursor-not-allowed"
+                      : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
                 }
               >
                 <Check size={14} />
@@ -2212,7 +2218,13 @@ export default function Transactions() {
   };
 
   const approve = async (id) => {
-    const r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
+    let r;
+    try {
+      r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Couldn't approve that transaction.");
+      return;
+    }
     load();
     const { similar, rule_exists } = r.data || {};
     if (similar?.count) {
@@ -2225,7 +2237,16 @@ export default function Transactions() {
     await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
     load();
   };
-  const toggleApprove = (t) => (t.human_reviewed ? unapprove(t.id) : approve(t.id));
+  const toggleApprove = (t) => {
+    if (t.human_reviewed) return unapprove(t.id);
+    if (isUncategorizedTxn(t)) {
+      toast.error("Pick a category first — Uncategorized Expense/Income can't be approved.");
+      emitAction("ai-tell-me-about", { txn: t });
+      emitAction("ai-open");
+      return;
+    }
+    return approve(t.id);
+  };
   const recategorize = async (id) => {
     setBusy(true);
     await api.post(`/companies/${currentId}/ai/recategorize/${id}`);
@@ -3174,13 +3195,15 @@ export default function Transactions() {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
                     <button
-                      title={t.human_reviewed ? "Unapprove" : "Approve"}
+                      title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                       data-testid={TID.txnApprove}
                       onClick={() => toggleApprove(t)}
                       className={
                         t.human_reviewed
                           ? "p-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
-                          : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
+                          : isUncategorizedTxn(t)
+                            ? "p-1 rounded text-slate-300 hover:bg-slate-100 cursor-not-allowed"
+                            : "p-1 rounded hover:bg-emerald-100 text-emerald-600"
                       }
                     >
                       <Check size={14} />

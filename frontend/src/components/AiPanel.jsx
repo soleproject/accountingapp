@@ -2853,7 +2853,10 @@ export default function AiPanel({ collapsed, onToggle }) {
           if (voiceOnRef.current) speakOne(prompt.replace(/\*\*/g, ""));
           emitAction("txns:changed");
         } catch (e) {
-          setMessages(m => [...m, { role: "assistant", content: "Sorry — I couldn't approve that transaction." }]);
+          const detail = e?.response?.data?.detail;
+          const say = detail ? `${detail} Tell me what it was and I'll categorize it.` : "Sorry — I couldn't approve that transaction.";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
         }
         return;
       }
