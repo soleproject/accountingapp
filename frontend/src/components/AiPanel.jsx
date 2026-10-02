@@ -64,11 +64,12 @@ function inferAccountTypeFromName(name) {
 // two alternative existing accounts, and an owner-draw escape hatch.
 function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClearSimilar }) {
   const [busy, setBusy] = useState(false);
-  const { rec, similar, alternatives, direction, similarMode } = card;
+  const { rec, similar, alternatives, direction, similarMode, setContact } = card;
+  const [fixContact, setFixContact] = useState(true);
   const ticked = similarMode?.active ? (similarMode.ticked || []) : null;
   const a = rec.account;
   const isNew = rec.kind === "new";
-  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply(args); } finally { setBusy(false); } };
+  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply({ ...args, setContactName: setContact && fixContact ? setContact : null }); } finally { setBusy(false); } };
   const primaryArgs = isNew ? { newAccount: a } : { accountId: a.id };
   return (
     <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-2" data-testid="category-recommend-card">
@@ -76,8 +77,14 @@ function CategoryRecommendCard({ card, onApply, onDismiss, onShowSimilar, onClea
         <span className="font-semibold text-slate-900">{a.code || "new"} {a.name}</span>
         <span className="text-slate-500">· {[...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ")}</span>
         {a.parent_name && <span className="text-slate-500">· under {a.parent_name}</span>}
-        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? "new account" : "existing"}</span>
+        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? (rec.subaccount ? "new sub-account" : "new account") : "existing"}</span>
       </div>
+      {setContact && (
+        <label className="flex items-center gap-2 text-[12px] text-slate-700 cursor-pointer" data-testid="category-recommend-set-contact">
+          <input type="checkbox" checked={fixContact} onChange={e => setFixContact(e.target.checked)} />
+          Also set contact to <b>{setContact}</b>{card.txn?.contact_name ? <span className="text-slate-500">(currently {card.txn.contact_name})</span> : null}
+        </label>
+      )}
       <div className="flex flex-wrap gap-1.5">
         <button type="button" disabled={busy} onClick={() => run(primaryArgs)} data-testid="category-recommend-apply"
                 className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
@@ -1709,7 +1716,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     if (location.pathname === "/accounting/transactions") emitAction("show-similar-txns", payload);
     else navigate("/accounting/transactions");
   };
-  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds }) => {
+  const applyCategoryCard = async (i, card, { withSimilar, accountId, newAccount, txnIds, setContactName }) => {
     try {
       let ids = txnIds || (card.txnId ? [card.txnId] : []);
       if (withSimilar && card.txn) {
@@ -1720,9 +1727,10 @@ export default function AiPanel({ collapsed, onToggle }) {
       const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
         txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
         create_rule: !!withSimilar && !!card.txn?.contact_id, contact_id: card.txn?.contact_id || null,
+        set_contact_name: setContactName || null,
       });
       const acct = res.data.account;
-      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
+      const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.contact ? ` · contact set to **${res.data.contact.name}**` : ""}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
       setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
       if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
       if (card.similarMode?.active) emitAction("similar-clear");
@@ -1806,7 +1814,7 @@ export default function AiPanel({ collapsed, onToggle }) {
     } catch { return false; }
     if (!pick) return false;
     setMessages(m => [...m, { role: "user", content: userMsg }, { role: "assistant", content: `On it — **${pick.label}**.` }]);
-    const primary = isNew ? { newAccount: a } : { accountId: a.id };
+    const primary = { ...(isNew ? { newAccount: a } : { accountId: a.id }), setContactName: card.setContact || null };
     if (pick.id === "use_this") await applyCategoryCard(i, card, primary);
     else if (pick.id === "show_similar") showSimilarForCard(i, card);
     else if (pick.id === "apply_similar_rule") await applyCategoryCard(i, card, { ...primary, withSimilar: true });
@@ -2007,7 +2015,7 @@ export default function AiPanel({ collapsed, onToggle }) {
           role: "assistant", content: say,
           card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,
                   similar: data.similar_count || 0, similarIds: data.similar_ids || [], similarLabel: data.similar_label || data.txn?.merchant || "",
-                  alternatives: data.alternatives || [], direction: data.direction },
+                  alternatives: data.alternatives || [], direction: data.direction, setContact: data.set_contact || null, partyName: data.party_name || null },
         }]);
         if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
         return true;
