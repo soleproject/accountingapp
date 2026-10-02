@@ -2631,6 +2631,24 @@ async def post_upload(
         await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
 
+@router.get("/{token}/items/{item_id}/attachments/{aid}/file")
+async def get_upload_file(token: str, item_id: str, aid: str):
+    """Stream an uploaded statement/receipt back (inline) so the client
+    can open "View statement" in a new tab. Token-gated like the rest."""
+    import base64
+    from fastapi.responses import Response
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i["item_id"] == item_id), None)
+    att = next((a for a in ((item or {}).get("attachments") or []) if a.get("id") == aid), None)
+    if not att or not att.get("data_url"):
+        raise HTTPException(404, "Attachment not found")
+    head, _, b64 = att["data_url"].partition(",")
+    mime = att.get("mime") or (head.split(":", 1)[1].split(";")[0] if ":" in head else "application/octet-stream")
+    return Response(content=base64.b64decode(b64), media_type=mime,
+                    headers={"Content-Disposition": f'inline; filename="{att.get("filename") or "statement"}"'})
+
+
+
 
 @router.delete("/{token}/items/{item_id}/attachments/{aid}")
 async def delete_upload(token: str, item_id: str, aid: str):

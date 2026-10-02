@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock } from "lucide-react";
+import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
 const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
@@ -1562,6 +1562,7 @@ ${companyName}`;
               message={m}
               w9Token={token}
               w9ItemId={currentItem?.item_id}
+              attachments={currentItem?.attachments}
               onW9Sent={(to) => {
                 // Mark the DRAFT bubble as sent (so rehydrate shows the
                 // green "Sent to …" state, not an empty draft form) AND
@@ -5061,7 +5062,7 @@ function CategorizationBreakdown({ breakdown, onChange }) {
 
 function round2(n) { return Math.round(Number(n || 0) * 100) / 100; }
 
-function LiabilityBreakdown({ breakdown, token, onChange }) {
+function LiabilityBreakdown({ breakdown, token, onChange, description, itemId, attachmentId }) {
   // Editable bucket list for mortgage / credit-card / auto-loan
   // statements. Each bucket has {label, amount, account_name}. The
   // client can tweak any amount inline AND swap the target account
@@ -5107,74 +5108,98 @@ function LiabilityBreakdown({ breakdown, token, onChange }) {
     : null;
 
   const typeStyle = {
-    mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50",    border: "border-rose-200"  },
-    credit_card:  { label: "Credit card statement",  accent: "text-blue-700",   bg: "bg-blue-50",    border: "border-blue-200"  },
-    auto_loan:    { label: "Auto loan statement",    accent: "text-indigo-700", bg: "bg-indigo-50",  border: "border-indigo-200" },
-    generic_loan: { label: "Loan statement",         accent: "text-slate-700",  bg: "bg-slate-50",   border: "border-slate-200" },
+    mortgage:     { label: "Mortgage statement",     accent: "text-rose-700",   bg: "bg-rose-50/60",   border: "border-rose-200"  },
+    credit_card:  { label: "Credit card statement",  accent: "text-blue-700",   bg: "bg-blue-50/60",   border: "border-blue-200"  },
+    auto_loan:    { label: "Auto loan statement",    accent: "text-indigo-700", bg: "bg-indigo-50/60", border: "border-indigo-200" },
+    generic_loan: { label: "Loan statement",         accent: "text-slate-700",  bg: "bg-slate-50",     border: "border-slate-200" },
   }[breakdown.statement_type] || {
     label: "Loan statement", accent: "text-slate-700",
     bg: "bg-slate-50", border: "border-slate-200",
   };
 
   const grandTotal = buckets.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const pct = (n) => grandTotal > 0 ? Math.round((Math.abs(Number(n) || 0) / Math.abs(grandTotal)) * 100) : 0;
+  const rowStyle = (b, i) => {
+    const k = (b.label || "").toLowerCase();
+    if (isPrincipal(b))                          return { Icon: Landmark,    bar: "bg-blue-500",    tint: "bg-blue-50 text-blue-600" };
+    if (k.includes("interest"))                  return { Icon: Percent,     bar: "bg-violet-500",  tint: "bg-violet-50 text-violet-600" };
+    if (k.includes("escrow"))                    return { Icon: Home,        bar: "bg-emerald-500", tint: "bg-emerald-50 text-emerald-600" };
+    if (k.includes("pmi") || k.includes("insur")) return { Icon: ShieldAlert, bar: "bg-orange-500",  tint: "bg-orange-50 text-orange-600" };
+    if (k.includes("tax"))                       return { Icon: ReceiptText, bar: "bg-amber-400",   tint: "bg-amber-50 text-amber-600" };
+    if (k.includes("hoa") || k.includes("dues")) return { Icon: Users,       bar: "bg-pink-500",    tint: "bg-pink-50 text-pink-600" };
+    if (k.includes("fee") || k.includes("late")) return { Icon: Clock,       bar: "bg-slate-400",   tint: "bg-slate-100 text-slate-600" };
+    const fallback = ["bg-sky-500", "bg-teal-500", "bg-fuchsia-500", "bg-lime-500"];
+    return { Icon: FileText, bar: fallback[i % fallback.length], tint: "bg-slate-100 text-slate-600" };
+  };
+  const statementUrl = token && itemId && attachmentId
+    ? `${API}/${token}/items/${itemId}/attachments/${attachmentId}/file` : null;
 
   return (
-    <div className="mt-3 space-y-3" data-testid="liability-breakdown">
-      <div className={`rounded-lg border ${typeStyle.border} ${typeStyle.bg} p-2.5`}>
-        <div className={`flex items-center justify-between mb-1.5 text-[11px] font-semibold uppercase tracking-wide ${typeStyle.accent}`}>
-          <span>{typeStyle.label}{breakdown.lender_name ? ` · ${breakdown.lender_name}` : ""}</span>
-          {breakdown.payment_amount != null && (
-            <span className="font-mono-num tabular-nums">
-              Payment {money(breakdown.payment_amount)}
-            </span>
+    <div className="mt-1 space-y-3" data-testid="liability-breakdown">
+      <div className={`rounded-2xl border ${typeStyle.border} ${typeStyle.bg} p-4 sm:p-5`}>
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-white border border-rose-100 text-rose-500 grid place-items-center shrink-0 shadow-sm">
+            <FileText size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[15px] font-semibold text-slate-900 leading-tight">
+              {typeStyle.label}{breakdown.lender_name ? <span className="text-slate-400 font-normal"> · </span> : ""}{breakdown.lender_name}
+            </div>
+            {description && <div className="text-[12px] text-slate-500 mt-1 leading-snug">{description}</div>}
+          </div>
+          {statementUrl && (
+            <a href={statementUrl} target="_blank" rel="noreferrer"
+               className="shrink-0 inline-flex items-center gap-1.5 text-[12px] font-semibold text-indigo-700 bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm hover:bg-indigo-50"
+               data-testid="liability-view-statement">
+              <FileText size={13} /> View statement
+            </a>
           )}
         </div>
-        <div className="text-[11px] text-slate-500 italic mb-2">
-          Tap an amount to edit if I read it wrong.
-        </div>
-        <div className="space-y-1">
-          {buckets.map((b) => (
-            <div key={b._idx} className="flex items-center gap-2 text-[13px] text-slate-800 py-0.5"
-                 data-testid={`liability-bucket-${b._idx}`}>
-              <div className="flex-1 min-w-0">
-                <div className="font-medium truncate">{b.label}</div>
-                {/* Every row gets a "Change" affordance so the client
-                    can route Interest / Escrow / Fees / PMI / etc. to
-                    a specific account (not just Principal). */}
-                {token && (
+
+        <div className="mt-4 divide-y divide-white/70">
+          {buckets.map((b, i) => {
+            const { Icon, bar, tint } = rowStyle(b, i);
+            const p = pct(b.amount);
+            return (
+              <div key={b._idx} className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,1fr)_3rem_6.5rem_minmax(5rem,1fr)] items-center gap-x-3 py-2"
+                   data-testid={`liability-bucket-${b._idx}`}>
+                <div className={`w-8 h-8 rounded-lg grid place-items-center shrink-0 ${tint}`}><Icon size={15} /></div>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-slate-800 truncate">{b.label}</div>
                   <div className="text-[11px] text-slate-500 truncate flex items-center gap-1.5">
-                    {b.account_name ? (
-                      <span className="truncate">→ {b.account_name}</span>
-                    ) : (
-                      <span className="truncate italic text-slate-400">
-                        → {isPrincipal(b) ? "Pick a liability account" : "Pick an account"}
-                      </span>
+                    {b.account_name
+                      ? <span className="truncate">{b.account_name}</span>
+                      : <span className="truncate italic text-slate-400">{isPrincipal(b) ? "Pick a liability account" : "Pick an account"}</span>}
+                    {token && (
+                      <button type="button" onClick={() => openPicker(b)}
+                              className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
+                              data-testid={`liability-bucket-change-${b._idx}`}>Change</button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => openPicker(b)}
-                      className="text-[10px] font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 shrink-0"
-                      data-testid={`liability-bucket-change-${b._idx}`}
-                    >
-                      Change
-                    </button>
                   </div>
-                )}
+                </div>
+                <div className="hidden sm:block text-[12px] font-semibold text-slate-700 font-mono-num tabular-nums text-right">{p}%</div>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={b.amount ?? 0}
+                  onChange={(e) => editBucket(b._idx, { amount: parseFloat(e.target.value) || 0 })}
+                  className="w-24 sm:w-full text-right font-mono-num tabular-nums border border-slate-200 rounded-md px-2 py-1 text-[12px] bg-white shrink-0 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  data-testid={`liability-bucket-amount-${b._idx}`}
+                />
+                <div className="hidden sm:block h-2.5 rounded-full bg-slate-200/80 overflow-hidden">
+                  <div className={`h-full rounded-full ${bar} transition-[width] duration-500`} style={{ width: `${Math.max(p > 0 ? 3 : 0, p)}%` }} />
+                </div>
               </div>
-              <input
-                type="number"
-                step="0.01"
-                value={b.amount ?? 0}
-                onChange={(e) => editBucket(b._idx, { amount: parseFloat(e.target.value) || 0 })}
-                className="w-24 text-right font-mono-num tabular-nums border border-slate-300 rounded px-1.5 py-0.5 text-[12px] bg-white shrink-0"
-                data-testid={`liability-bucket-amount-${b._idx}`}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
-        <div className="mt-2 pt-1.5 border-t border-slate-300 flex items-center justify-between text-sm font-semibold text-slate-900">
-          <span>Total</span>
-          <span className="font-mono-num tabular-nums">{money(grandTotal)}</span>
+
+        <div className="mt-2 pt-3 border-t border-slate-300/60 grid grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:grid-cols-[auto_minmax(0,1fr)_3rem_6.5rem_minmax(5rem,1fr)] items-center gap-x-3">
+          <div className="w-8" />
+          <div className="text-[14px] font-semibold text-slate-900">Total</div>
+          <div className="hidden sm:block text-[12px] font-semibold text-slate-800 font-mono-num tabular-nums text-right">100%</div>
+          <div className="text-right font-mono-num tabular-nums text-[13px] font-semibold text-slate-900 bg-white border border-slate-200 rounded-md px-2 py-1 w-24 sm:w-full" data-testid="liability-grand-total">{money(grandTotal)}</div>
+          <div className="hidden sm:block h-2.5 rounded-full bg-slate-800" />
         </div>
       </div>
 
@@ -5633,7 +5658,7 @@ function W9Checklist() {
   );
 }
 
-function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment, w9Token, w9ItemId, onW9Sent }) {
+function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachment, w9Token, w9ItemId, onW9Sent, attachments }) {
   const isUser = message.role === "user";
   const hasBreakdown = !isUser && message._splitBreakdown;
   const hasLiability = !isUser && message._liabilityBreakdown;
@@ -5641,6 +5666,36 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
   const wide = hasBreakdown || hasLiability || hasCategorization;
   const isAttachment = isUser && message._attachmentId;
   const isAnswered = !isUser && message._readOnlyAnswered;
+  const liabilityReplyStyle = (qr) => qr === "Use this split"
+    ? "inline-flex items-center gap-1.5 text-[13px] font-semibold px-5 py-2.5 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+    : "inline-flex items-center gap-1.5 text-[13px] font-medium px-4 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50";
+  if (hasLiability) {
+    const latestAtt = (attachments || []).slice(-1)[0];
+    return (
+      <div className="flex justify-start group">
+        <div className="w-full">
+          <LiabilityBreakdown
+            breakdown={message._liabilityBreakdown}
+            token={w9Token}
+            itemId={w9ItemId}
+            attachmentId={latestAtt?.id}
+            description={message.content}
+            onChange={(next) => onBreakdownChange?.(next)}
+          />
+          {(message.quickReplies || []).length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(message.quickReplies || []).slice(0, 8).map((qr, i) => (
+                <button key={i} onClick={() => onQuickReply?.(qr)} className={liabilityReplyStyle(qr)} data-testid={`review-quick-reply-${i}`}>
+                  {qr === "Use this split" ? <CheckCircle2 size={15} /> : qr === "Something's off" ? <AlertTriangle size={15} /> : null}
+                  {qr}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} group`}>
       <div
@@ -5667,13 +5722,6 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         {hasBreakdown && (
           <SplitBreakdown
             breakdown={message._splitBreakdown}
-            onChange={(next) => onBreakdownChange?.(next)}
-          />
-        )}
-        {hasLiability && (
-          <LiabilityBreakdown
-            breakdown={message._liabilityBreakdown}
-            token={w9Token}
             onChange={(next) => onBreakdownChange?.(next)}
           />
         )}
