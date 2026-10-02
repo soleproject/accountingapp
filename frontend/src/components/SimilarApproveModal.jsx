@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { X, Check, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { X, Check, Sparkles, Search } from "lucide-react";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
 
@@ -12,8 +12,17 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   const items = similar.items || similar.sample || [];
   const [ticked, setTicked] = useState(() => new Set(items.map(i => i.id)));
   const [busy, setBusy] = useState(false);
+  const [q, setQ] = useState("");
   const cat = similar.category_account_name || similar.category_account_code || "the same category";
   const isDesc = similar.match_kind === "description";
+
+  const visible = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter(it =>
+      [it.merchant, it.date, it.category_account_name, money(it.amount), String(it.amount ?? "")]
+        .some(v => (v || "").toString().toLowerCase().includes(s)));
+  }, [items, q]);
 
   useEffect(() => { emitAction("bulk-approve-selection-changed", { ids: [...ticked], origin: "modal" }); }, [ticked]);
   useActionListener("bulk-approve-selection-changed", (p) => {
@@ -22,7 +31,12 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   useActionListener("bulk-approve-done", () => onClose());
 
   const toggle = (id) => setTicked(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const allOn = ticked.size === items.length;
+  const allOn = visible.length > 0 && visible.every(i => ticked.has(i.id));
+  const toggleAll = () => setTicked(s => {
+    const n = new Set(s);
+    visible.forEach(i => allOn ? n.delete(i.id) : n.add(i.id));
+    return n;
+  });
 
   const run = async (createRule) => {
     if (busy || !ticked.size) return;
@@ -80,11 +94,23 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
           </div>
           <button type="button" onClick={decline} className="text-slate-400 hover:text-slate-700" aria-label="Close" data-testid="similar-approve-close"><X size={16} /></button>
         </div>
+        <div className="px-5 py-2 border-b border-slate-100 flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={q} onChange={e => setQ(e.target.value)} autoFocus placeholder="Search description, date, amount or category…"
+                   className="w-full text-[13px] pl-8 pr-8 py-1.5 rounded-md border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-fuchsia-200 focus:border-fuchsia-300"
+                   data-testid="similar-approve-search" />
+            {q && <button type="button" onClick={() => setQ("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700" aria-label="Clear search" data-testid="similar-approve-search-clear"><X size={13} /></button>}
+          </div>
+          <span className="text-[11px] text-slate-500 whitespace-nowrap" data-testid="similar-approve-search-count">
+            {q ? `${visible.length} of ${items.length}` : `${items.length} rows`} · {ticked.size} ticked
+          </span>
+        </div>
         <div className="max-h-[46vh] overflow-auto">
           <table className="w-full text-[13px]">
             <thead className="sticky top-0 bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="px-4 py-2 text-left w-8"><input type="checkbox" checked={allOn} onChange={() => setTicked(allOn ? new Set() : new Set(items.map(i => i.id)))} data-testid="similar-approve-tick-all" /></th>
+                <th className="px-4 py-2 text-left w-8"><input type="checkbox" checked={allOn} onChange={toggleAll} disabled={!visible.length} title={q ? "Tick all shown" : "Tick all"} data-testid="similar-approve-tick-all" /></th>
                 <th className="px-2 py-2 text-left">Date</th>
                 <th className="px-2 py-2 text-left">Description</th>
                 <th className="px-2 py-2 text-left">Current category</th>
@@ -92,7 +118,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
               </tr>
             </thead>
             <tbody>
-              {items.map(it => (
+              {visible.map(it => (
                 <tr key={it.id} className="border-t border-slate-100 hover:bg-slate-50/60" data-testid={`similar-approve-row-${it.id}`}>
                   <td className="px-4 py-2"><input type="checkbox" checked={ticked.has(it.id)} onChange={() => toggle(it.id)} data-testid={`similar-approve-tick-${it.id}`} /></td>
                   <td className="px-2 py-2 font-mono text-slate-600 whitespace-nowrap">{it.date}</td>
@@ -101,6 +127,9 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
                   <td className={`px-4 py-2 text-right font-mono ${it.amount > 0 ? "text-emerald-700" : "text-slate-800"}`}>{money(it.amount)}</td>
                 </tr>
               ))}
+              {!visible.length && (
+                <tr><td colSpan={5} className="px-4 py-6 text-center text-slate-500" data-testid="similar-approve-empty">No rows match “{q}”.</td></tr>
+              )}
             </tbody>
           </table>
         </div>
