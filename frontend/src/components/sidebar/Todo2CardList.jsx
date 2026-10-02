@@ -131,8 +131,9 @@ const EMBEDDED_CHECKIN_ROUTES = {
   cleanup_liability_payments: "/accounting/liability-payments",
   receipt_followup:           "/accounting/receipt-followup",
   cleanup_receipt_followup:   "/accounting/receipt-followup",
-  checks_no_payee:            "/accounting/checks-review",
-  cleanup_checks_no_payee:    "/accounting/checks-review",
+  // Checks open the Review Chat "Checks" tab (payee + category allocator).
+  checks_no_payee:            "/accounting/review-chat?tab=checks",
+  cleanup_checks_no_payee:    "/accounting/review-chat?tab=checks",
 };
 
 const CARD_FILTERS = {
@@ -485,7 +486,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         ? "/accounting/review-chat"
         : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
     }
-    if (EMBEDDED_CHECKIN_ROUTES[item.key]) return EMBEDDED_CHECKIN_ROUTES[item.key];
+    if (EMBEDDED_CHECKIN_ROUTES[item.key]) return EMBEDDED_CHECKIN_ROUTES[item.key].split("?")[0];
     if (!item.area_link) return "/accounting/todo";
     return item.area_link.split("?")[0];
   };
