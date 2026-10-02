@@ -2742,6 +2742,117 @@ async def list_all_open_invoices(
     ]}
 
 
+_DESC_NOISE_RE = re.compile(r"(conf(?:irmation)?#?\s*[:#]?\s*\S+|ref(?:erence)?#?\s*\S+|\b(?:on|dated?)\s+\d{1,2}/\d{1,2}(?:/\d{2,4})?|[#*]\S*|\S*\d\S*)", re.IGNORECASE)
+
+
+def _desc_key(text: str | None) -> str:
+    """Normalize a bank memo into a vendor-ish key: drop confirmation /
+    reference codes, dates and any token containing digits, keep the first
+    six words. 'Online Banking transfer to CHK 6084 Confirmation# XXXXX98242'
+    → 'online banking transfer to chk'."""
+    t = _DESC_NOISE_RE.sub(" ", (text or "").lower())
+    words = [w for w in re.split(r"[^a-z&']+", t) if w]
+    return " ".join(words[:6])
+
+
+_ACCT_ANCHORS: frozenset[str] = frozenset({
+    "chk", "checking", "sav", "savings", "acct", "account", "acc", "card",
+    "ending", "loan", "ln", "mtg", "mortgage", "visa", "mc", "amex", "cc",
+    "line", "loc", "heloc", "cd", "ira", "brokerage",
+})
+
+
+def _similar_tokens(text: str | None) -> tuple[str, list[tuple[str, bool, int, int]]]:
+    """Tokenize a memo (cut at the first noise marker) into
+    `(lowercased_token, kept, start, end)` for the popup's hybrid normalizer:
+      • pure 3–6 digit numbers are kept ONLY when anchored to an account
+        word (`CHK 6278`, `card ending 4521`) — store/order/date numbers go;
+      • any other token containing a digit (order codes, masked IDs) goes;
+      • everything else is kept (stopwords flagged so grouping can skip them
+        while rule text keeps them as a real substring).
+    Returns the lowered text too so callers can slice real substrings."""
+    lowered = (text or "").lower()
+    for marker in _NOISE_MARKERS:
+        idx = lowered.find(marker)
+        if idx > 0:
+            lowered = lowered[:idx]
+            break
+    matches = list(re.finditer(r"[a-z0-9]+", lowered))
+    out: list[tuple[str, bool, int, int]] = []
+    for i, m in enumerate(matches):
+        t = m.group(0)
+        if t.isdigit():
+            prev = matches[i - 1].group(0) if i else ""
+            keep = 3 <= len(t) <= 6 and prev in _ACCT_ANCHORS
+        elif any(ch.isdigit() for ch in t) or (len(t) > 2 and all(ch == "x" for ch in t)):
+            keep = False
+        else:
+            keep = True
+        out.append((t, keep, m.start(), m.end()))
+    return lowered, out
+
+
+def _similar_desc_group(text: str | None, amount: float | None = None) -> tuple[str, str]:
+    """Group key + label for the "similar description" popup (hybrid of
+    Step 3B and the old digit-stripped key): account numbers survive so
+    'transfer to CHK 6278' ≠ 'transfer to CHK 7984', but store/order codes
+    don't, so every Amazon order lands in one 'Amazon Mktplace Us Wa' group.
+    When `amount` is given, money-in and money-out rows are kept apart
+    (a transfer *from* an account shouldn't be bulk-booked like one *to* it)."""
+    keep = [t for t, ok, _s, _e in _similar_tokens(text)[1] if ok and t not in _DESC_STOPWORDS and len(t) >= 2][:6]
+    if keep:
+        key = " ".join(keep)
+        label = " ".join(w.upper() if w.isdigit() else w.capitalize() for w in keep)
+    else:
+        key = _desc_key(text)
+        label = key or "similar description"
+    if amount is not None and key:
+        key += "|in" if (amount or 0) > 0 else "|out"
+    return key, label
+
+
+def _similar_rule_candidates(text: str | None) -> list[str]:
+    """Substrings of the raw (lowercased) memo that could back a
+    `merchant_contains` rule, best first: the leading run of kept words,
+    then every other contiguous run between dropped tokens, longest first.
+    'CHECKCARD 0626 DENTAL INSURANCE AUTOPA XXX-XX04204 CA' →
+    ['checkcard', 'dental insurance autopa', 'ca']."""
+    lowered, toks = _similar_tokens(text)
+    segs: list[list[tuple[int, int]]] = [[]]
+    for _t, ok, s, e in toks:
+        if ok:
+            segs[-1].append((s, e))
+        elif segs[-1]:
+            segs.append([])
+    spans = [lowered[s[0][0]:s[-1][1]].strip() for s in segs if s]
+    if not spans:
+        return []
+    return [spans[0]] + sorted(spans[1:], key=len, reverse=True)
+
+
+def _pick_similar_rule_text(text: str | None, group_key: str, siblings: list[str],
+                            others: list[tuple[str, str]]) -> str | None:
+    """Pick the first rule candidate that is contained in every sibling memo
+    and in no memo from a different description group (direction ignored —
+    a vendor rule legitimately covers refunds too). `others` is
+    `(memo, group_key)` for the rest of the company's rows. None → no safe rule."""
+    base = group_key.split("|")[0]
+    sib = [(s or "").lower() for s in siblings]
+    oth = [((m or "").lower(), g.split("|")[0]) for m, g in others]
+    # A group whose key extends ours word-by-word ("adobe creative cloud" vs
+    # "adobe") is the same vendor — not a conflict. "checkcard …" vs "check" is.
+    related = lambda g: g == base or g.startswith(base + " ")
+    for cand in _similar_rule_candidates(text):
+        if len(cand) < 3:
+            continue
+        if any(cand not in s for s in sib):
+            continue
+        if any(cand in m and not related(g) for m, g in oth):
+            continue
+        return cand
+    return None
+
+
 UNCATEGORIZED_CODES = {"9999", "6999", "4999"}
 
 
@@ -3385,17 +3496,36 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
     contact_id = txn.get("contact_id")
     category_id = txn.get("category_account_id")
     contact_name = txn.get("contact_name")
-    if contact_id and category_id:
-        # Find every other transaction for this contact that hasn't been
-        # human-reviewed yet. Excludes the one we just approved and anything
-        # in a closed period (we can't safely bulk-update those).
-        candidates_q = {
-            "company_id": cid,
-            "contact_id": contact_id,
-            "human_reviewed": {"$ne": True},
-            "id": {"$ne": tid},
-        }
-        candidates = await db.transactions.find(candidates_q).sort([("date", -1), ("_id", -1)]).to_list(500)
+    # No contact → fall back to "same description" siblings (hybrid
+    # normalizer: account numbers kept, store/order codes dropped).
+    raw_desc = txn.get("merchant") or txn.get("description")
+    desc_key, desc_label = (None, None) if contact_id else _similar_desc_group(raw_desc, txn.get("amount"))
+    rule_text = None
+    rule_available = True
+    if category_id and (contact_id or desc_key):
+        # Find every other transaction for this contact (or with the same
+        # normalized description) that hasn't been human-reviewed yet.
+        # Excludes the one we just approved and anything in a closed period.
+        if contact_id:
+            candidates_q = {"company_id": cid, "contact_id": contact_id, "human_reviewed": {"$ne": True}, "id": {"$ne": tid}}
+            candidates = await db.transactions.find(candidates_q).sort([("date", -1), ("_id", -1)]).to_list(500)
+        else:
+            # Whole company (contacts too) so a rule like "checkcard" that
+            # would swallow every card purchase gets rejected.
+            pool = await db.transactions.find({"company_id": cid, "id": {"$ne": tid}},
+                                              {"id": 1, "merchant": 1, "description": 1, "human_reviewed": 1, "date": 1, "contact_id": 1,
+                                               "amount": 1, "category_account_id": 1, "category_account_name": 1}
+                                              ).sort([("date", -1), ("_id", -1)]).to_list(10000)
+            keyed = [(c, _similar_desc_group(c.get("merchant") or c.get("description"), c.get("amount"))[0]) for c in pool]
+            candidates = [c for c, k in keyed if k == desc_key and not c.get("contact_id") and not c.get("human_reviewed")][:500]
+            contact_name = desc_label
+            # Only offer "+ create rule" when a substring exists that hits
+            # every sibling and nothing from another group.
+            rule_text = _pick_similar_rule_text(
+                raw_desc, desc_key,
+                [raw_desc] + [c.get("merchant") or c.get("description") for c in candidates],
+                [(c.get("merchant") or c.get("description"), k) for c, k in keyed])
+            rule_available = rule_text is not None
         # Filter out any in a closed period — bulk approval shouldn't silently
         # skip them; the UI will show only the actionable count.
         actionable: list[dict] = []
@@ -3407,6 +3537,9 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
             similar = {
                 "contact_id": contact_id,
                 "contact_name": contact_name,
+                "match_kind": "contact" if contact_id else "description",
+                "match_value": contact_id or rule_text,
+                "rule_available": rule_available,
                 "category_account_id": category_id,
                 "category_account_code": txn.get("category_account_code"),
                 "category_account_name": txn.get("category_account_name"),
@@ -3431,12 +3564,14 @@ async def approve_with_suggestion(cid: str, tid: str, user: dict = Depends(get_c
                 ],
             }
         # Detect if a rule for this contact already exists so the client
-        # doesn't create a duplicate.
-        rule_exists = bool(await db.rules.find_one({
-            "company_id": cid,
-            "match_type": "contact_id",
-            "match_value": contact_id,
-        }))
+        # doesn't create a duplicate. No safe description substring → hide
+        # the rule offer the same way (every chat/modal path honours this).
+        if contact_id:
+            rule_exists = bool(await db.rules.find_one({"company_id": cid, "match_type": "contact_id", "match_value": contact_id}))
+        elif not rule_available:
+            rule_exists = True
+        else:
+            rule_exists = bool(await db.rules.find_one({"company_id": cid, "match_type": "merchant_contains", "match_value": rule_text}))
 
     await _invalidate_dash(cid)
     return {"ok": True, "approved": approved_info, "similar": similar, "rule_exists": rule_exists}
@@ -3447,6 +3582,7 @@ class BulkApproveRuleIn(BaseModel):
     category_account_id: str
     contact_id: Optional[str] = None
     contact_name: Optional[str] = None
+    match_text: Optional[str] = None  # no-contact flow: normalized description key for a merchant_contains rule
     create_rule: bool = True
 
 
@@ -3719,6 +3855,19 @@ async def apply_bulk_approve_rule(cid: str, inp: BulkApproveRuleIn, user: dict =
                 "category_account_id": acct["id"],
                 "source": "user_bulk_approve",
                 "created_at": now_iso(),
+            }
+            await db.rules.insert_one(rule)
+            rule_id = rule["id"]
+    elif inp.create_rule and inp.match_text:
+        key = inp.match_text.strip().lower()
+        existing = await db.rules.find_one({"company_id": cid, "match_type": "merchant_contains", "match_value": key})
+        if not existing and key:
+            rule = {
+                "id": str(uuid.uuid4()), "company_id": cid,
+                "match_type": "merchant_contains", "match_value": key,
+                "contact_name": inp.contact_name or "",
+                "account_code": acct["code"], "account_name": acct["name"], "category_account_id": acct["id"],
+                "source": "user_bulk_approve", "created_at": now_iso(),
             }
             await db.rules.insert_one(rule)
             rule_id = rule["id"]

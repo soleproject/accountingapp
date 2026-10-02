@@ -274,8 +274,12 @@ function BulkApproveCard({ similar, createRule, ruleExists, ticked, currentId, o
     try {
       let txnIds = ids;
       if (!txnIds) {
-        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`);
-        txnIds = (r.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+        if (similar.contact_id) {
+          const r = await api.get(`/companies/${currentId}/transactions?contact_id=${similar.contact_id}&limit=1000`);
+          txnIds = (r.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+        } else {
+          txnIds = (similar.items || []).map((x) => x.id);
+        }
       }
       const res = await api.post(
         `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
@@ -285,6 +289,7 @@ function BulkApproveCard({ similar, createRule, ruleExists, ticked, currentId, o
           contact_id: similar.contact_id,
           contact_name: similar.contact_name,
           create_rule: !!withRule,
+          match_text: similar.match_kind === "description" ? similar.match_value : null,
         }
       );
       const updated = res.data?.updated || 0;
@@ -888,7 +893,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     const { similar, rule_exists, ids } = payload || {};
     if (!similar?.count) return;
     const catName = similar.category_account_name || similar.category_account_code || "the same category";
-    const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} **${similar.count}** other unapproved transaction${similar.count === 1 ? "" : "s"} from **${similar.contact_name}**. Categorize the ticked ones as **${catName}** and approve them? Say **yes**${rule_exists ? "" : ", or **yes, and make a rule** so future imports land there automatically"}.`;
+    const who = similar.match_kind === "description" ? `with a description like **“${similar.contact_name}”**` : `from **${similar.contact_name}**`;
+    const prompt = `Approved. There ${similar.count === 1 ? "is" : "are"} **${similar.count}** other unapproved transaction${similar.count === 1 ? "" : "s"} ${who}. Categorize the ticked ones as **${catName}** and approve them? Say **yes**${rule_exists ? "" : ", or **yes, and make a rule** so future imports land there automatically"}.`;
     pendingIntentRef.current = { kind: "bulk-approve-contact", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null };
     setMessages(m => [...m.map(mm => mm.card?.kind === "bulk-approve-confirm" ? { ...mm, card: null } : mm),
       { role: "assistant", content: prompt, card: { kind: "bulk-approve-confirm", similar, create_rule: false, rule_exists: !!rule_exists, ticked: ids || null } }]);
@@ -1755,12 +1761,17 @@ export default function AiPanel({ collapsed, onToggle }) {
     try {
       let ids = card.ticked;
       if (!ids) {
-        const r = await api.get(`/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`);
-        ids = (r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id);
+        if (sim.contact_id) {
+          const r = await api.get(`/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`);
+          ids = (r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id);
+        } else {
+          ids = (sim.items || []).map(x => x.id);
+        }
       }
       const res = await api.post(`/companies/${currentId}/transactions/apply-bulk-approve-rule`, {
         txn_ids: ids, category_account_id: sim.category_account_id, contact_id: sim.contact_id,
         contact_name: sim.contact_name, create_rule: !!withRule,
+        match_text: sim.match_kind === "description" ? sim.match_value : null,
       });
       const n = res.data?.updated || 0;
       const msg = res.data?.rule_id ? `Approved ${n} transaction${n === 1 ? "" : "s"} and created a rule for ${sim.contact_name}.` : `Approved ${n} transaction${n === 1 ? "" : "s"}.`;
@@ -2524,10 +2535,14 @@ export default function AiPanel({ collapsed, onToggle }) {
           // Fetch every unapproved txn for this contact — sample caps at 5.
           let ids = p.ticked || null;
           if (!ids) {
-            const full = await api.get(
-              `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
-            );
-            ids = (full.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+            if (sim.contact_id) {
+              const full = await api.get(
+                `/companies/${currentId}/transactions?contact_id=${sim.contact_id}&limit=1000`
+              );
+              ids = (full.data.transactions || []).filter((t) => !t.human_reviewed).map((t) => t.id);
+            } else {
+              ids = (sim.items || []).map((x) => x.id);
+            }
           }
           const res = await api.post(
             `/companies/${currentId}/transactions/apply-bulk-approve-rule`,
@@ -2537,6 +2552,7 @@ export default function AiPanel({ collapsed, onToggle }) {
               contact_id: sim.contact_id,
               contact_name: sim.contact_name,
               create_rule: !!p.create_rule,
+              match_text: sim.match_kind === "description" ? sim.match_value : null,
             }
           );
           const updated = res.data?.updated || 0;
