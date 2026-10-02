@@ -59,6 +59,63 @@ function inferAccountTypeFromName(name) {
 // Compact confirm card used by the create-account / recategorize / transfer
 // flows. Same visual language as BulkApproveCard but generic — takes a title,
 // a busy label, and an onConfirm/onDismiss pair.
+// Recommendation card for the meaning-first resolver: one primary action
+// (use existing / create & categorize), optional "also N similar", up to
+// two alternative existing accounts, and an owner-draw escape hatch.
+function CategoryRecommendCard({ card, onApply, onDismiss }) {
+  const [busy, setBusy] = useState(false);
+  const { rec, similar, alternatives, direction } = card;
+  const a = rec.account;
+  const isNew = rec.kind === "new";
+  const run = async (args) => { if (busy) return; setBusy(true); try { await onApply(args); } finally { setBusy(false); } };
+  const primaryArgs = isNew ? { newAccount: a } : { accountId: a.id };
+  return (
+    <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/60 p-3 space-y-2" data-testid="category-recommend-card">
+      <div className="text-[12px] text-slate-700 flex flex-wrap gap-x-2 gap-y-0.5">
+        <span className="font-semibold text-slate-900">{a.code || "new"} {a.name}</span>
+        <span className="text-slate-500">· {[...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ")}</span>
+        {a.parent_name && <span className="text-slate-500">· under {a.parent_name}</span>}
+        <span className={`px-1.5 rounded text-[10px] font-semibold uppercase tracking-wide ${isNew ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"}`}>{isNew ? "new account" : "existing"}</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" disabled={busy} onClick={() => run(primaryArgs)} data-testid="category-recommend-apply"
+                className="text-[12px] font-medium px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+          {busy ? "Applying…" : isNew ? "Create account & categorize" : "Use this"}
+        </button>
+        {similar > 0 && (
+          <button type="button" disabled={busy} onClick={() => run({ ...primaryArgs, withSimilar: true })} data-testid="category-recommend-apply-similar"
+                  className="text-[12px] font-medium px-3 py-1.5 rounded-md border border-indigo-300 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+            Also {similar} similar + save rule
+          </button>
+        )}
+        <button type="button" disabled={busy} onClick={onDismiss} data-testid="category-recommend-dismiss"
+                className="text-[12px] px-3 py-1.5 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+          Not this
+        </button>
+      </div>
+      {(alternatives?.length > 0 || (direction === "money_out" && !/owner/i.test(a.name))) && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+          <span>Or:</span>
+          {alternatives.map(alt => (
+            <button key={alt.id} type="button" disabled={busy} onClick={() => run({ accountId: alt.id })}
+                    data-testid={`category-recommend-alt-${alt.id}`}
+                    className="px-2 py-0.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">
+              {alt.code} {alt.name}
+            </button>
+          ))}
+          {direction === "money_out" && !/owner/i.test(a.name) && (
+            <button type="button" disabled={busy} onClick={() => run({ newAccount: { semantic: "owner_draw", name: "Owner's Draw", type: "equity" } })}
+                    data-testid="category-recommend-owner-draw"
+                    className="px-2 py-0.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 text-slate-700">
+              Not a business expense (Owner's Draw)
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InlineConfirmCard({ testId, tone = "fuchsia", confirmLabel = "Yes, do it", cancelLabel = "No, thanks", busyLabel = "Applying…", onConfirm, onDismiss }) {
   const [busy, setBusy] = useState(false);
   const [handled, setHandled] = useState(false);
@@ -1730,6 +1787,38 @@ export default function AiPanel({ collapsed, onToggle }) {
         return;
       }
     }
+    // ------ Meaning-first category recommendation --------------------
+    // Shared by the focused-transaction path and the free-text fallback.
+    // Returns true when a recommendation card was shown.
+    async function recommendCategory(text, txnId) {
+      try {
+        const { data } = await api.post(`/companies/${currentId}/ai/resolve-category`, { message: text, txn_id: txnId || null });
+        const rec = data?.recommendation;
+        if (!rec?.account) {
+          const say = "I couldn't work out where that belongs yet — tell me what the money was for in a few words (e.g. “office supplies”, “a customer paying an invoice”, “paid myself”).";
+          setMessages(m => [...m, { role: "assistant", content: say }]);
+          if (voiceOnRef.current) speakOne(say);
+          return true;
+        }
+        const a = rec.account;
+        const label = `${a.code || "new"} ${a.name}`;
+        const who = data.txn?.merchant ? `**${data.txn.merchant}**${typeof data.txn.amount === "number" ? ` (${data.txn.amount.toLocaleString("en-US", { style: "currency", currency: "USD" })})` : ""} → ` : "";
+        const typeLine = [...new Set([a.type, a.subtype, a.detail_type].filter(Boolean).map(s => String(s).replace(/_/g, " ")))].join(" › ");
+        const say = rec.kind === "existing"
+          ? `${who}**${label}** (already on your chart). ${rec.why}`
+          : `${who}nothing on your chart fits, so I'd add **${label}** — ${typeLine}${a.parent_name ? `, under ${a.parent_name}` : ""}. ${rec.why}`;
+        setMessages(m => [...m, {
+          role: "assistant", content: say,
+          card: { kind: "category-recommend", rec, txnId: txnId || data.txn?.id || null, txn: data.txn,
+                  similar: data.similar_count || 0, alternatives: data.alternatives || [], direction: data.direction },
+        }]);
+        if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
     // ------ Cleanup-Copilot inquiry interceptor -----------------------
     // The Transactions page emits `cleanup-inquiry` when the user clicks
     // "Fix now" on the hero band. The AI asked "what are these X <contact>
@@ -2023,6 +2112,21 @@ export default function AiPanel({ collapsed, onToggle }) {
       }
       // Note: if intent === "question", we intentionally fall through to the
       // regular chat stream below.
+    }
+
+    // ---- Pinned-transaction free text → category recommendation ----
+    // The user answered "what was this for?" in their own words and no
+    // explicit command matched. Short, non-question text about a pinned
+    // transaction is a description — resolve its meaning.
+    {
+      const pinnedTxnId = inquiryTxnRef.current || (focusPinned && focus?.id) || null;
+      const words = userMsg.trim().split(/\s+/).length;
+      if (pinnedTxnId && words <= 16 && !/\?\s*$/.test(userMsg)
+          && !/^(?:what|why|how|when|where|who|which|show|open|go to|create an? invoice|read)\b/i.test(userMsg.trim())) {
+        setMessages(m => [...m, { role: "user", content: userMsg }]);
+        if (await recommendCategory(userMsg, pinnedTxnId)) return;
+        setMessages(m => m.slice(0, -1));
+      }
     }
 
     // ---- Ambiguous account-type resolver ----
@@ -2793,8 +2897,11 @@ export default function AiPanel({ collapsed, onToggle }) {
     // --- Remote intent: recategorize the focused transaction to a named account. ---
     if (cmd.handled && cmd.remote === "recategorize-focused") {
       setMessages(m => [...m, { role: "user", content: userMsg }]);
+      // Meaning-first: resolve the user's words (not a literal account
+      // name) against the chart, else propose a complete GAAP account.
+      if (await recommendCategory(userMsg, cmd.txnId)) return;
       try {
-        // Look up an account whose name/code matches the spoken target.
+        // Fallback (resolver unavailable): literal name/code match.
         const r = await api.get(`/companies/${currentId}/accounts`);
         const accts = r.data.accounts || [];
         const needle = cmd.targetName.toLowerCase();
@@ -3634,6 +3741,34 @@ export default function AiPanel({ collapsed, onToggle }) {
                   pendingIntentRef.current = null;
                   setMessages(mm => [...mm, { role: "assistant", content: "OK — no new account created." }]);
                 }}
+              />
+            )}
+            {m.card?.kind === "category-recommend" && (
+              <CategoryRecommendCard
+                card={m.card}
+                onApply={async ({ withSimilar, accountId, newAccount }) => {
+                  try {
+                    let ids = m.card.txnId ? [m.card.txnId] : [];
+                    if (withSimilar && m.card.txn) {
+                      const q = m.card.txn.contact_id ? `contact_id=${m.card.txn.contact_id}` : `q=${encodeURIComponent(m.card.txn.merchant || "")}`;
+                      const r = await api.get(`/companies/${currentId}/transactions?${q}&limit=2000`);
+                      ids = [...new Set([...ids, ...(r.data.transactions || []).filter(t => !t.human_reviewed).map(t => t.id)])];
+                    }
+                    const res = await api.post(`/companies/${currentId}/ai/resolve-category/apply`, {
+                      txn_ids: ids, account_id: accountId || null, new_account: newAccount || null,
+                      create_rule: !!withSimilar && !!m.card.txn?.contact_id, contact_id: m.card.txn?.contact_id || null,
+                    });
+                    const acct = res.data.account;
+                    const say = `${res.data.created_account ? "Created" : "Used"} **${acct.code} ${acct.name}** and categorized **${res.data.updated}** transaction${res.data.updated === 1 ? "" : "s"}${res.data.rule_id ? " · rule saved for future imports" : ""}.`;
+                    setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2).concat([{ role: "assistant", content: say }]));
+                    if (voiceOnRef.current) speakOne(say.replace(/\*\*/g, ""));
+                    emitAction("txns:changed");
+                    if (m.card.txnId && inquiryTxnRef.current === m.card.txnId) resolveInquiry();
+                  } catch {
+                    setMessages(mm => [...mm, { role: "assistant", content: "Sorry — I couldn't apply that category." }]);
+                  }
+                }}
+                onDismiss={() => setMessages(mm => mm.map((mm2, j) => j === i ? { ...mm2, card: null } : mm2))}
               />
             )}
             {m.card?.kind === "create-account-then-recategorize" && (

@@ -47,6 +47,30 @@ CANONICAL_SEMANTIC_ACCOUNTS: dict[str, dict] = {
         "code_by_template": {"generic": "6400", "professional_services": "6400", "restaurant": "6400", "construction": "6400", "ecommerce": "6400"},
         "tax_line": "sched_c_24b_meals",
     },
+    "contract_labor": {
+        "name": "Contract Labor", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "cost_of_labor",
+        "code_by_template": {"generic": "6150", "professional_services": "6150", "restaurant": "6150", "construction": "6150", "ecommerce": "6150"},
+        "tax_line": "sched_c_11_contract_labor",
+    },
+    "cleaning_janitorial": {
+        "name": "Cleaning & Janitorial", "type": "expense",
+        "subtype": "operating_expense", "detail_type": "office_general_administrative_expenses",
+        "code_by_template": {"generic": "6160", "professional_services": "6160", "restaurant": "6160", "construction": "6160", "ecommerce": "6160"},
+        "tax_line": "sched_c_27a_other",
+    },
+    "consulting_revenue": {
+        "name": "Consulting Revenue", "type": "revenue",
+        "subtype": "operating_revenue", "detail_type": "service_fee_income",
+        "code_by_template": {"generic": "4100", "professional_services": "4100", "restaurant": "4100", "construction": "4100", "ecommerce": "4100"},
+        "tax_line": "sched_c_1_gross_receipts",
+    },
+    "donation_income": {
+        "name": "Donation Income", "type": "revenue",
+        "subtype": "other_income", "detail_type": "other_miscellaneous_income",
+        "code_by_template": {"generic": "4800", "professional_services": "4800", "restaurant": "4800", "construction": "4800", "ecommerce": "4800"},
+        "tax_line": "sched_c_6_other_income",
+    },
     "charitable_contributions": {
         "name": "Charitable Contributions", "type": "expense",
         "subtype": "operating_expense", "detail_type": "charitable_contributions",

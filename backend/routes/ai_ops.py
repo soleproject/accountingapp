@@ -122,6 +122,74 @@ def canonical_semantic_for_name(name: str) -> Optional[str]:
     return None
 
 
+class ResolveCategoryIn(BaseModel):
+    message: str
+    txn_id: Optional[str] = None
+
+
+@router.post("/companies/{cid}/ai/resolve-category")
+async def ai_resolve_category(cid: str, inp: ResolveCategoryIn, user: dict = Depends(get_current_user)):
+    """Plain-English description → closest existing account, else a fully
+    specified GAAP-aligned new account. Creates nothing."""
+    await require_company(user, cid)
+    from ai_category_resolver import resolve_category
+    return await resolve_category(cid, inp.message, inp.txn_id)
+
+
+class ApplyCategoryIn(BaseModel):
+    txn_ids: List[str]
+    account_id: Optional[str] = None
+    new_account: Optional[dict] = None
+    create_rule: bool = False
+    contact_id: Optional[str] = None
+
+
+@router.post("/companies/{cid}/ai/resolve-category/apply")
+async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict = Depends(get_current_user)):
+    """Confirm step: create the proposed account if needed (all fields), then
+    categorize + mark reviewed the given transactions. Optional contact rule."""
+    await require_company(user, cid)
+    from ai_category_resolver import create_account_from_proposal
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
+    template = (company or {}).get("industry_template") or "generic"
+    if inp.account_id:
+        acct = await db.accounts.find_one({"id": inp.account_id, "company_id": cid}, {"_id": 0})
+        created = False
+    elif inp.new_account and inp.new_account.get("name"):
+        acct = await create_account_from_proposal(cid, inp.new_account, template=template)
+        created = acct.get("created_via") in ("ai_panel_resolver", "canonical_semantic")
+    else:
+        acct = None
+        created = False
+    if not acct:
+        raise HTTPException(400, "No account to apply")
+    docs = await db.transactions.find({"id": {"$in": inp.txn_ids[:3000]}, "company_id": cid}).to_list(3000)
+    ids = [d["id"] for d in docs if not await is_period_closed(cid, d.get("date"))]
+    updated = 0
+    if ids:
+        res = await db.transactions.update_many(
+            {"id": {"$in": ids}, "company_id": cid},
+            {"$set": {"category_account_id": acct["id"], "category_account_code": acct.get("code"),
+                      "category_account_name": acct.get("name"), "human_reviewed": True, "needs_review": False,
+                      "posted": True, "ai_confidence": 1.0, "updated_at": now_iso()}},
+        )
+        updated = res.modified_count
+    rule_id = None
+    if inp.create_rule and inp.contact_id:
+        existing = await db.rules.find_one({"company_id": cid, "match_type": "contact_id", "match_value": inp.contact_id})
+        if existing:
+            await db.rules.update_one({"id": existing["id"]}, {"$set": {"category_account_id": acct["id"], "updated_at": now_iso()}})
+            rule_id = existing["id"]
+        else:
+            rule_id = str(uuid.uuid4())
+            await db.rules.insert_one({"id": rule_id, "company_id": cid, "match_type": "contact_id",
+                                       "match_value": inp.contact_id, "category_account_id": acct["id"],
+                                       "created_via": "ai_panel_resolver", "created_at": now_iso(), "updated_at": now_iso()})
+    return {"ok": True, "updated": updated, "skipped_closed": len(docs) - len(ids), "created_account": created,
+            "account": {"id": acct["id"], "code": acct.get("code"), "name": acct.get("name"), "type": acct.get("type")},
+            "rule_id": rule_id}
+
+
 @router.post("/companies/{cid}/ai/cpa-review")
 async def ai_cpa_review(cid: str, inp: CpaReviewIn, user: dict = Depends(get_current_user)):
     """LLM-backed CPA gate for cleanup-inquiry answers. Given a user's raw text
