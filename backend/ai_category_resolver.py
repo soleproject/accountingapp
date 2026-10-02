@@ -89,6 +89,41 @@ def _norm_name(n: str) -> str:
     return " ".join(n.split())
 
 
+_STOP = {"and", "the", "of", "for", "expense", "expenses", "income", "other", "general", "misc"}
+
+
+def _tokens(name: str) -> set[str]:
+    toks = set(_norm_name(name).split()) - _STOP
+    return {t[:-1] if t.endswith("s") and len(t) > 4 else t for t in toks}
+
+
+def find_semantic_duplicate(accounts: list[dict], proposal: dict) -> dict | None:
+    """Does an account that MEANS the same thing already exist? Same type
+    and (same detail_type, or the same words in any order, or one name's
+    words all inside the other's). 'Advertising & Marketing' ≡ 'Marketing &
+    Advertising'; 'Legal & Professional Fees' ⊇ 'Professional Fees'."""
+    want = _tokens(proposal.get("name") or "")
+    ptype = proposal.get("type")
+    pdetail = (proposal.get("detail_type") or "").strip()
+    best, best_score = None, 0.0
+    for a in accounts:
+        if a.get("type") != ptype or a.get("active") is False:
+            continue
+        if pdetail and pdetail not in ("", "other_miscellaneous_expense", "other_business_expenses") \
+                and (a.get("detail_type") or "") == pdetail and not a.get("parent_account_id"):
+            return a
+        have = _tokens(a.get("name") or "")
+        if not want or not have:
+            continue
+        inter = len(want & have)
+        score = inter / len(want | have)
+        if want == have or (inter >= 1 and (want <= have or have <= want)):
+            score = max(score, 0.9)
+        if score > best_score:
+            best, best_score = a, score
+    return best if best_score >= 0.6 else None
+
+
 def _existing_for_semantic(accounts: list[dict], sem: str) -> dict | None:
     spec = csa.CANONICAL_SEMANTIC_ACCOUNTS[sem]
     for a in accounts:
@@ -98,6 +133,9 @@ def _existing_for_semantic(accounts: list[dict], sem: str) -> dict | None:
     for a in accounts:
         if _norm_name(a.get("name")) == want:
             return a
+    dup = find_semantic_duplicate(accounts, {"name": spec["name"], "type": spec["type"], "detail_type": spec["detail_type"]})
+    if dup:
+        return dup
     # Same type + one name contains the other ("Inter-Account Transfer" vs
     # "Inter-Account Transfer (Clearing)", "Legal & Professional Fees" vs
     # "Professional Fees").
@@ -310,8 +348,14 @@ async def resolve_category(cid: str, message: str, txn_id: str | None) -> dict:
                 "parent_account_id": parent["id"] if parent else None, "parent_name": parent.get("name") if parent else None,
                 "tax_line": None, "semantic": None}
         normalize_account_payload(acct)
-        rec = {"kind": "new", "account": acct, "why": data.get("why") or "", "source": "llm",
-               "confidence": float(data.get("confidence") or 0.6)}
+        dup = find_semantic_duplicate(accounts, acct)
+        if dup:
+            rec = {"kind": "existing", "account": _pack(dup), "source": "llm+dedupe",
+                   "why": (data.get("why") or "") + f" Your chart already has “{dup.get('name')}” for this, so I'd use it rather than add a near-duplicate.",
+                   "confidence": float(data.get("confidence") or 0.6)}
+        else:
+            rec = {"kind": "new", "account": acct, "why": data.get("why") or "", "source": "llm",
+                   "confidence": float(data.get("confidence") or 0.6)}
     else:
         rec = None
     return {"recommendation": rec, "alternatives": alts, "direction": direction, "similar_count": similar,

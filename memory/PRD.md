@@ -690,3 +690,4 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-02 — Resolver direction enforcement
 - direction_ok(): money_out never revenue; money_in never expense/cogs unless refund/reimbursement wording. CoA pre-filtered before LLM + post-validation; LLM may return account code or id. Money-out "consulting" → Professional Fees cue. Frontend no-match message is direction-aware.
 - Vagueness gate (is_too_vague) → direction-aware clarifying question; bank Conf#/Ref# codes stripped from memo before LLM.
+- find_semantic_duplicate(): type + detail_type / word-set (order-free) / subset match; applied to canonical AND LLM proposals before any "new account" is offered ("Marketing & Advertising" → existing "Advertising & Marketing").
