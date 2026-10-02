@@ -40,5 +40,5 @@ export default function EmbeddedCheckin({ scope }) {
       </div>
     );
   }
-  return <ClientReviewPage key={`${currentId}:${state.token}`} embedded token={state.token} itemTypes={cfg.types} embeddedTitle={cfg.title} />;
+  return <ClientReviewPage key={`${scope}:${currentId}:${state.token}`} embedded token={state.token} itemTypes={cfg.types} embeddedTitle={cfg.title} />;
 }
