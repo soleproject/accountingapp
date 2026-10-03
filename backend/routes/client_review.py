@@ -2206,6 +2206,78 @@ async def post_save_client_messages(token: str, item_id: str, body: SaveMessages
     return {"ok": True, "count": len(cleaned)}
 
 
+async def _snap_link_missing_receipt(batch: dict, item: dict, attachment: dict, analysis: dict | None) -> dict | None:
+    """Missing-receipt snap: mirror the upload into `receipts`, link it to
+    the exact transaction (meta.txn_id or amount/date fallback), clear any
+    earlier "dismissed" flag, and close the check-in item."""
+    cid = batch["company_id"]
+    ctx = item.get("context") or {}
+    meta = ctx.get("meta") or {}
+    txn = None
+    if meta.get("txn_id"):
+        txn = await db.transactions.find_one({"id": meta["txn_id"], "company_id": cid})
+    if not txn:
+        amt = meta.get("txn_amount") or meta.get("amount") or ctx.get("amount")
+        date = meta.get("txn_date") or ctx.get("date")
+        if amt and date:
+            async for t in db.transactions.find({"company_id": cid, "date": date}):
+                if abs(abs(float(t.get("amount") or 0)) - abs(float(amt))) <= 0.01:
+                    txn = t
+                    break
+    if not txn:
+        return None
+    receipt = await db.receipts.find_one({"company_id": cid, "source_item_id": item["item_id"]})
+    if not receipt:
+        await _mirror_upload_to_receipts_page(batch, item, attachment)
+        receipt = await db.receipts.find_one({"company_id": cid, "source_item_id": item["item_id"]})
+    if not receipt:
+        return None
+    patch = {"payment_account_id": txn.get("bank_account_id") or txn.get("plaid_account_id"), "source": "checkin_snap"}
+    if analysis:
+        if analysis.get("merchant"):
+            patch["merchant"] = str(analysis["merchant"])[:120]
+        if analysis.get("date") and re.match(r"^\d{4}-\d{2}-\d{2}$", str(analysis.get("date"))):
+            patch["date"] = analysis["date"]
+        lines = [li for li in (analysis.get("line_items") or []) if li.get("amount")]
+        if lines:
+            patch["line_items"] = lines
+        if analysis.get("narrative"):
+            patch["ai_narrative"] = analysis["narrative"]
+    await db.receipts.update_one({"id": receipt["id"]}, {"$set": patch})
+    receipt = await db.receipts.find_one({"id": receipt["id"]})
+    if txn.get("matched_receipt_id") and txn["matched_receipt_id"] != receipt["id"]:
+        linked = False
+    else:
+        from receipt_match import link_receipt_to_transaction
+        await link_receipt_to_transaction(cid, receipt, txn)
+        linked = True
+    now = _now_iso()
+    await db.transactions.update_one(
+        {"id": txn["id"]},
+        {"$set": {"receipt_attached_at": now, "receipt_attached_by": "client", "updated_at": now},
+         "$unset": {"receipt_dismissed": "", "receipt_dismissed_at": "", "receipt_dismissed_by": ""}},
+    )
+    if item.get("source_collection") == "agent_findings":
+        fid = item.get("source_id")
+        if fid:
+            await db.agent_findings.update_one(
+                {"id": fid},
+                {"$set": {"status": "resolved", "resolved_at": now, "resolved_by": "client:receipt_attached",
+                          "meta.matched_txn_id": txn["id"], "meta.receipt_id": receipt["id"]}},
+            )
+    detail = f"Receipt {'linked to' if linked else 'uploaded for'} {txn.get('description') or 'transaction'} · ${abs(float(txn.get('amount') or 0)):,.2f}"
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item["item_id"]},
+        {"$set": {"items.$.answered_at": now, "items.$.answer": "Receipt attached",
+                  "items.$.action_taken": "receipt_attached", "items.$.action_detail": detail,
+                  "items.$.answered_by_client": True, "updated_at": now},
+         "$inc": {"answer_count": 1}},
+    )
+    return {"receipt_id": receipt["id"], "txn_id": txn["id"], "linked": linked,
+            "merchant": receipt.get("merchant"), "amount": receipt.get("amount"), "date": receipt.get("date"),
+            "detail": detail}
+
+
 async def _mirror_upload_to_receipts_page(
     batch: dict, item: dict, attachment: dict,
 ) -> None:
@@ -2669,6 +2741,15 @@ async def post_upload(
     # and Q14 (Travel §274).
     if item.get("item_type") in (3, 8, 10, 14):
         await _mirror_upload_to_receipts_page(batch, item, attachment)
+    # Missing-receipt (type 3): the photo IS the answer — link the
+    # mirrored receipt to the exact transaction and close the item.
+    if item.get("item_type") == 3 and mime.startswith(("image/", "application/pdf")):
+        try:
+            link = await _snap_link_missing_receipt(batch, item, attachment, locals().get("cat_analysis"))
+            if link:
+                resp["receipt_link"] = link
+        except Exception:  # noqa: BLE001
+            logger.exception("missing-receipt snap-link failed for item %s", item_id)
     return resp
 
 @router.get("/{token}/items/{item_id}/attachments/{aid}/file")

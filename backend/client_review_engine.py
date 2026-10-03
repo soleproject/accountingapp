@@ -823,6 +823,8 @@ this shape:
 
 {
   "narrative": "1-2 sentence plain-English readout ("Home Depot run — lumber, concrete, and a Milwaukee driver for job supplies. Sales tax billed separately.").",
+  "merchant": "Home Depot",
+  "date": "2026-03-14",
   "line_items": [
     {"description": "4x4x8 PT POST",  "amount": 119.88, "account_code": "5100", "account_name": "Materials · Lumber",     "category_hint": null},
     {"description": "QUIKRETE 80LB",  "amount":  69.80, "account_code": "5100", "account_name": "Materials · Concrete",   "category_hint": null},
@@ -833,6 +835,8 @@ this shape:
 }
 
 RULES:
+* `merchant` is the store/vendor name printed on the receipt; `date` is the
+  receipt date as YYYY-MM-DD (null if unreadable).
 * Every line SHOULD carry `account_code` + `account_name` copied EXACTLY
   from the client's chart of accounts (provided below) when an account
   there genuinely fits the item. If nothing on the chart fits, set both

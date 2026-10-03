@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
-import { Send, Paperclip, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine, RotateCcw } from "lucide-react";
+import { Send, Paperclip, Camera, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine, RotateCcw } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
 const isParked = (i) => !!(i?.snoozed_until && !i.answered_at && !i.deferred
@@ -934,7 +934,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       // Accounts split. Render the grouped breakdown so the client
       // sees each line mapped to an account and can tap "Use this
       // split" or tweak an account before booking.
-      if ([1, 2, 3].includes(currentItem.item_type) && r.data.categorization_analysis) {
+      if ([1, 2, 3].includes(currentItem.item_type) && r.data.categorization_analysis && !r.data.receipt_link) {
         const a = r.data.categorization_analysis;
         setMessages((m) => [...m, {
           role: "assistant",
@@ -965,14 +965,37 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
         }]);
       }
       if (currentItem.item_type === 3) {
-        setMessages((m) => [...m, {
-          role: "assistant",
-          content: "Got it — filed away. On to the next question.",
-        }]);
-        await applyAnswer(
-          { flow: "attached", filename: r.data.attachment.filename },
-          `Uploaded ${r.data.attachment.filename}`,
-        );
+        const link = r.data.receipt_link;
+        if (link) {
+          const a = r.data.categorization_analysis;
+          if (a) {
+            setMessages((m) => [...m, {
+              role: "assistant",
+              content: a.narrative || "Here's what I read from the receipt:",
+              _categorizationBreakdown: {
+                line_items:           a.line_items           || [],
+                suggested_categories: a.suggested_categories || [],
+                totals:               a.totals               || null,
+              },
+            }]);
+          }
+          const amt = link.amount != null ? ` · $${Math.abs(Number(link.amount)).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : "";
+          setMessages((m) => [...m, {
+            role: "assistant",
+            content: `Got it — I read the receipt${link.merchant ? ` from ${link.merchant}` : ""}${amt} and ${link.linked ? "linked it to this exact transaction" : "attached it to this transaction"}. It'll show as Matched on your Receipts page. On to the next one.`,
+            testId: "missing-receipt-linked-ack",
+          }]);
+          markCompleted({ label: "Receipt attached", detail: link.detail });
+        } else {
+          setMessages((m) => [...m, {
+            role: "assistant",
+            content: "Got it — filed away. On to the next question.",
+          }]);
+          await applyAnswer(
+            { flow: "attached", filename: r.data.attachment.filename },
+            `Uploaded ${r.data.attachment.filename}`,
+          );
+        }
       }
     } catch (e) {
       setMessages((m) => [...m, {
@@ -2264,11 +2287,11 @@ function MissingReceiptShortcuts({ currentItem, token, onReceipt, onLinked, onDi
           data-testid="missing-receipt-upload"
         >
           <div className="w-10 h-10 rounded-full bg-indigo-100 group-hover:bg-indigo-200 flex items-center justify-center transition">
-            <Paperclip size={18} className="text-indigo-700" />
+            <Camera size={18} className="text-indigo-700" />
           </div>
-          <div className="text-sm font-semibold text-slate-800">Upload a receipt</div>
+          <div className="text-sm font-semibold text-slate-800">Snap the receipt</div>
           <div className="text-[11px] text-slate-500 leading-tight text-center">
-            Photo or PDF — I'll read it and file it.
+            Photo or PDF — I'll read it and link it to this exact charge.
           </div>
         </button>
         <button
