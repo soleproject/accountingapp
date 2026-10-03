@@ -264,25 +264,27 @@ export default function Signup() {
         )}
 
         <label className="block">
-          <span className="text-xs font-medium text-slate-600">Full name</span>
+          <span className="text-xs font-medium text-slate-600">Full name<span className="text-rose-500" aria-hidden="true"> *</span></span>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
             className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             autoFocus
             autoComplete="name"
+            required
             data-testid="signup-name"
           />
         </label>
         {enterpriseMode && (
           <label className="block">
-            <span className="text-xs font-medium text-slate-600">Firm / enterprise name</span>
+            <span className="text-xs font-medium text-slate-600">Firm / enterprise name<span className="text-rose-500" aria-hidden="true"> *</span></span>
             <input
               value={firmName}
               onChange={e => setFirmName(e.target.value)}
               placeholder="e.g. PriyaBooks, LLC"
               className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
               autoComplete="organization"
+              required
               data-testid="signup-firm"
             />
             <span className="mt-1 block text-[11px] text-slate-500">
@@ -293,36 +295,40 @@ export default function Signup() {
         )}
         {!enterpriseMode && !affiliateMode && (
           <label className="block">
-            <span className="text-xs font-medium text-slate-600">Business name</span>
+            <span className="text-xs font-medium text-slate-600">Business name<span className="text-rose-500" aria-hidden="true"> *</span></span>
             <input
               value={bizName}
               onChange={e => setBizName(e.target.value)}
               placeholder="e.g. Bright Beans Coffee Co."
               className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
               autoComplete="organization"
+              required
               data-testid="signup-business"
             />
           </label>
         )}
         <label className="block">
-          <span className="text-xs font-medium text-slate-600">Work email</span>
+          <span className="text-xs font-medium text-slate-600">Work email<span className="text-rose-500" aria-hidden="true"> *</span></span>
           <input
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             autoComplete="email"
+            required
             data-testid="signup-email"
           />
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-slate-600">Password (6+ chars)</span>
+          <span className="text-xs font-medium text-slate-600">Password (6+ chars)<span className="text-rose-500" aria-hidden="true"> *</span></span>
           <input
             type="password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             autoComplete="new-password"
+            required
+            minLength={6}
             data-testid="signup-password"
           />
         </label>
