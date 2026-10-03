@@ -11,6 +11,7 @@
 // back to active.
 // -----------------------------------------------------------------------
 import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { Lock, Loader2, CreditCard } from "lucide-react";
@@ -20,6 +21,8 @@ const POLL_MS = 20_000;
 
 export default function BillingLockedModal() {
   const { currentId } = useCompany();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [state, setState] = useState(null);
   const [busy, setBusy] = useState(false);
   const timerRef = useRef(null);
@@ -35,6 +38,14 @@ export default function BillingLockedModal() {
       setState(null);
     }
   };
+
+  // Finished onboarding but never completed Stripe → straight to pricing
+  // (on login, and whenever such a company is picked in the switcher).
+  useEffect(() => {
+    if (!state?.needs_checkout) return;
+    if (/^\/(welcome|onboarding|billing|set-password|login|signup)/.test(pathname)) return;
+    navigate("/welcome/pricing", { replace: true });
+  }, [state?.needs_checkout, currentId, pathname, navigate]);
 
   // Re-fetch on companyId change + short-poll while locked.
   useEffect(() => {
