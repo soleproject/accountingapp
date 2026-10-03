@@ -15,7 +15,7 @@
 // who's seen it before can bail out instantly.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Play, ChevronRight, Sparkles, Volume2, VolumeX, MessageSquare } from "lucide-react";
+import { X, Play, ChevronRight, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 
@@ -36,15 +36,12 @@ const SLIDES = [
     // short so it doesn't dwarf the two big CTAs.
     title: () => "Ready? Let's onboard your company",
     body:
-      "Next up: a quick company setup. I'll be right there every step of the way — you pick how loud I should be.",
+      "Next up: a quick company setup. I'll be right there every step of the way — use the speaker icon above any time to turn my voice on or off.",
     isCta: true,
   },
 ];
 
 const TYPE_SPEED_MS = 45; // ~22 chars/sec, matches natural speaking cadence
-// Extra pause after a slide finishes reading before we auto-advance —
-// gives the user a beat to absorb before the next line drops in.
-const AUTO_ADVANCE_PAUSE_MS = 1200;
 // The voice picker in AiPanel writes this key. Reusing it means the
 // welcome tour speaks in whatever voice the client has chosen for the
 // day-to-day assistant — no separate UI to configure twice.
@@ -158,29 +155,7 @@ export default function WelcomeModal({ open, onClose }) {
     };
   }, [open, slideIdx, fullBody, title, muted]);
 
-  // Auto-advance to the next slide once BOTH the typewriter finished
-  // AND the TTS utterance ended (or the pause elapsed if speech isn't
-  // available). On the CTA slide we do NOT auto-close — the user must
-  // pick "Onboard with sound" or "Onboard with chat only" so they've
-  // made an intentional decision about the audio companion.
-  useEffect(() => {
-    if (!open || !done) return;
-    if (isCtaSlide) return;
-    const isLast = slideIdx === SLIDES.length - 1;
-    const startAt = Date.now();
-    const ttsIdle = () =>
-      !("speechSynthesis" in window)
-      || (!window.speechSynthesis.speaking && !window.speechSynthesis.pending);
-    let advTimer = null;
-    const tick = setInterval(() => {
-      if (ttsIdle() && Date.now() - startAt >= AUTO_ADVANCE_PAUSE_MS) {
-        clearInterval(tick);
-        if (isLast) onClose();
-        else setSlideIdx((i) => i + 1);
-      }
-    }, 200);
-    return () => { clearInterval(tick); advTimer && clearTimeout(advTimer); };
-  }, [open, done, slideIdx, onClose, isCtaSlide]);
+  // Slides never auto-advance — the user steps through with "Next".
 
   // Stop TTS + cleanup when the modal itself closes.
   useEffect(() => {
@@ -193,14 +168,7 @@ export default function WelcomeModal({ open, onClose }) {
 
   const isLast = slideIdx === SLIDES.length - 1;
   const handleNext = () => {
-    if (!done && slide) {
-      // Fast-forward the current slide instead of skipping — nicer UX
-      // than an abrupt "you missed my line" jump.
-      setTyped(fullBody);
-      setDone(true);
-      if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-      return;
-    }
+    if ("speechSynthesis" in window) window.speechSynthesis.cancel();
     if (isLast) onClose();
     else setSlideIdx((i) => i + 1);
   };
@@ -284,32 +252,21 @@ export default function WelcomeModal({ open, onClose }) {
             ))}
           </div>
           {isCtaSlide ? (
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => startOnboarding(true)}
-                data-testid="welcome-onboard-sound"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
-                title="Continue with the AI narration turned on"
-              >
-                <Volume2 size={13} /> Onboard with sound
-              </button>
-              <button
-                onClick={() => startOnboarding(false)}
-                data-testid="welcome-onboard-chat-only"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md border border-slate-300 bg-white text-slate-700 text-sm font-medium hover:bg-slate-50"
-                title="Continue with chat only — I'll stop reading things out loud"
-              >
-                <MessageSquare size={13} /> Onboard with chat only
-              </button>
-            </div>
+            <button
+              onClick={() => startOnboarding(!muted)}
+              data-testid="welcome-start-onboarding"
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
+              title="Begin the guided company setup"
+            >
+              Start Onboarding <ChevronRight size={13} />
+            </button>
           ) : (
             <button
               onClick={handleNext}
               data-testid="welcome-modal-next"
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
             >
-              {!done ? "Skip line" : "Next"}
-              <ChevronRight size={13} />
+              Next <ChevronRight size={13} />
             </button>
           )}
         </div>
