@@ -70,6 +70,7 @@ import PartnerFinancials from "@/pages/PartnerFinancials";
 import AdminPartnerDetail from "@/pages/AdminPartnerDetail";
 import ProClients from "@/pages/ProClients";
 import AdminEnterpriseDetail from "@/pages/AdminEnterpriseDetail";
+import AdminClientPayments from "@/pages/AdminClientPayments";
 import AdminFeedback from "@/pages/AdminFeedback";
 import AdminLeads from "@/pages/AdminLeads";
 import AdminCronRuns from "@/pages/AdminCronRuns";
@@ -242,6 +243,7 @@ function App() {
               <Route path="/partner/financials" element={<PartnerFinancials />} />
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
+              <Route path="/admin/client-payments" element={<AdminClientPayments />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/admin/cron-runs" element={<AdminCronRuns />} />

@@ -43,6 +43,7 @@ from routes.anomaly import router as anomaly_router  # noqa: F401
 from routes.communications import router as communications_router  # noqa: F401
 from routes.invites import router as invites_router  # noqa: F401
 from routes.stripe_billing import router as stripe_billing_router  # noqa: F401
+from routes.admin_client_payments import router as admin_client_payments_router  # noqa: F401
 from routes.firm_glance import router as firm_glance_router  # noqa: F401
 from routes.recurring import router as recurring_router  # noqa: F401
 from routes.cleanup import router as cleanup_router  # noqa: F401
@@ -146,6 +147,7 @@ ALL_ROUTERS = [
     communications_router,
     invites_router,
     stripe_billing_router,
+    admin_client_payments_router,
     firm_glance_router,
     recurring_router,
     items_router,
