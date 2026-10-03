@@ -977,6 +977,28 @@ async def delete_pro_logo(
 # user has any credentials. Root domain configured via PRIVATE_LABEL_ROOT.
 # ---------------------------------------------------------------------------
 
+@router.get("/branding/logo/{slug}")
+async def branding_logo_by_slug(slug: str):
+    """Public: serve a firm's uploaded logo as a real image (emails can't
+    render data: URLs). 404 when the firm has no logo so callers fall back to text."""
+    import base64 as _b64
+    s = (slug or "").strip().lower()
+    owner = await db.users.find_one(
+        {"$or": [{"branding.signin_subdomain": s}, {"branding.subdomain": s}, {"branding.subdomain_slug": s}]},
+        {"_id": 0, "branding": 1},
+    )
+    data_url = _logos_from((owner or {}).get("branding") or {}).get("logo_light") if owner else None
+    if not data_url or not data_url.startswith("data:"):
+        raise HTTPException(404, "No logo")
+    try:
+        head, b64 = data_url.split(",", 1)
+        mime = head[5:].split(";")[0] or "image/png"
+        raw = _b64.b64decode(b64)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(404, "No logo")
+    return Response(content=raw, media_type=mime, headers={"Cache-Control": "public, max-age=3600"})
+
+
 @router.get("/branding/by-subdomain/{sub}")
 async def branding_by_subdomain(sub: str):
     from subdomain_util import validate_subdomain

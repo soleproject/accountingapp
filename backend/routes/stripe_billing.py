@@ -512,6 +512,69 @@ def _snapshot_event_object(obj: dict) -> dict:
     return out
 
 
+async def _send_checkout_welcome(company_id: str, snap: dict) -> None:
+    """Branded welcome after a self-serve company checkout. Never raises."""
+    try:
+        from email_dispatcher import dispatch, public_base_url
+        import email_templates as _tmpl
+
+        company = await db.companies.find_one({"id": company_id}, {"_id": 0})
+        if not company or company.get("checkout_welcome_sent_at"):
+            return
+        owner_id = company.get("owner_user_id")
+        if not owner_id:
+            m = await db.memberships.find_one({"company_id": company_id, "role": "owner"}, {"_id": 0, "user_id": 1})
+            owner_id = (m or {}).get("user_id")
+        owner = await db.users.find_one({"id": owner_id}, {"_id": 0}) if owner_id else None
+        if not owner or not owner.get("email"):
+            return
+
+        firm_pro = None
+        if company.get("enterprise_id"):
+            ent = await db.enterprises.find_one({"id": company["enterprise_id"]}, {"_id": 0, "owner_user_id": 1})
+            if ent and ent.get("owner_user_id"):
+                firm_pro = await db.users.find_one({"id": ent["owner_user_id"]}, {"_id": 0, "branding": 1})
+        fb = (firm_pro or {}).get("branding") or {}
+        firm_name = (fb.get("firm_name") or "").strip()
+        slug = fb.get("signin_subdomain") or company.get("signup_firm_slug")
+        is_private_label = bool(firm_name)
+        firm_name = firm_name or "SmartBooks"
+        base = public_base_url(slug).rstrip("/")
+        has_logo = bool((fb.get("logos") or {}).get("logo_light") or fb.get("logo_data_url"))
+        logo_url = f"{public_base_url().rstrip('/')}/api/branding/logo/{slug}" if (slug and has_logo) else None
+        txn_url = f"{base}/accounting/transactions"
+        if slug and "{slug}" not in (os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE") or ""):
+            txn_url += f"?firm={slug}"
+
+        prod = snap.get("billing_product") or company.get("billing_product") or "simple_start"
+        cadence = snap.get("billing_cadence") or company.get("billing_cadence") or "monthly"
+        card = (f"{(snap.get('sub_card_brand') or '').title()} •••• {snap.get('sub_card_last4')}"
+                if snap.get("sub_card_last4") else None)
+        subject, html = _tmpl.checkout_welcome(
+            name=owner.get("name") or owner["email"].split("@")[0],
+            company_name=company.get("name") or "your business",
+            firm_name=firm_name,
+            logo_url=logo_url,
+            plan_label=PLAN_LABELS.get(prod, prod),
+            cadence=cadence,
+            amount_cents=snap.get("sub_amount_cents"),
+            trial_end=snap.get("sub_trial_end") if snap.get("sub_status") == "trialing" else None,
+            next_charge=snap.get("sub_current_period_end"),
+            card=card,
+            transactions_url=txn_url,
+            is_private_label=is_private_label,
+        )
+        await dispatch(
+            kind="checkout_welcome", to=owner["email"], subject=subject, html=html,
+            initiating_user_id=owner["id"], company_id=company_id,
+            related={"plan": prod, "cadence": cadence, "firm_slug": slug},
+            firm_name_override=firm_name if is_private_label else None,
+        )
+        await db.companies.update_one({"id": company_id}, {"$set": {"checkout_welcome_sent_at": now_iso()}})
+    except Exception:  # noqa: BLE001
+        logger.exception("Failed to send checkout welcome for company %s", company_id)
+
+
 async def _handle_checkout_completed(session: dict) -> dict:
     email = (
         (session.get("customer_details") or {}).get("email")
@@ -628,6 +691,7 @@ async def _handle_checkout_completed(session: dict) -> dict:
                 **snap,
             }},
         )
+        await _send_checkout_welcome(company_id, snap)
 
     # White-label upgrade — the pro paid to unlock branding. Flip the
     # gate on the target user (identified by metadata.pro_user_id, which

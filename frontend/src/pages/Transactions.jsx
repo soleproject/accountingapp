@@ -17,7 +17,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper,
 } from "lucide-react";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
@@ -1487,6 +1487,7 @@ export default function Transactions() {
   const TXN_TOUR_SEEN_KEY = "transactions-tour-completed-v1";
   const [txnTourOpen, setTxnTourOpen] = useState(false);
   const fromOnboarding = params.get("from") === "onboarding";
+  const fromCheckout = params.get("from") === "checkout";
   const [tourInviteOpen, setTourInviteOpen] = useState(false);
   const closeTourInvite = (startIt) => {
     setTourInviteOpen(false);
@@ -1497,6 +1498,11 @@ export default function Transactions() {
   useEffect(() => {
     if (fromOnboarding && txns.length) setTourInviteOpen(true);
   }, [fromOnboarding, txns.length]);
+  useEffect(() => {
+    if (!fromCheckout) return;
+    const t = setTimeout(() => setTourInviteOpen(true), 800);
+    return () => clearTimeout(t);
+  }, [fromCheckout]);
   const txnTourSnapRef = useRef(null);
   const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; setTxnTourOpen(true); };
   const closeTxnTour = () => {
@@ -1506,7 +1512,7 @@ export default function Transactions() {
     if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
   };
   useEffect(() => {
-    if (txnTourOpen || tourInviteOpen || fromOnboarding || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
+    if (txnTourOpen || tourInviteOpen || fromOnboarding || fromCheckout || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
     if (!txns.length) return;
     let seen = false;
     try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
@@ -2356,20 +2362,40 @@ export default function Transactions() {
       )}
       {tourInviteOpen && !txnTourOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="txn-tour-invite">
-          <div className="w-[min(460px,92vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-6">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-600 font-semibold"><Lightbulb size={13} /> Welcome to Transactions</div>
-            <h3 className="text-lg font-semibold text-slate-900 mt-1">Want a quick tour?</h3>
-            <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
-              About a minute: how to find what needs you, approve with one click, and hand anything confusing to the assistant. You can replay it anytime from the <b>Tour</b> button.
-            </p>
+          <div className="w-[min(460px,92vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl p-6 relative overflow-hidden">
+            {fromCheckout && (
+              <div className="pointer-events-none absolute -top-24 -right-24 w-48 h-48 rounded-full bg-emerald-100/40 blur-3xl" aria-hidden />
+            )}
+            {fromCheckout ? (
+              <>
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-emerald-600 font-semibold" data-testid="txn-checkout-congrats">
+                  <PartyPopper size={13} /> You're all set
+                </div>
+                <h3 className="text-lg font-semibold text-slate-900 mt-1">Welcome aboard — your books are ready.</h3>
+                <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
+                  Your plan is active and this is your <b>Transactions</b> page — where everything lands, gets categorized, and gets approved.
+                  {txns.length
+                    ? " Want a one-minute tour so you know where to look first?"
+                    : " Connect a bank or upload a statement and your transactions will show up here. Want a one-minute tour of how it works?"}
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-600 font-semibold"><Lightbulb size={13} /> Welcome to Transactions</div>
+                <h3 className="text-lg font-semibold text-slate-900 mt-1">Want a quick tour?</h3>
+                <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
+                  About a minute: how to find what needs you, approve with one click, and hand anything confusing to the assistant. You can replay it anytime from the <b>Tour</b> button.
+                </p>
+              </>
+            )}
             <div className="mt-5 flex items-center gap-2">
               <button type="button" onClick={() => closeTourInvite(true)} data-testid="txn-tour-invite-yes"
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-md">
-                <Lightbulb size={14} /> Show me
+                <Lightbulb size={14} /> {fromCheckout ? "Show me around" : "Show me"}
               </button>
               <button type="button" onClick={() => closeTourInvite(false)} data-testid="txn-tour-invite-no"
                       className="px-4 py-2 rounded-full border border-slate-200 bg-white text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300">
-                Not now
+                {fromCheckout ? "Skip for now" : "Not now"}
               </button>
             </div>
           </div>
