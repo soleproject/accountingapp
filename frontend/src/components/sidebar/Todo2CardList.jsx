@@ -137,7 +137,7 @@ const EMBEDDED_CHECKIN_ROUTES = {
 };
 
 const CARD_FILTERS = {
-  paying_bills:          { outstanding: "1" },   // /bills — balance_due>0
+  paying_bills:          { overdue: "1" },       // /bills — past-due only
   following_up_invoices: { overdue: "1" },       // /invoices — past-due only
   reconciling_accounts:  { filter: "unreconciled" }, // /accounting/reconciliation
 };

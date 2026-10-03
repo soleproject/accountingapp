@@ -358,6 +358,7 @@ export default function Bills() {
             <span>
               Showing{" "}
               {outstanding && <b>outstanding</b>}
+              {outstanding && overdue && " · "}
               {overdue && <b>overdue</b>}
               {bucket && <b>{BUCKETS.find(b => b.key === bucket)?.label || bucket}</b>}
               {(outstanding || overdue || bucket) && asOf && " "}
