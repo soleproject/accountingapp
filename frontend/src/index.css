@@ -162,7 +162,65 @@ body {
     --input: 220 13% 91%;
     --ring: 222 47% 11%;
     --radius: 0.5rem;
+    --brand-sidebar-bg: #FFFFFF;
+    --brand-sidebar-active-bg: #F1F5F9;
+    --brand-topbar-bg: #FFFFFF;
+    --tw-indigo-50: 238 242 255; --tw-indigo-100: 224 231 255; --tw-indigo-200: 199 210 254;
+    --tw-indigo-300: 165 180 252; --tw-indigo-400: 129 140 248; --tw-indigo-500: 99 102 241;
+    --tw-indigo-600: 79 70 229; --tw-indigo-700: 67 56 202; --tw-indigo-800: 55 48 163;
+    --tw-indigo-900: 49 46 129; --tw-indigo-950: 30 27 75;
+    --tw-violet-50: 245 243 255; --tw-violet-100: 237 233 254; --tw-violet-200: 221 214 254;
+    --tw-violet-300: 196 181 253; --tw-violet-400: 167 139 250; --tw-violet-500: 139 92 246;
+    --tw-violet-600: 124 58 237; --tw-violet-700: 109 40 217; --tw-violet-800: 91 33 182;
+    --tw-violet-900: 76 29 149; --tw-violet-950: 46 16 101;
+    --tw-fuchsia-50: 253 244 255; --tw-fuchsia-100: 250 232 255; --tw-fuchsia-200: 245 208 254;
+    --tw-fuchsia-300: 240 171 252; --tw-fuchsia-400: 232 121 249; --tw-fuchsia-500: 217 70 239;
+    --tw-fuchsia-600: 192 38 211; --tw-fuchsia-700: 162 28 175; --tw-fuchsia-800: 134 25 143;
+    --tw-fuchsia-900: 112 26 117; --tw-fuchsia-950: 74 4 78;
   }
+}
+
+/* Dark-sidebar / dark-topbar legibility: when a brand picks a dark chrome
+   color, remap the slate text/border/hover utilities inside that chrome. */
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"],
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] {
+  --brand-chrome-fg: #f8fafc;
+  --brand-chrome-fg-muted: #cbd5e1;
+  --brand-chrome-fg-faint: #94a3b8;
+  --brand-chrome-border: rgba(255, 255, 255, 0.12);
+  --brand-chrome-hover: rgba(255, 255, 255, 0.08);
+  color: var(--brand-chrome-fg);
+  border-color: var(--brand-chrome-border);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] :is(.text-slate-900, .text-slate-800, .text-slate-700, .text-indigo-700, .text-indigo-600),
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] :is(.text-slate-900, .text-slate-800, .text-slate-700, .text-indigo-700, .text-indigo-600) {
+  color: var(--brand-chrome-fg);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] :is(.text-slate-600, .text-slate-500),
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] :is(.text-slate-600, .text-slate-500) {
+  color: var(--brand-chrome-fg-muted);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] .text-slate-400,
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] .text-slate-400 {
+  color: var(--brand-chrome-fg-faint);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] :is(.border, .border-b, .border-t, .border-r, .border-l, .border-slate-200, .border-slate-100),
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] :is(.border, .border-b, .border-t, .border-r, .border-l, .border-slate-200, .border-slate-100) {
+  border-color: var(--brand-chrome-border);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] :is(.hover\:bg-slate-50:hover, .hover\:bg-slate-100:hover, .nav-item:hover),
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] :is(.hover\:bg-slate-50:hover, .hover\:bg-slate-100:hover) {
+  background: var(--brand-chrome-hover);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] :is(.bg-slate-100, .bg-slate-50, .bg-indigo-50, .bg-white),
+html[data-brand-topbar="dark"] [data-testid="app-topbar"] :is(.bg-slate-100, .bg-slate-50, .bg-indigo-50, .bg-white) {
+  background-color: var(--brand-sidebar-active-bg);
+}
+[data-testid="app-sidebar"] .nav-item-active {
+  background: var(--brand-sidebar-active-bg);
+}
+html[data-brand-sidebar="dark"] [data-testid="app-sidebar"] .nav-item-active {
+  color: var(--brand-chrome-fg);
 }
 
 @layer base {

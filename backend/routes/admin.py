@@ -2232,6 +2232,7 @@ async def open_enterprise_as_owner(eid: str, user: dict = Depends(require_role("
                 # Unguessable random secret → no one can sign in as it.
                 "password": hash_password(_secrets.token_urlsafe(32)),
                 "login_disabled": True, "is_service_account": True,
+                "branding": {"whitelabel_comp": True},
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             await db.users.insert_one(owner)

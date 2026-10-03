@@ -356,7 +356,6 @@ position 1 in the client-review UI, "0 of 19 done" counter correct,
 sit adjacent right after.
 
 ## Backlog
-- **P0** Theme Coloring not applied to live app (`PRO_SETTINGS.branding.theme` not loaded into CSS vars on boot)
 - **P1** NMI Webhook signing secret (blocked on user providing key)
 - **P1** Retroactive Bank Fees Cleanup UI (surface `/bank-fees-scan` in Cockpit)
 - **P1** IRS Compliance sub-flows: Vehicle/mileage, Business gifts, Charitable contributions
@@ -753,3 +752,7 @@ need to type into the chat box to invoke the matching help flow.
 - Superadmin /pro/clients list view: new ENTERPRISE column (GET /pro/clients now returns enterprise_id/enterprise_name for superadmin via company → pro membership → users.enterprise_id → enterprises). Rows without an enterprise show 'SmartBooks direct'; search also matches enterprise name.
 - Enterprises list/grid: 'Open' button on every row incl. SmartBooks DEFAULT. New POST /admin/enterprises/{eid}/open provisions a login-disabled `pro` service account ('<Enterprise> Team', team+<slug>@smartbookssoftware.ai, random password) as owner on first use and returns an impersonation token (same shape as /admin/impersonate); frontend openAsOwner uses it when owner_user_id is missing.
 - White-label signup attribution (tested, iteration_99): Signup.jsx sends firm_slug (subdomain / ?firm / by-host slug) to POST /companies; create_company resolves the branded pro user (users.branding.signin_subdomain|subdomain|subdomain_slug), stamps company.enterprise_id (+partner_id, signup_firm_slug) and inserts a role='pro' membership for that pro. /pro/clients superadmin attribution now also reads company.enterprise_id directly. branding/by-host returns slug. NOTE: the already-created prod company 'Michael Proactive 2 LLC' predates the fix and still needs manual attribution.
+
+## 2026-10-03 — SmartBooks Team white-label + P0 Theme fix (RESOLVED)
+- `_whitelabel_state()` (pro.py) treats `is_service_account` users as comp-unlocked; `/admin/enterprises/{eid}/open` seeds `branding.whitelabel_comp=true` on the SmartBooks Team service account (existing one backfilled).
+- **P0 Theme Coloring FIXED**: tailwind.config.js now maps `indigo/violet/fuchsia` palettes to `rgb(var(--tw-<name>-<shade>) / <alpha>)` with canonical defaults in index.css `:root`. `BrandingProvider` (lib/branding.js) builds hue-shifted shade ramps from `theme.accent` (shade 600 == brand hex exactly), sets `--primary/--ring/--primary-foreground` from `theme.primary`, and `data-brand-sidebar|topbar="dark|light"` on `<html>`. Sidebar `<aside data-testid="app-sidebar">` and Layout `<header data-testid="app-topbar">` use `var(--brand-sidebar-bg)` / `var(--brand-topbar-bg)`; index.css remaps slate text/border/hover inside dark chrome for legibility. Default preset accent changed `#0891B2` → `#4F46E5` so "Default" == stock look (ramps removed when accent is default). Verified with Forest preset on pro@axiom.ai (reset to default afterwards).
