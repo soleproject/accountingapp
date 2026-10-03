@@ -808,3 +808,8 @@ need to type into the chat box to invoke the matching help flow.
 - `/companies/{cid}/billing/state` returns `needs_checkout` = billing_state pending ∧ no stripe_subscription_id ∧ payer ∉ {enterprise, free_spot, client_email} ∧ onboarding_complete ∧ user.role == client ∧ not pro-side.
 - `BillingLockedModal` (mounted in Layout) redirects to `/welcome/pricing` whenever the current company has `needs_checkout` (login landing + picker switch), skipping /welcome, /onboarding, /billing, /set-password, /login, /signup paths.
 - PricingPlans: a company that's already active (or has a subscription) bounces to `/accounting/transactions`; sponsored still skip to summary. So switching paid ↔ unpaid in the "Plan for" picker routes correctly both ways.
+
+## 2026-10-03 — Trial gate on Reports + "Pay now" ✅ verified against Stripe test mode
+- `/companies/{cid}/billing/state` adds `trialing, trial_end, trial_gate (client-side + trialing), plan_amount_cents, plan_cadence, plan_label, card`.
+- NEW `POST /companies/{cid}/billing/end-trial` (owner/editor or superadmin): `Subscription.modify(trial_end="now", proration_behavior="none", payment_behavior="error_if_incomplete")` → 402 on card decline; re-snapshots sub, sets billing_state, `trial_ended_early_at`.
+- `TrialReportsGate.jsx` wraps `/reports` route (App.js): blurs page, modal with plan/price/card, "Pay now & unlock Reports" (trial-gate-pay-now), "I'll wait until {date}" (navigate back), "Back to Transactions". Pros/superadmins/sponsored unaffected.

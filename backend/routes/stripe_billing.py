@@ -1799,6 +1799,43 @@ async def billing_webhook_status(user: dict = Depends(require_role("superadmin")
     }
 
 
+@router.post("/companies/{cid}/billing/end-trial")
+async def end_trial_now(cid: str, user: dict = Depends(get_current_user)):
+    """Client chose "pay now": end the Stripe trial immediately, which
+    invoices the full plan amount to the card on file and resets the
+    billing cycle to today. Returns the refreshed subscription snapshot."""
+    m = await db.memberships.find_one({"user_id": user["id"], "company_id": cid, "role": {"$in": ["owner", "editor"]}})
+    if not m and user.get("role") != "superadmin":
+        raise HTTPException(403, "Only the company owner can end the trial.")
+    c = await db.companies.find_one({"id": cid}, {"_id": 0, "stripe_subscription_id": 1, "sub_status": 1})
+    if not c or not c.get("stripe_subscription_id"):
+        raise HTTPException(400, "This company has no Stripe subscription.")
+    if not _STRIPE_KEY:
+        raise HTTPException(503, "Stripe is not configured.")
+    sub_id = c["stripe_subscription_id"]
+    try:
+        await asyncio.to_thread(
+            stripe.Subscription.modify, sub_id,
+            trial_end="now", proration_behavior="none",
+            payment_behavior="error_if_incomplete",
+        )
+    except stripe.error.CardError as e:
+        raise HTTPException(402, f"Your card was declined: {e.user_message or str(e)}")
+    except stripe.error.StripeError as e:
+        msg = e.user_message or str(e)
+        if "payment_intent" in msg.lower() or "incomplete" in msg.lower() or "declined" in msg.lower():
+            raise HTTPException(402, f"Payment didn't go through: {msg}")
+        raise HTTPException(502, f"Stripe error: {msg}")
+    snap = await asyncio.to_thread(_fetch_sub_snapshot, sub_id)
+    state = _sub_status_to_billing_state(snap.get("sub_status"))
+    await db.companies.update_one(
+        {"id": cid},
+        {"$set": {**snap, "billing_state": state, "trial_ended_early_at": now_iso(), "updated_at": now_iso()}},
+    )
+    return {"ok": True, "sub_status": snap.get("sub_status"), "billing_state": state,
+            "current_period_end": snap.get("sub_current_period_end")}
+
+
 @router.get("/companies/{cid}/billing/state")
 async def get_company_billing_state(
     cid: str,
@@ -1853,6 +1890,15 @@ async def get_company_billing_state(
         "billing_discount": bool(c.get("billing_discount")),
         "locked": locked,
         "needs_checkout": needs_checkout,
+        # Trial gate: client-side users on a Stripe trial can pay early to
+        # unlock gated areas (Reports) right away.
+        "trialing": c.get("sub_status") == "trialing",
+        "trial_end": c.get("sub_trial_end"),
+        "trial_gate": c.get("sub_status") == "trialing" and not is_pro_side and user.get("role") == "client",
+        "plan_amount_cents": c.get("sub_amount_cents"),
+        "plan_cadence": c.get("billing_cadence"),
+        "plan_label": PLAN_LABELS.get(c.get("billing_product") or "", c.get("billing_product")),
+        "card": (f"{(c.get('sub_card_brand') or '').title()} •••• {c.get('sub_card_last4')}" if c.get("sub_card_last4") else None),
         "stripe_subscription_id": c.get("stripe_subscription_id"),
         "stripe_customer_id": c.get("stripe_customer_id"),
         "last_session_id": c.get("billing_last_session_id"),

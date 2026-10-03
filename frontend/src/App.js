@@ -25,6 +25,7 @@ import LetsReview from "@/pages/LetsReview";
 import NoContactReview from "@/pages/NoContactReview";
 import TransferReview from "@/pages/TransferReview";
 import Reports from "@/pages/Reports";
+import TrialReportsGate from "@/components/TrialReportsGate";
 import ReportView from "@/pages/ReportView";
 import ChartOfAccounts from "@/pages/ChartOfAccounts";
 import Classes from "@/pages/Classes";
@@ -308,7 +309,7 @@ function App() {
                   /communications URL can host the client-review
                   transcript archive). */}
               <Route path="/communications/audit" element={<Communications />} />
-              <Route path="/reports" element={<Reports />} />
+              <Route path="/reports" element={<TrialReportsGate><Reports /></TrialReportsGate>} />
               <Route path="/reports/ar-aging" element={<ArAgingReport />} />
               <Route path="/reports/ap-aging" element={<ApAgingReport />} />
               <Route path="/reports/sales-tax-report" element={<SalesTaxReport />} />
