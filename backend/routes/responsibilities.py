@@ -364,7 +364,7 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
     """
     from client_review import (  # local import to avoid cycles at boot
         ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
-        ITEM_CHECK_NO_CONTACT, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+        ITEM_CHECK_NO_CONTACT, ITEM_OWNER_DRAW, ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
     )
     buckets: dict[str, list[dict]] = {
         "liability_payments": [],
@@ -406,7 +406,7 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
             row["resolved_txn_ids"] = it.get("resolved_txn_ids") or []
         if t == ITEM_LIABILITY_SPLIT:
             buckets["liability_payments"].append(row)
-        elif t == ITEM_CHECK_NO_CONTACT:
+        elif t in (ITEM_CHECK_NO_CONTACT, ITEM_OWNER_DRAW):
             buckets["checks_no_payee"].append(row)
         elif t == ITEM_MISSING_RECEIPT:
             buckets["receipt_followup"].append(row)
@@ -589,6 +589,17 @@ async def responsibilities_status(
     cleanup_buckets: Optional[dict[str, list[dict]]] = None
 
     items: list[dict] = []
+    chat_counts_cache: dict | None = None
+
+    async def _chat_counts_once() -> dict:
+        nonlocal chat_counts_cache
+        if chat_counts_cache is None:
+            try:
+                chat_counts_cache = await _chat_review_counts(cid, user)
+            except Exception:  # noqa: BLE001
+                chat_counts_cache = {"no_category": 0, "transactions": 0, "checks": 0}
+        return chat_counts_cache
+
     for c in CATALOG:
         key = c["key"]
         # The full ledger-backed "Paying Payroll liabilities" row is only
@@ -646,7 +657,7 @@ async def responsibilities_status(
                 # Always populated for `reviewing_transactions` so
                 # consumers don't have to double-fetch.
                 try:
-                    chat_counts_val = await _chat_review_counts(cid, user)
+                    chat_counts_val = await _chat_counts_once()
                 except Exception:  # noqa: BLE001
                     chat_counts_val = {"no_category": 0, "transactions": 0, "checks": 0}
                 extra["chat_counts"] = chat_counts_val
@@ -1034,20 +1045,18 @@ async def responsibilities_status(
                 # so the card header + card badge reflect the real
                 # amount of work waiting, not the number of aggregates.
                 if key == "checks_no_payee":
-                    count = 0
-                    for row in bucket:
-                        checks = row.get("checks") or []
-                        resolved = set(row.get("resolved_txn_ids") or [])
-                        if checks:
-                            count += sum(1 for c in checks
-                                         if c.get("id") not in resolved)
-                        else:
-                            count += 1
+                    # The Checks card opens the Review Chat "Checks" tab,
+                    # so its count must be that tab's live queue — not
+                    # the Quick Check-in bucket.
+                    count = int((await _chat_counts_once()).get("checks") or 0)
                 else:
                     count = len(bucket)
                 if count == 0:
                     status = "done"
                     detail = "all caught up — nothing waiting on the client"
+                elif key == "checks_no_payee":
+                    status = "in_progress"
+                    detail = f"{count} check{'' if count == 1 else 's'} need{'s' if count == 1 else ''} a payee"
                 else:
                     status = "in_progress"
                     detail = (f"{count} item{'' if count == 1 else 's'} "

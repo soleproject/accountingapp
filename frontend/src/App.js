@@ -144,6 +144,7 @@ import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
 import ClientReviewPage from "@/pages/ClientReviewPage";
+import EmbeddedCheckin from "@/pages/EmbeddedCheckin";
 import CommunicationsPage from "@/pages/CommunicationsPage";
 import CompliancePage from "@/pages/CompliancePage";
 import CommunicationsDetailPage from "@/pages/CommunicationsDetailPage";
@@ -317,6 +318,9 @@ function App() {
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
               <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
               <Route path="/accounting/review-chat" element={<ChatReview />} />
+              <Route path="/accounting/liability-payments" element={<EmbeddedCheckin scope="liability_payments" />} />
+              <Route path="/accounting/receipt-followup" element={<EmbeddedCheckin scope="receipt_followup" />} />
+              <Route path="/accounting/checks-review" element={<EmbeddedCheckin scope="checks" />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
               <Route path="/accounting/no-contact-review" element={<NoContactReview />} />
               <Route path="/accounting/transfer-review" element={<TransferReview />} />

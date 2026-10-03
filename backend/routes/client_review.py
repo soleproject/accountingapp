@@ -285,6 +285,46 @@ async def post_answer(token: str, item_id: str, body: AnswerRequest):
     return {"ok": True, **result}
 
 
+@router.post("/{token}/items/{item_id}/not-liability")
+async def post_not_liability(token: str, item_id: str):
+    """Client says this payment is NOT a loan / credit-card / mortgage
+    payment. Close the item and flag the transaction for the pro to
+    recategorize normally (no split booked)."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    meta = (item.get("context") or {}).get("meta", {}) or {}
+    txn_id = meta.get("txn_id") or (
+        item.get("source_id") if item.get("source_collection") == "transactions" else None)
+    if not txn_id and meta.get("txn_date") and meta.get("txn_amount") is not None:
+        # Seeded / finding-backed items carry date+amount+desc only.
+        t = await db.transactions.find_one({
+            "company_id": batch["company_id"], "date": {"$regex": f"^{meta['txn_date'][:10]}"},
+            "amount": meta["txn_amount"], "merchant": meta.get("txn_desc")})
+        txn_id = t["id"] if t else None
+    if txn_id:
+        await db.transactions.update_one(
+            {"id": txn_id, "company_id": batch["company_id"]},
+            {"$set": {"needs_review": True, "review_note": "Client: not a liability payment — recategorize",
+                      "updated_at": _now_iso()}})
+    if item.get("source_collection") == "agent_findings":
+        await db.agent_findings.update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$set": {"status": "resolved", "resolution": "not_liability", "updated_at": _now_iso()}})
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.answered_at": _now_iso(), "items.$.answer": "Not a liability statement",
+                  "items.$.action_taken": "not_liability",
+                  "items.$.action_detail": "Flagged for the bookkeeper to categorize as a regular expense.",
+                  "updated_at": _now_iso()},
+         "$inc": {"answer_count": 1}})
+    return {"ok": True, "action_taken": "not_liability"}
+
+
+
 # --------------------------------------------------------------------------
 # Phase-1 state model — /draft + /book + compliance-tab
 # --------------------------------------------------------------------------
@@ -2630,6 +2670,54 @@ async def post_upload(
     if item.get("item_type") in (3, 8, 10, 14):
         await _mirror_upload_to_receipts_page(batch, item, attachment)
     return resp
+
+@router.get("/{token}/items/{item_id}/attachments/{aid}/file")
+async def get_upload_file(token: str, item_id: str, aid: str):
+    """Stream an uploaded statement/receipt back (inline) so the client
+    can open "View statement" in a new tab. Token-gated like the rest."""
+    import base64
+    from fastapi.responses import Response
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i["item_id"] == item_id), None)
+    att = next((a for a in ((item or {}).get("attachments") or []) if a.get("id") == aid), None)
+    if not att or not att.get("data_url"):
+        raise HTTPException(404, "Attachment not found")
+    head, _, b64 = att["data_url"].partition(",")
+    mime = att.get("mime") or (head.split(":", 1)[1].split(";")[0] if ":" in head else "application/octet-stream")
+    return Response(content=base64.b64decode(b64), media_type=mime,
+                    headers={"Content-Disposition": f'inline; filename="{att.get("filename") or "statement"}"'})
+
+
+
+
+@router.post("/{token}/items/{item_id}/reset-statement")
+async def reset_statement(token: str, item_id: str):
+    """"Start over" on a statement/receipt item: drop every attachment
+    (batch item + source record), the AI analyses derived from them, and
+    the per-item chat history so the item returns to its fresh state.
+    Refused once the item is answered — the upload is then part of the JE."""
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i.get("item_id") == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not found")
+    if item.get("answered_at"):
+        raise HTTPException(409, "Item already answered — reopen it first")
+    ids = [a.get("id") for a in (item.get("attachments") or []) if a.get("id")]
+    coll = item.get("source_collection")
+    if ids and coll in ("agent_findings", "transactions", "contacts"):
+        await db[coll].update_one(
+            {"id": item["source_id"], "company_id": batch["company_id"]},
+            {"$pull": {"attachments": {"id": {"$in": ids}}}, "$set": {"updated_at": _now_iso()}},
+        )
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.attachments": [], "items.$.messages": [], "items.$.client_messages": [],
+                  "updated_at": _now_iso()},
+         "$unset": {"items.$.liability_analysis": "", "items.$.categorization_analysis": "",
+                    "items.$.receipt_analysis": ""}},
+    )
+    return {"ok": True, "removed_attachments": len(ids)}
+
 
 
 @router.delete("/{token}/items/{item_id}/attachments/{aid}")

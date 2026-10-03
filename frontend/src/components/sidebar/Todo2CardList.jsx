@@ -124,8 +124,20 @@ const TIER_ORDER = { pro: 0, assistant: 1, ai: 2 };
 // Per-catalog filter params so the destination page opens ALREADY
 // scoped to the items the card represents. If a page doesn't accept
 // a filter, the entry stays null and the page opens unfiltered.
+// Quick Check-in buckets that open the live check-in in-shell, scoped
+// to their item types (see pages/EmbeddedCheckin.jsx CHECKIN_SCOPES).
+const EMBEDDED_CHECKIN_ROUTES = {
+  liability_payments:         "/accounting/liability-payments",
+  cleanup_liability_payments: "/accounting/liability-payments",
+  receipt_followup:           "/accounting/receipt-followup",
+  cleanup_receipt_followup:   "/accounting/receipt-followup",
+  // Checks open the Review Chat "Checks" tab (payee + category allocator).
+  checks_no_payee:            "/accounting/review-chat?tab=checks",
+  cleanup_checks_no_payee:    "/accounting/review-chat?tab=checks",
+};
+
 const CARD_FILTERS = {
-  paying_bills:          { outstanding: "1" },   // /bills — balance_due>0
+  paying_bills:          { overdue: "1" },       // /bills — past-due only
   following_up_invoices: { overdue: "1" },       // /invoices — past-due only
   reconciling_accounts:  { filter: "unreconciled" }, // /accounting/reconciliation
 };
@@ -322,11 +334,21 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
     return () => { cancelled = true; window.removeEventListener("axiom:action", onChanged); };
   }, [currentId, aiReview]);
 
+  // Silent refresh (no spinner) when an embedded Quick Check-in item is
+  // answered/deferred so the card counts drop immediately.
+  const [refreshTick, setRefreshTick] = useState(0);
+  useEffect(() => {
+    const onAction = (e) => { if (e.detail?.kind === "checkin:changed") setRefreshTick(t => t + 1); };
+    window.addEventListener("axiom:action", onAction);
+    return () => window.removeEventListener("axiom:action", onAction);
+  }, []);
+
   useEffect(() => {
     if (!currentId) { setLoad(false); return; }
     let cancelled = false;
+    const silent = refreshTick > 0;
     (async () => {
-      setLoad(true);
+      if (!silent) setLoad(true);
       try {
         const [statusR, cashR] = await Promise.allSettled([
           api.get(`/companies/${currentId}/responsibilities/status`,
@@ -336,20 +358,20 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         if (cancelled) return;
         if (statusR.status === "fulfilled") {
           setItems(statusR.value.data?.items || []);
-        } else {
+        } else if (!silent) {
           setError(statusR.reason?.response?.data?.detail || "Couldn't load To Do");
         }
         if (cashR.status === "fulfilled") {
           setCashFlow(cashR.value.data || null);
-        } else {
+        } else if (!silent) {
           setCashFlow(null);
         }
       } finally {
-        if (!cancelled) setLoad(false);
+        if (!cancelled && !silent) setLoad(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [currentId]);
+  }, [currentId, refreshTick]);
 
   // Filter to only actionable, open items.
   // - Drop "done" and "n/a" (as intended by the panel).
@@ -428,6 +450,10 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
       }
       return;
     }
+    if (EMBEDDED_CHECKIN_ROUTES[item.key]) {
+      navigate(EMBEDDED_CHECKIN_ROUTES[item.key]);
+      return;
+    }
     // Prefer the item's own area link, appending any per-card filter
     // params so the destination page opens scoped to the work the
     // sidebar card represents (e.g. Bills → outstanding only).
@@ -455,10 +481,12 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   // pathname, no query, so filter params don't break the match.
   const targetPathFor = (item) => {
     if (item.key === "reviewing_transactions") {
+      if (aiReview) return "/accounting/transactions";
       return reviewMode === "chat"
         ? "/accounting/review-chat"
         : (item.area_link || "/accounting/ai-cleanup-review").split("?")[0];
     }
+    if (EMBEDDED_CHECKIN_ROUTES[item.key]) return EMBEDDED_CHECKIN_ROUTES[item.key].split("?")[0];
     if (!item.area_link) return "/accounting/todo";
     return item.area_link.split("?")[0];
   };
