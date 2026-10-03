@@ -59,6 +59,7 @@ export default function Signup() {
   //   ?firm=slug → subdomain slug (proactivebooks.accountingapp.ai)
   //   → server host resolver → cached slug (non-flagship hosts only).
   const [firm, setFirm] = useState(null);
+  const [firmSlug, setFirmSlug] = useState(null);
   useEffect(() => {
     let cancelled = false;
     const host = window.location.hostname.toLowerCase();
@@ -74,13 +75,14 @@ export default function Signup() {
       api.get(`/branding/by-subdomain/${encodeURIComponent(slug)}`).then((r) => {
         if (cancelled) return;
         setFirm(r.data);
+        setFirmSlug(slug);
         try { localStorage.setItem("axiom_firm_slug", slug); } catch { /* ignore */ }
       });
     const serverResolve = () =>
       api.get(`/branding/by-host?host=${encodeURIComponent(host)}`)
         .then((r) => {
           if (cancelled) return;
-          if (r.data?.mode === "firm") { setFirm(r.data); return; }
+          if (r.data?.mode === "firm") { setFirm(r.data); setFirmSlug(r.data.slug || r.data.subdomain || host.split(".")[0]); return; }
           if (isFlagshipHost) return;
           const cached = (() => { try { return localStorage.getItem("axiom_firm_slug"); } catch { return null; } })();
           if (cached) bySlug(cached).catch(() => {});
@@ -170,7 +172,7 @@ export default function Signup() {
       // Self-serve business owners get their first company right away so
       // the onboarding interview has something to attach to.
       if (clientMode) {
-        const c = await api.post("/companies", { name: bizName.trim() });
+        const c = await api.post("/companies", { name: bizName.trim(), firm_slug: firmSlug || undefined });
         const cid = c.data?.company_id || c.data?.id;
         if (cid) { localStorage.setItem("axiom_company_id", cid); switchCompany?.(cid); }
       }

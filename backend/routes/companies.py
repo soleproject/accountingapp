@@ -108,8 +108,32 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
     prior_owner_count = await db.memberships.count_documents({
         "user_id": user["id"], "role": "owner",
     })
+    # White-label attribution: a signup from acme.accountingapp.ai (or
+    # ?firm=acme) belongs to that firm — stamp enterprise_id/partner_id
+    # on the company and give the firm's pro a membership, exactly like
+    # a Pro-created client.
+    firm_pro: dict | None = None
+    firm_fields: dict = {}
+    if inp.firm_slug:
+        slug = inp.firm_slug.strip().lower()
+        firm_pro = await db.users.find_one({"$or": [
+            {"branding.signin_subdomain": slug},
+            {"branding.subdomain": slug},
+            {"branding.subdomain_slug": slug},
+        ]}, {"_id": 0, "id": 1, "enterprise_id": 1, "partner_id": 1, "role": 1})
+        if firm_pro:
+            ent_id = firm_pro.get("enterprise_id")
+            if not ent_id:
+                ent = await db.enterprises.find_one({"owner_user_id": firm_pro["id"]}, {"_id": 0, "id": 1})
+                ent_id = ent["id"] if ent else None
+            if ent_id:
+                firm_fields["enterprise_id"] = ent_id
+            if firm_pro.get("partner_id"):
+                firm_fields["partner_id"] = firm_pro["partner_id"]
+            firm_fields["signup_firm_slug"] = slug
     await db.companies.insert_one({
         "id": cid, "name": inp.name,
+        **firm_fields,
         # Snap the entity type to one of the seven canonical forms so
         # every downstream tax/reporting switch works against a closed
         # enum instead of colloquial variants.
@@ -146,6 +170,11 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
         "id": str(uuid.uuid4()), "user_id": user["id"], "company_id": cid,
         "role": "owner", "created_at": now,
     })
+    if firm_pro and firm_pro["id"] != user["id"] and firm_pro.get("role") in ("pro", "partner", "superadmin"):
+        await db.memberships.insert_one({
+            "id": str(uuid.uuid4()), "user_id": firm_pro["id"], "company_id": cid,
+            "role": "pro", "created_at": now, "via": "white_label_signup",
+        })
     # Auto-provision default CoA — branches on region. US companies
     # get the same 40-row starter CoA they've always had; UK companies
     # get the FRS 102 Section 1A layout (Fixed Assets → Current Assets

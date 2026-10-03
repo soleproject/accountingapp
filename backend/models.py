@@ -40,6 +40,9 @@ class CompanyCreate(BaseModel):
     # every existing UI keeps sending nothing here → backend derives
     # US defaults, preserving today's behavior identically.
     region: Optional[str] = None
+    # Self-serve signup from a white-labelled host (acme.accountingapp.ai
+    # or ?firm=acme): links the new company to that firm's enterprise.
+    firm_slug: Optional[str] = None
 
 
 class TransactionUpdate(BaseModel):
