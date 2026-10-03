@@ -145,6 +145,10 @@ export default function WelcomeSummary() {
   const { current, currentId } = useCompany();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Enterprise-sponsored companies skipped the pricing step, so "Back"
+  // should return to the payments step instead.
+  const sponsored = current?.billing_payer === "enterprise" || current?.billing_payer === "free_spot";
+  const backHref = sponsored ? "/welcome/payments" : "/welcome/pricing";
 
   // Column measurer for the sticky Back / Next-step footer — same
   // pattern used by `/welcome` and `/welcome/payments` so this final
@@ -272,7 +276,7 @@ export default function WelcomeSummary() {
         <div className="flex items-center justify-center gap-3 pointer-events-auto">
           <button
             type="button"
-            onClick={() => nav("/welcome/pricing")}
+            onClick={() => nav(backHref)}
             className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
             data-testid="welcome-summary-back"
           >

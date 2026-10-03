@@ -220,6 +220,25 @@ export default function PricingPlans() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, []);
 
+  // Enterprise-sponsored companies ("Enterprise pays" / "Free enterprise
+  // spot") never pick a plan — their billing is already settled by the
+  // firm. Skip straight to the summary. Hold rendering until we know.
+  const [sponsored, setSponsored] = useState(null); // null = checking
+  useEffect(() => {
+    if (!currentId) { setSponsored(false); return; }
+    let cancelled = false;
+    api.get(`/companies/${currentId}/billing/state`)
+      .then((r) => {
+        if (cancelled) return;
+        const payer = r.data?.billing_payer;
+        const isSponsored = payer === "enterprise" || payer === "free_spot";
+        setSponsored(isSponsored);
+        if (isSponsored) nav("/welcome/summary", { replace: true });
+      })
+      .catch(() => { if (!cancelled) setSponsored(false); });
+    return () => { cancelled = true; };
+  }, [currentId, nav]);
+
   // Kick off a Stripe Checkout session for the selected plan and
   // redirect the browser to the returned URL. Only plans that have
   // `stripeProduct` set are wired — the others fall through to the
@@ -263,6 +282,14 @@ export default function PricingPlans() {
   // Footer "Continue" / "Not right now" — always skip to summary.
   const onContinue = () => nav("/welcome/summary");
   const onSkip     = () => nav("/welcome/summary");
+
+  if (sponsored !== false) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-center justify-center" data-testid="pricing-plans-checking">
+        <Loader2 size={22} className="animate-spin text-slate-400" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14" data-testid="pricing-plans-page">
