@@ -616,7 +616,8 @@ def _whitelabel_state(user_doc: dict) -> dict:
         }
     """
     b = (user_doc or {}).get("branding") or {}
-    comp = bool(b.get("whitelabel_comp"))
+    # Internal service accounts (SmartBooks Team default-enterprise owner) are always unlocked.
+    comp = bool(b.get("whitelabel_comp")) or bool((user_doc or {}).get("is_service_account"))
     paid = bool(b.get("whitelabel_paid"))
     src = "comp" if comp else ("paid" if paid else None)
     return {

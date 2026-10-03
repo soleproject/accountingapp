@@ -1263,12 +1263,13 @@ export default function Sidebar({ collapsed, onToggle }) {
 
   return (
     <aside
-      className={`shrink-0 border-r bg-white transition-all duration-300 flex flex-col ${
+      className={`shrink-0 border-r transition-all duration-300 flex flex-col ${
         // Width follows the EFFECTIVE state (persistent + hover), so
         // hovering over the rail expands the sidebar in-place and the
         // main content reflows to the right instead of being covered.
         showCollapsed ? "w-16" : "w-64"
       }`}
+      style={{ backgroundColor: "var(--brand-sidebar-bg)" }}
       data-testid="app-sidebar"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

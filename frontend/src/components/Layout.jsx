@@ -558,7 +558,11 @@ export default function Layout() {
         <Sidebar collapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-16 shrink-0 border-b bg-white flex items-center px-6 gap-4">
+          <header
+            className="h-16 shrink-0 border-b flex items-center px-6 gap-4"
+            style={{ backgroundColor: "var(--brand-topbar-bg)" }}
+            data-testid="app-topbar"
+          >
             {/* CompanySwitcher gets z-[1000] so it stays clickable when
                 the BillingLockedModal (z-[999]) is up — clients who own
                 multiple companies can escape a locked one via the

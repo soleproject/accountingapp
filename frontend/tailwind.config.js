@@ -16,6 +16,14 @@ module.exports = {
         sm: 'calc(var(--radius) - 4px)'
       },
       colors: {
+        // Brand-themeable palettes: every indigo/violet/fuchsia utility reads a
+        // CSS variable so BrandingProvider can re-tint the whole app at runtime.
+        ...Object.fromEntries(['indigo', 'violet', 'fuchsia'].map((name) => [
+          name,
+          Object.fromEntries([50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950].map((s) => [
+            s, `rgb(var(--tw-${name}-${s}) / <alpha-value>)`,
+          ])),
+        ])),
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
         card: {
