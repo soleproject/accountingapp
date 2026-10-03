@@ -394,15 +394,18 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
     // (i.e. `runway_days < 30`). Healthy or merely-warning runway
     // means no card at all; the CPA already has other places to see
     // the number and we don't want noise here.
-    if (cashFlow && typeof cashFlow.runway_days === "number" && cashFlow.runway_days < 30) {
-      const runway = Math.max(0, Math.floor(cashFlow.runway_days));
-      const detail = `Only ~${runway}d of runway — burn $${Math.round(cashFlow.avg_daily_burn || 0)}/d`;
+    if (cashFlow && cashFlow.issue_30d) {
+      const runway = typeof cashFlow.runway_days === "number" ? Math.max(0, Math.floor(cashFlow.runway_days)) : null;
+      const burnDay = Math.round((cashFlow.forward_monthly_burn || 0) / 30);
+      const detail = runway != null && runway < 30
+        ? `Only ~${runway}d of runway — burn $${burnDay.toLocaleString()}/d`
+        : `Cash dips to $${Math.round(cashFlow.low_30d || 0).toLocaleString()} within 30 days`;
       list.unshift({
         key:       "monitoring_cash_flow",
         label:     "Monitoring Cash Flow",
         status:    "in_progress",
         detail,
-        count:     runway,
+        count:     runway ?? 30,
         area_link: cashFlow.open_link || "/accounting/projections",
         tracked:   true,
         danger:    true,   // renderer switches to a red palette

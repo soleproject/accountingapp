@@ -4,8 +4,9 @@
  * Handoff order at end-of-onboarding:
  *   Onboarding.finish()  →  /welcome            (housekeeping toggles)
  *                       →  /welcome/payments    (Get Paid Faster wizard)
+ *                       →  /welcome/summary     (celebrate)
  *                       →  /welcome/pricing     (this page)
- *                       →  /welcome/summary     (celebrate & land)
+ *                       →  /accounting/transactions?from=onboarding (land)
  *
  * Visual language mirrors the "Get Paid Faster" step — same slate→white
  * ambient gradient, same rounded-3xl hero card, same eyebrow + bold
@@ -21,7 +22,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Toaster, toast } from "sonner";
 import {
-  Check, Star, ArrowRight, Crown, Loader2,
+  Check, Star, ArrowRight, ArrowLeft, Crown, Loader2,
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
@@ -173,6 +174,9 @@ const money = (n) => {
 };
 
 
+// Pricing is the last onboarding step — land in the review queue.
+const NEXT_AFTER_PRICING = "/accounting/transactions?from=onboarding";
+
 export default function PricingPlans() {
   const nav = useNavigate();
   // Read the current pro/firm branding so we can pin the firm logo
@@ -220,6 +224,25 @@ export default function PricingPlans() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, []);
 
+  // Enterprise-sponsored companies ("Enterprise pays" / "Free enterprise
+  // spot") never pick a plan — their billing is already settled by the
+  // firm. Skip straight to the summary. Hold rendering until we know.
+  const [sponsored, setSponsored] = useState(null); // null = checking
+  useEffect(() => {
+    if (!currentId) { setSponsored(false); return; }
+    let cancelled = false;
+    api.get(`/companies/${currentId}/billing/state`)
+      .then((r) => {
+        if (cancelled) return;
+        const payer = r.data?.billing_payer;
+        const isSponsored = payer === "enterprise" || payer === "free_spot";
+        setSponsored(isSponsored);
+        if (isSponsored) nav(NEXT_AFTER_PRICING, { replace: true });
+      })
+      .catch(() => { if (!cancelled) setSponsored(false); });
+    return () => { cancelled = true; };
+  }, [currentId, nav]);
+
   // Kick off a Stripe Checkout session for the selected plan and
   // redirect the browser to the returned URL. Only plans that have
   // `stripeProduct` set are wired — the others fall through to the
@@ -233,7 +256,7 @@ export default function PricingPlans() {
     // don't break the onboarding flow while other price IDs are still
     // pending.
     if (!plan?.stripeProduct) {
-      nav("/welcome/summary");
+      nav(NEXT_AFTER_PRICING);
       return;
     }
     if (!currentId) {
@@ -261,8 +284,16 @@ export default function PricingPlans() {
   };
 
   // Footer "Continue" / "Not right now" — always skip to summary.
-  const onContinue = () => nav("/welcome/summary");
-  const onSkip     = () => nav("/welcome/summary");
+  const onContinue = () => nav(NEXT_AFTER_PRICING);
+  const onSkip     = () => nav(NEXT_AFTER_PRICING);
+
+  if (sponsored !== false) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white flex items-center justify-center" data-testid="pricing-plans-checking">
+        <Loader2 size={22} className="animate-spin text-slate-400" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-white p-6 pt-14" data-testid="pricing-plans-page">
@@ -370,14 +401,24 @@ export default function PricingPlans() {
 
         {/* Continue / Skip footer — same rhythm as the payments page. */}
         <div className="mt-8 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onSkip}
-            className="text-sm text-slate-500 hover:text-slate-800 underline underline-offset-4 decoration-slate-300"
-            data-testid="pricing-skip"
-          >
-            Not right now
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => nav("/welcome/summary")}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
+              data-testid="pricing-back"
+            >
+              <ArrowLeft size={14} /> Back
+            </button>
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-sm text-slate-500 hover:text-slate-800 underline underline-offset-4 decoration-slate-300"
+              data-testid="pricing-skip"
+            >
+              Not right now
+            </button>
+          </div>
           <button
             type="button"
             onClick={onContinue}

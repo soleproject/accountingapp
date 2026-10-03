@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams, Link, useLocation } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import { Loader2, Sparkles, DollarSign, Building2 } from "lucide-react";
 import PlanComparisonCard from "@/components/PlanComparisonCard";
@@ -29,6 +30,10 @@ function readRefCookie() {
 
 export default function Signup() {
   const { user, setUser } = useAuth();
+  const { refresh: refreshCompanies, switchCompany } = useCompany();
+  // Set once we start our own post-signup routing so the "already
+  // signed in" redirect below doesn't hijack it.
+  const routingRef = useRef(false);
   const nav = useNavigate();
   const { pathname } = useLocation();
   const [params] = useSearchParams();
@@ -42,6 +47,7 @@ export default function Signup() {
 
   const [name, setName] = useState("");
   const [firmName, setFirmName] = useState("");
+  const [bizName, setBizName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [ref, setRef] = useState("");
@@ -103,7 +109,7 @@ export default function Signup() {
 
   // Already signed in — no need to see the signup form.
   useEffect(() => {
-    if (!user) return;
+    if (!user || routingRef.current) return;
     const dest =
       user.role === "superadmin" ? "/admin"
       : user.role === "pro"       ? "/pro/clients"
@@ -122,6 +128,11 @@ export default function Signup() {
       toast.error("Firm / enterprise name is required");
       return;
     }
+    const clientMode = !enterpriseMode && !affiliateMode;
+    if (clientMode && !bizName.trim()) {
+      toast.error("Business name is required");
+      return;
+    }
     setBusy(true);
     try {
       const r = await api.post("/auth/signup", {
@@ -132,18 +143,27 @@ export default function Signup() {
         enterprise_name: enterpriseMode ? firmName.trim() : undefined,
         ref: ref || undefined,
       });
+      routingRef.current = true;
       localStorage.setItem("axiom_token", r.data.token);
       localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
+      // Self-serve business owners get their first company right away so
+      // the onboarding interview has something to attach to.
+      if (clientMode) {
+        const c = await api.post("/companies", { name: bizName.trim() });
+        const cid = c.data?.company_id || c.data?.id;
+        if (cid) { localStorage.setItem("axiom_company_id", cid); switchCompany?.(cid); }
+      }
       setUser(r.data.user);
+      await refreshCompanies?.();
       const successMsg =
         enterpriseMode ? "Your firm is live — welcome." :
         affiliateMode  ? "Affiliate account created — start sharing." :
-                         "Account created — welcome!";
+                         "Account created — let's set up your books.";
       toast.success(successMsg);
       nav(
         enterpriseMode ? "/pro/clients" :
         affiliateMode  ? "/share"       :
-                         "/dashboard"
+                         "/onboarding"
       );
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Signup failed");
@@ -269,6 +289,19 @@ export default function Signup() {
               Shown to your clients everywhere — you can change it in Settings.
               A private-label subdomain unlocks on the paid tier.
             </span>
+          </label>
+        )}
+        {!enterpriseMode && !affiliateMode && (
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">Business name</span>
+            <input
+              value={bizName}
+              onChange={e => setBizName(e.target.value)}
+              placeholder="e.g. Bright Beans Coffee Co."
+              className="mt-1 w-full border border-slate-200 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
+              autoComplete="organization"
+              data-testid="signup-business"
+            />
           </label>
         )}
         <label className="block">

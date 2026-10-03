@@ -256,12 +256,27 @@ async def cashflow_snapshot(
         "balance_source": a.get("balance_source"),
     } for a in (data.get("cash_breakdown") or [])]
 
+    # 30-day trouble check for the To Do card: does projected cash dip
+    # below zero within the next 30 days? Use the un-thinned timeline.
+    as_of = str(data.get("as_of") or "")[:10]
+    low_30d = None
+    for r in tl:
+        d = str(r.get("date") or "")[:10]
+        if as_of and d and (datetime.fromisoformat(d) - datetime.fromisoformat(as_of)).days > 30:
+            break
+        c = float(r.get("cash") or 0.0)
+        low_30d = c if low_30d is None else min(low_30d, c)
+    has_txns = await db.transactions.count_documents({"company_id": cid}, limit=1) > 0
+
     return {
         "health": health,
         "as_of": data.get("as_of"),
         "cash_today": float(data.get("cash_today") or 0.0),
         "runway_days": runway,
         "forward_monthly_burn": forward_monthly_burn,
+        "has_transactions": has_txns,
+        "low_30d": low_30d,
+        "issue_30d": bool(has_txns and ((runway is not None and runway < 30) or (low_30d is not None and low_30d < 0))),
         "snapshots": snapshots,
         "burn_reconciliation": burn_r,
         "biggest_events": horizon_events,

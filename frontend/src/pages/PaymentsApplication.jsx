@@ -385,8 +385,8 @@ export default function PaymentsApplication() {
   };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
-  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/pricing"); };
-  const skipEntirely = () => nav("/welcome/pricing");
+  const saveAndExit = () => { toast.success("Progress saved. Come back from the sidebar anytime."); nav("/welcome/summary"); };
+  const skipEntirely = () => nav("/welcome/summary");
 
   // Nuke a draft-in-progress so the user can start fresh from the
   // marketing intro. Guarded by a browser confirm — accidental clicks
@@ -419,7 +419,7 @@ export default function PaymentsApplication() {
       await api.patch(`/companies/${currentId}/payments-app`, app);
       await api.post(`/companies/${currentId}/payments-app/submit`);
       toast.success("Payments application submitted!");
-      nav("/welcome/pricing");
+      nav("/welcome/summary");
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Couldn't submit — check the highlighted fields.");
     } finally {
@@ -1102,7 +1102,7 @@ export default function PaymentsApplication() {
           </button>
           <button
             type="button"
-            onClick={() => nav("/welcome/pricing")}
+            onClick={() => nav("/welcome/summary")}
             className="inline-flex items-center gap-1.5 px-5 py-2 rounded-full bg-slate-900 text-white text-sm shadow-md hover:bg-slate-800"
             data-testid="payments-app-nav-next"
           >
