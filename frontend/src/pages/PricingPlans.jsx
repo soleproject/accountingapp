@@ -22,7 +22,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Toaster, toast } from "sonner";
 import {
-  Check, Star, ArrowRight, ArrowLeft, Crown, Loader2,
+  Check, Star, ArrowRight, ArrowLeft, Crown, Loader2, Sparkles,
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
@@ -177,6 +177,15 @@ const money = (n) => {
 // Pricing is the last onboarding step — land in the review queue.
 const NEXT_AFTER_PRICING = "/accounting/transactions?from=onboarding";
 
+// Staff bypass behind the logo: only the SHA-256 of the code ships to
+// the browser, never the digits themselves.
+const BYPASS_HASH = "5590a50fcb0ec10eb2c64d23996be0904ea6de9cde64f2ff708e0aae26005722";
+async function bypassMatches(code) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode((code || "").trim()));
+  const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return hex === BYPASS_HASH;
+}
+
 export default function PricingPlans() {
   const nav = useNavigate();
   // Read the current pro/firm branding so we can pin the firm logo
@@ -228,6 +237,9 @@ export default function PricingPlans() {
   // spot") never pick a plan — their billing is already settled by the
   // firm. Skip straight to the summary. Hold rendering until we know.
   const [sponsored, setSponsored] = useState(null); // null = checking
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState("");
+  const [codeErr, setCodeErr] = useState(false);
   useEffect(() => {
     if (!currentId) { setSponsored(false); return; }
     let cancelled = false;
@@ -304,15 +316,57 @@ export default function PricingPlans() {
       <Toaster richColors position="top-center" />
 
       {/* Top-left firm logo — pinned so a chrome-less page still
-          carries the brand mark. Falls back to nothing when no logo
-          is on file (rather than a bare "Firm" placeholder). */}
-      {logoUrl && (
-        <img
-          src={logoUrl}
-          alt="Firm logo"
-          className="fixed top-5 left-6 h-9 w-auto max-w-[180px] object-contain z-10"
-          data-testid="pricing-firm-logo"
-        />
+          carries the brand mark. Clicking it reveals a hidden passcode
+          field (staff bypass) that skips the plan picker. */}
+      {(
+        <div className="fixed top-5 left-6 z-10 flex items-center gap-3">
+          {logoUrl ? (
+            <img
+              src={logoUrl}
+              alt="Firm logo"
+              onClick={() => { setCodeOpen((v) => !v); setCode(""); setCodeErr(false); }}
+              className="h-9 w-auto max-w-[180px] object-contain cursor-pointer select-none"
+              data-testid="pricing-firm-logo"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setCodeOpen((v) => !v); setCode(""); setCodeErr(false); }}
+              className="flex items-center gap-2 select-none"
+              aria-label="Brand"
+              data-testid="pricing-firm-logo"
+            >
+              <span className="w-9 h-9 rounded-lg bg-blue-600 grid place-items-center"><Sparkles size={18} className="text-white" /></span>
+              <span className="font-heading font-bold text-base text-slate-900">{branding?.app_name || branding?.firm_name || "SmartBooks"}</span>
+            </button>
+          )}
+          {codeOpen && (
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (await bypassMatches(code)) { nav(NEXT_AFTER_PRICING); return; }
+                setCodeErr(true); setCode("");
+              }}
+              className="flex items-center gap-1.5"
+              data-testid="pricing-bypass-form"
+            >
+              <input
+                type="password"
+                inputMode="numeric"
+                autoFocus
+                value={code}
+                onChange={(e) => { setCode(e.target.value); setCodeErr(false); }}
+                placeholder="••••••"
+                className={`w-28 h-9 px-3 rounded-lg border text-sm tracking-[0.35em] bg-white/90 backdrop-blur focus:outline-none focus:ring-2 ${codeErr ? "border-rose-300 focus:ring-rose-200" : "border-slate-200 focus:ring-slate-300"}`}
+                aria-label="Access code"
+                data-testid="pricing-bypass-input"
+              />
+              <button type="submit" className="h-9 px-3 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-800" data-testid="pricing-bypass-submit">
+                Go
+              </button>
+            </form>
+          )}
+        </div>
       )}
 
       <div className="max-w-[1500px] mx-auto">
