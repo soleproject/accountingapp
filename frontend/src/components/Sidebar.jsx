@@ -1433,6 +1433,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/admin/usage", label: "Usage & Costs", icon: Activity }} />
         )}
+        {user?.role === "superadmin" && (
+          <Item item={{ to: "/admin/client-payments", label: "Client Payments", icon: CreditCard }} />
+        )}
         {/* Product Launch — superadmin control panel for gating each
             product on/off per user cohort. Sits right below Usage &
             Costs (Round 7.21, Feb 2026). */}

@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import stripe
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -315,27 +316,29 @@ async def _record_payment(
     # the invoice line item says if the company row is unreachable.
     billing_product = None
     billing_discount = None
+    billing_cadence = None
+    try:
+        lines = (invoice.get("lines") or {}).get("data") or []
+        line_price_id = lines[0].get("price", {}).get("id") if lines else None
+    except Exception:  # noqa: BLE001
+        line_price_id = None
+    inferred_prod, inferred_cadence = _plan_from_price_id(line_price_id)
     if company:
-        billing_product = company.get("billing_product")
+        billing_product = company.get("billing_product") or inferred_prod
         billing_discount = bool(company.get("billing_discount"))
+        billing_cadence = inferred_cadence or company.get("billing_cadence")
     else:
-        # Try to infer from the invoice's price ID — matches the env
-        # vars we set for each tier. Silent-fail if none matches.
-        try:
-            lines = (invoice.get("lines") or {}).get("data") or []
-            price_id = lines[0].get("price", {}).get("id") if lines else None
-            if price_id:
-                for prod in ("simple_start", "essentials", "plus", "advanced"):
-                    for tier in ("regular", "discount"):
-                        env_val = os.environ.get(f"STRIPE_PRICE_{prod.upper()}_{tier.upper()}")
-                        if env_val and env_val == price_id:
-                            billing_product = prod
-                            billing_discount = (tier == "discount")
-                            break
-                    if billing_product:
+        billing_product, billing_cadence = inferred_prod, inferred_cadence
+        if line_price_id and not billing_product:
+            for prod in ("simple_start", "essentials", "plus", "advanced"):
+                for tier in ("regular", "discount"):
+                    env_val = os.environ.get(f"STRIPE_PRICE_{prod.upper()}_{tier.upper()}")
+                    if env_val and env_val == line_price_id:
+                        billing_product = prod
+                        billing_discount = (tier == "discount")
                         break
-        except Exception:  # noqa: BLE001
-            pass
+                if billing_product:
+                    break
     doc = {
         "id": pid,
         "stripe_invoice_id": inv_id,
@@ -345,6 +348,9 @@ async def _record_payment(
         "company_id": company_id,
         "billing_product": billing_product,
         "billing_discount": billing_discount,
+        "billing_cadence": billing_cadence,
+        "billing_reason": invoice.get("billing_reason"),
+        "status": "paid",
         "amount_cents": amount_cents,
         "currency": (invoice.get("currency") or "usd").lower(),
         "hosted_invoice_url": invoice.get("hosted_invoice_url"),
@@ -606,13 +612,20 @@ async def _handle_checkout_completed(session: dict) -> dict:
     # subscription so downstream webhooks can find the right row.
     company_id = (session.get("metadata") or {}).get("company_id")
     if company_id and stripe_subscription_id:
+        snap: dict = {}
+        try:
+            snap = await asyncio.to_thread(_fetch_sub_snapshot, stripe_subscription_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not snapshot subscription %s", stripe_subscription_id)
         await db.companies.update_one(
             {"id": company_id},
             {"$set": {
                 "billing_state": "active",
                 "stripe_subscription_id": stripe_subscription_id,
                 "stripe_customer_id": stripe_customer_id,
+                "billing_checkout_completed_at": now_iso(),
                 "updated_at": now_iso(),
+                **snap,
             }},
         )
 
@@ -689,7 +702,8 @@ async def _handle_invoice_paid(invoice: dict) -> None:
     if sub_id:
         await db.companies.update_one(
             {"stripe_subscription_id": sub_id},
-            {"$set": {"billing_state": "active", "updated_at": now_iso()}},
+            {"$set": {"billing_state": "active", "updated_at": now_iso(), "sub_last_paid_at": now_iso()},
+             "$unset": {"sub_last_failure": ""}},
         )
 
     # Phase D — consolidated enterprise invoice paid. The scheduler
@@ -739,7 +753,18 @@ async def _handle_invoice_payment_failed(invoice: dict) -> None:
         company = await db.companies.find_one({"stripe_subscription_id": sub_id})
         await db.companies.update_one(
             {"stripe_subscription_id": sub_id},
-            {"$set": {"billing_state": "past_due", "updated_at": now_iso()}},
+            {"$set": {
+                "billing_state": "past_due", "updated_at": now_iso(),
+                "sub_last_failure": {
+                    "stripe_invoice_id": invoice.get("id"),
+                    "amount_cents": int(invoice.get("amount_due") or 0),
+                    "attempt_count": invoice.get("attempt_count"),
+                    "next_payment_attempt": _ts_iso(invoice.get("next_payment_attempt")),
+                    "reason": ((invoice.get("last_finalization_error") or {}).get("message")),
+                    "hosted_invoice_url": invoice.get("hosted_invoice_url"),
+                    "at": now_iso(),
+                },
+            }},
         )
 
     # ---- Consolidated enterprise-invoice branch ------------------------
@@ -869,6 +894,83 @@ async def _handle_invoice_payment_failed(invoice: dict) -> None:
                 logger.exception("payment_failed pro email failed for %s", pro_uid)
 
 
+PLAN_LABELS = {
+    "simple_start": "Core", "assistant": "AI Assistant", "bookkeeper": "AI Bookkeeper",
+    "advanced": "Advanced", "essentials": "Essentials", "plus": "Plus",
+}
+# Monthly list price per product (annual = x10) — fallback when Stripe amount unknown.
+PLAN_MONTHLY_CENTS = {
+    "simple_start": 3800, "assistant": 7900, "bookkeeper": 9900, "advanced": 14900,
+    "essentials": 7900, "plus": 9500,
+}
+
+
+def _plan_from_price_id(price_id: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Reverse-map a Stripe price id to (product, cadence) via STRIPE_PRICE_* env vars."""
+    if not price_id:
+        return None, None
+    for k, v in os.environ.items():
+        if not k.startswith("STRIPE_PRICE_") or v != price_id:
+            continue
+        rest = k[len("STRIPE_PRICE_"):].lower()
+        for prod in ("simple_start", "assistant", "bookkeeper", "advanced", "essentials", "plus"):
+            if rest.startswith(prod + "_"):
+                suffix = rest[len(prod) + 1:]
+                cadence = "annual" if suffix.startswith("annual") else "monthly"
+                return prod, cadence
+    return None, None
+
+
+def _ts_iso(ts) -> Optional[str]:
+    try:
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat() if ts else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _sub_snapshot(sub: dict) -> dict:
+    """Flatten the bits of a Stripe Subscription the admin Client Payments page needs."""
+    items = ((sub.get("items") or {}).get("data") or [])
+    price = (items[0].get("price") or {}) if items else {}
+    recurring = price.get("recurring") or {}
+    prod, cadence = _plan_from_price_id(price.get("id"))
+    out = {
+        "sub_status": sub.get("status"),
+        "sub_current_period_end": _ts_iso(sub.get("current_period_end") or (items[0].get("current_period_end") if items else None)),
+        "sub_trial_end": _ts_iso(sub.get("trial_end")),
+        "sub_cancel_at_period_end": bool(sub.get("cancel_at_period_end")),
+        "sub_canceled_at": _ts_iso(sub.get("canceled_at")),
+        "sub_started_at": _ts_iso(sub.get("start_date") or sub.get("created")),
+        "sub_price_id": price.get("id"),
+        "sub_amount_cents": price.get("unit_amount"),
+        "sub_interval": recurring.get("interval"),
+        "stripe_customer_id": sub.get("customer") if isinstance(sub.get("customer"), str) else (sub.get("customer") or {}).get("id"),
+        "sub_synced_at": now_iso(),
+    }
+    if prod:
+        out["billing_product"] = prod
+    if cadence:
+        out["billing_cadence"] = cadence
+    elif recurring.get("interval") == "year":
+        out["billing_cadence"] = "annual"
+    pm = sub.get("default_payment_method")
+    if isinstance(pm, dict):
+        card = pm.get("card") or {}
+        out["sub_card_brand"], out["sub_card_last4"] = card.get("brand"), card.get("last4")
+    elif isinstance(pm, str) and _STRIPE_KEY:
+        try:
+            card = stripe.PaymentMethod.retrieve(pm).get("card") or {}
+            out["sub_card_brand"], out["sub_card_last4"] = card.get("brand"), card.get("last4")
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+def _fetch_sub_snapshot(sub_id: str) -> dict:
+    sub = stripe.Subscription.retrieve(sub_id, expand=["default_payment_method"])
+    return _sub_snapshot(sub.to_dict_recursive() if hasattr(sub, "to_dict_recursive") else dict(sub))
+
+
 async def _handle_subscription_change(sub: dict) -> None:
     stripe_customer_id = sub.get("customer")
     if not stripe_customer_id:
@@ -894,7 +996,7 @@ async def _handle_subscription_change(sub: dict) -> None:
         state = _sub_status_to_billing_state(status)
         await db.companies.update_one(
             {"stripe_subscription_id": sub_id},
-            {"$set": {"billing_state": state, "updated_at": now_iso()}},
+            {"$set": {"billing_state": state, "updated_at": now_iso(), **_sub_snapshot(sub)}},
         )
 
     # White-label subscription lifecycle — the sub's metadata carries the
