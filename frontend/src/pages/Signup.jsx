@@ -54,31 +54,52 @@ export default function Signup() {
   const [refWho, setRefWho] = useState(null);  // {name, firm_name} once resolved
   const [busy, setBusy] = useState(false);
 
-  // White-label branding — when the visitor lands on {firm}.accountingapp.ai,
-  // hit /branding/by-host and swap the SmartBooks header for the firm's
-  // logo + name. Mirrors the Login page behavior so a Pro's affiliates,
-  // customers, and enterprise recruits all see the same brand.
+  // White-label branding — same resolution chain as Login so a firm's
+  // customers see the firm's logo + name on every entry point:
+  //   ?firm=slug → subdomain slug (proactivebooks.accountingapp.ai)
+  //   → server host resolver → cached slug (non-flagship hosts only).
   const [firm, setFirm] = useState(null);
   useEffect(() => {
     let cancelled = false;
-    // 1. `?firm=acme` explicit override wins — same pattern as Login,
-    //    so previewers can test any firm's brand from the platform host.
+    const host = window.location.hostname.toLowerCase();
+    const isFlagshipHost =
+      host === "app.smartbookssoftware.ai" ||
+      host === "smartbookssoftware.ai" ||
+      host === "www.smartbookssoftware.ai" ||
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host.endsWith(".preview.emergentagent.com") ||
+      host.endsWith(".emergentagent.com");
+    const bySlug = (slug) =>
+      api.get(`/branding/by-subdomain/${encodeURIComponent(slug)}`).then((r) => {
+        if (cancelled) return;
+        setFirm(r.data);
+        try { localStorage.setItem("axiom_firm_slug", slug); } catch { /* ignore */ }
+      });
+    const serverResolve = () =>
+      api.get(`/branding/by-host?host=${encodeURIComponent(host)}`)
+        .then((r) => {
+          if (cancelled) return;
+          if (r.data?.mode === "firm") { setFirm(r.data); return; }
+          if (isFlagshipHost) return;
+          const cached = (() => { try { return localStorage.getItem("axiom_firm_slug"); } catch { return null; } })();
+          if (cached) bySlug(cached).catch(() => {});
+        })
+        .catch(() => { /* platform brand is the fallback */ });
+
     const q = new URLSearchParams(window.location.search).get("firm");
     if (q) {
-      api.get(`/branding/by-subdomain/${encodeURIComponent(q.toLowerCase().trim())}`)
-        .then(r => { if (!cancelled) setFirm(r.data); })
-        .catch(() => { /* unknown firm → platform brand */ });
+      bySlug(q.toLowerCase().trim()).catch(() => {});
       return () => { cancelled = true; };
     }
-    // 2. Server-resolved from the current hostname — same endpoint
-    //    Login uses, so a Pro's affiliates, customers, and enterprise
-    //    recruits all see the same brand on every entry point.
-    api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`)
-      .then(r => {
-        if (cancelled) return;
-        if (r.data.mode === "firm") setFirm(r.data);
-      })
-      .catch(() => { /* platform brand is the fallback */ });
+    if (!isFlagshipHost) {
+      const slug = host.split(".")[0];
+      if (host.split(".").length >= 2 && !["api", "www", "app", "admin", "preview"].includes(slug)) {
+        bySlug(slug).catch(serverResolve);
+        return () => { cancelled = true; };
+      }
+    }
+    serverResolve();
     return () => { cancelled = true; };
   }, []);
 
@@ -366,7 +387,7 @@ export default function Signup() {
               {" · "}
               <Link to="/signup/enterprise" className="text-indigo-700 hover:underline">Start a firm</Link>
             </div>
-          ) : (
+          ) : firm ? null : (
             <div>
               Running a firm? <Link to="/signup/enterprise" className="text-indigo-700 hover:underline">Start on the enterprise plan</Link>
               {" · "}
