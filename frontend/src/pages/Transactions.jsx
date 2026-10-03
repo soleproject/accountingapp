@@ -2373,10 +2373,7 @@ export default function Transactions() {
                 </div>
                 <h3 className="text-lg font-semibold text-slate-900 mt-1">Welcome aboard — your books are ready.</h3>
                 <p className="text-[14px] text-slate-600 mt-2 leading-relaxed">
-                  Your plan is active and this is your <b>Transactions</b> page — where everything lands, gets categorized, and gets approved.
-                  {txns.length
-                    ? " Want a one-minute tour so you know where to look first?"
-                    : " Connect a bank or upload a statement and your transactions will show up here. Want a one-minute tour of how it works?"}
+                  Your plan is active and this is your <b>Transactions</b> page — where everything lands, gets categorized, and gets approved. Want a one-minute tour of how it works?
                 </p>
               </>
             ) : (
