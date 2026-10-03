@@ -12,6 +12,7 @@ import { useColumnBox } from "@/hooks/useColumnBox";
 import ResponsibilitiesChecklist from "@/components/ResponsibilitiesChecklist";
 import PlaidLinkButton from "@/components/PlaidLinkButton";
 import { IndustryTemplatePicker } from "@/components/AIFirstControls";
+import WelcomeModal, { hasSeenWelcome, markWelcomeSeen } from "@/components/WelcomeModal";
 import { IndustrySelect } from "@/components/IndustrySelect";
 import StatementsTab from "@/components/StatementsTab";
 import InlineQboConnect from "@/components/InlineQboConnect";
@@ -407,6 +408,18 @@ export default function Onboarding() {
   const { currentId, current, refresh } = useCompany();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
+  // First visit to onboarding → play the welcome tour once per user
+  // (same localStorage flag the dashboard uses, so it never double-fires).
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  useEffect(() => {
+    if (!user?.id || user?.is_demo_visitor || hasSeenWelcome(user.id)) return;
+    const t = setTimeout(() => setWelcomeOpen(true), 400);
+    return () => clearTimeout(t);
+  }, [user?.id, user?.is_demo_visitor]);
+  const closeWelcome = () => {
+    setWelcomeOpen(false);
+    if (user?.id) markWelcomeSeen(user.id);
+  };
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
   // Disables the "Finish" / "Next step" button on the last step while
@@ -1284,6 +1297,7 @@ export default function Onboarding() {
 
   return (
     <div ref={columnRef} className="max-w-3xl mx-auto space-y-6 pb-24">
+      <WelcomeModal open={welcomeOpen} onClose={closeWelcome} />
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center">
           <Sparkles className="text-indigo-600" size={20} />
