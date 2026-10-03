@@ -762,3 +762,8 @@ need to type into the chat box to invoke the matching help flow.
 - `enterprises.rollup_stats` unions companies stamped with `enterprise_id` into `company_ids` → Enterprises page counts + enterprise detail Companies table include white-label signups.
 - NEW `PATCH /admin/companies/{cid}/enterprise` {enterprise_id|null} — re-attributes a company, swaps the enterprise owner's pro membership (`via: admin_reassign`). Superadmin Clients list "Enterprise" cell is now a dropdown (`pro-clients-enterprise-select-{cid}`) using it.
 - Root cause for prod "Michael Proactive 5 LLC" mis-attribution: most likely stale production frontend (pre-`firm_slug` build); user must re-publish and then use the dropdown to fix existing rows.
+
+## 2026-10-03 — Post-checkout landing → Transactions
+- `BillingReturn.jsx` (`/billing/success`): client-role users (self-serve) now auto-redirect to `/accounting/transactions` after billing_state flips active, and the 30s-timeout fallback button ("Continue to transactions", `billing-success-continue-btn`) also goes there. Pros/superadmins returning from "Pay with client card" still go to `/dashboard`. Branded host preserved via `origin_url`.
+- Prod Stripe: user set the 8 `STRIPE_PRICE_<PRODUCT>_<MONTHLY|ANNUAL>` live env vars on Railway; live checkout with 7-day trial verified by user. Webhook at api.smartbookssoftware.ai/api/stripe/webhook active (6 events — advised to confirm subscription.updated/deleted + invoice.paid/payment_failed are included).
+- Open product question: pro Add-client catalog (Simple Start/Essentials/Plus/Advanced) ≠ self-serve pricing catalog (Core/AI Assistant/AI Bookkeeper/Advanced); user may want to unify.

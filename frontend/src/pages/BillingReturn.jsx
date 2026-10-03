@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { CheckCircle2, Loader2, XCircle, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
@@ -20,9 +21,14 @@ export function BillingSuccess() {
   const [params] = useSearchParams();
   const nav = useNavigate();
   const { switchCompany } = useCompany();
+  const { user } = useAuth();
   const cid = params.get("company_id");
   const [state, setState] = useState("polling"); // polling | active | timeout
   const [tries, setTries] = useState(0);
+  // Self-serve owners land on their Transactions; pros paying on a client's behalf keep the dashboard.
+  const isClient = user?.role === "client";
+  const dest = isClient ? "/accounting/transactions" : "/dashboard";
+  const destLabel = isClient ? "transactions" : "dashboard";
 
   useEffect(() => {
     if (!cid) return;
@@ -36,7 +42,7 @@ export function BillingSuccess() {
           // small delay so the user sees the ✓ before we redirect
           setTimeout(() => {
             switchCompany(cid);
-            nav("/dashboard");
+            nav(dest);
           }, 1500);
         } else {
           setTries((n) => n + 1);
@@ -61,7 +67,7 @@ export function BillingSuccess() {
               <CheckCircle2 size={26} className="text-emerald-600" />
             </div>
             <h1 className="mt-4 font-heading text-2xl font-bold">Payment confirmed ✨</h1>
-            <p className="mt-2 text-sm text-slate-600">Redirecting to the dashboard…</p>
+            <p className="mt-2 text-sm text-slate-600" data-testid="billing-success-redirecting">Redirecting to your {destLabel}…</p>
           </>
         ) : state === "timeout" ? (
           <>
@@ -74,10 +80,11 @@ export function BillingSuccess() {
               You can continue — access will unlock automatically the moment it arrives.
             </p>
             <button
-              onClick={() => { if (cid) switchCompany(cid); nav("/dashboard"); }}
+              onClick={() => { if (cid) switchCompany(cid); nav(dest); }}
               className="mt-5 inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm"
+              data-testid="billing-success-continue-btn"
             >
-              Continue to dashboard <ArrowRight size={13} />
+              Continue to {destLabel} <ArrowRight size={13} />
             </button>
           </>
         ) : (
