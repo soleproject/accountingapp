@@ -785,3 +785,6 @@ need to type into the chat box to invoke the matching help flow.
 - `_fetch_sub_snapshot` now also expands `customer.invoice_settings.default_payment_method` so card last4 shows when the PM lives on the customer.
 - Drawer `BillingActions` (cp-action-cancel / cp-cancel-confirm-yes / cp-action-change-plan / cp-plan-product / cp-plan-cadence / cp-plan-apply / cp-action-portal) with inline confirm + plan form; refreshes drawer + table silently.
 - Prod prerequisite for portal: enable Customer Portal once in Stripe Dashboard → Settings → Billing → Customer portal (live mode).
+
+## 2026-10-03 — Post-checkout congrats + tour invite
+- BillingSuccess (client role) now lands on `/accounting/transactions?from=checkout`. Transactions.jsx: `fromCheckout` opens the existing tour-invite modal (800ms delay, no row requirement) with a celebratory variant (`txn-checkout-congrats`, PartyPopper, copy adapts to 0 rows → "connect a bank or upload a statement"). "Show me around" starts the Transactions tour (works with zero rows); "Skip for now" marks seen + strips the param. Auto-tour guard also skips when fromCheckout.

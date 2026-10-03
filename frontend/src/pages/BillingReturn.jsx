@@ -27,7 +27,7 @@ export function BillingSuccess() {
   const [tries, setTries] = useState(0);
   // Self-serve owners land on their Transactions; pros paying on a client's behalf keep the dashboard.
   const isClient = user?.role === "client";
-  const dest = isClient ? "/accounting/transactions" : "/dashboard";
+  const dest = isClient ? "/accounting/transactions?from=checkout" : "/dashboard";
   const destLabel = isClient ? "transactions" : "dashboard";
 
   useEffect(() => {
