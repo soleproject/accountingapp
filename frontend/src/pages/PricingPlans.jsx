@@ -22,7 +22,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Toaster, toast } from "sonner";
 import {
-  Check, Star, ArrowRight, ArrowLeft, Crown, Loader2, Sparkles,
+  Check, Star, ArrowRight, Crown, Loader2, Sparkles,
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
@@ -296,8 +296,6 @@ export default function PricingPlans() {
   };
 
   // Footer "Continue" / "Not right now" — always skip to summary.
-  const onContinue = () => nav(NEXT_AFTER_PRICING);
-  const onSkip     = () => nav(NEXT_AFTER_PRICING);
 
   if (sponsored !== false) {
     return (
@@ -453,36 +451,6 @@ export default function PricingPlans() {
           ))}
         </div>
 
-        {/* Continue / Skip footer — same rhythm as the payments page. */}
-        <div className="mt-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <button
-              type="button"
-              onClick={() => nav("/welcome/summary")}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white border border-slate-200 shadow-sm text-sm text-slate-600 hover:text-slate-900 hover:border-slate-300"
-              data-testid="pricing-back"
-            >
-              <ArrowLeft size={14} /> Back
-            </button>
-            <button
-              type="button"
-              onClick={onSkip}
-              className="text-sm text-slate-500 hover:text-slate-800 underline underline-offset-4 decoration-slate-300"
-              data-testid="pricing-skip"
-            >
-              Not right now
-            </button>
-          </div>
-          <button
-            type="button"
-            onClick={onContinue}
-            className="group inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-slate-900 text-white text-sm font-semibold shadow-lg hover:shadow-xl hover:scale-[1.02] transition-transform"
-            data-testid="pricing-continue"
-          >
-            Continue
-            <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
-          </button>
-        </div>
       </div>
     </div>
   );
