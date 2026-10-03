@@ -86,6 +86,28 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin", "pa
     for m in owner_memberships:
         if m["company_id"] not in owner_by_cid:
             owner_by_cid[m["company_id"]] = owner_users.get(m["user_id"]) or {}
+    # Enterprise attribution (superadmin list view): company → pro
+    # membership → pro user's enterprise_id → enterprise name.
+    ent_by_cid: dict[str, dict] = {}
+    if user["role"] == "superadmin":
+        pro_ms = await db.memberships.find(
+            {"company_id": {"$in": all_cids}, "role": "pro",
+             "$or": [{"archived_at": {"$exists": False}}, {"archived_at": None}]},
+            {"_id": 0, "company_id": 1, "user_id": 1}).to_list(5000)
+        pro_users = {
+            u["id"]: u.get("enterprise_id") for u in
+            await db.users.find({"id": {"$in": list({m["user_id"] for m in pro_ms})}, "enterprise_id": {"$ne": None}},
+                                {"_id": 0, "id": 1, "enterprise_id": 1}).to_list(2000)
+        }
+        ents = {
+            e["id"]: e for e in
+            await db.enterprises.find({"id": {"$in": list({v for v in pro_users.values() if v})}},
+                                      {"_id": 0, "id": 1, "name": 1, "slug": 1}).to_list(500)
+        }
+        for m in pro_ms:
+            eid = pro_users.get(m["user_id"])
+            if eid and eid in ents and m["company_id"] not in ent_by_cid:
+                ent_by_cid[m["company_id"]] = ents[eid]
     result = []
     for c in companies:
         # Kept the per-company count queries — they're indexed on
@@ -102,6 +124,8 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin", "pa
             # settings blob) so the response stays lightweight.
             "owner_name": owner.get("name"),
             "owner_email": owner.get("email"),
+            "enterprise_id": (ent_by_cid.get(c["id"]) or {}).get("id"),
+            "enterprise_name": (ent_by_cid.get(c["id"]) or {}).get("name"),
             "billing_payer": c.get("billing_payer"),
             "billing_state": c.get("billing_state"),
             "needs_activation": (

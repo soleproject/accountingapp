@@ -227,7 +227,7 @@ export default function ProClients() {
     if (!needle) return base;
     return base.filter((c) => {
       const hay = [
-        c.name, c.business_type, c.owner_name, c.owner_email,
+        c.name, c.business_type, c.owner_name, c.owner_email, c.enterprise_name,
       ].filter(Boolean).map((s) => s.toLowerCase()).join(" ");
       return hay.includes(needle);
     });
@@ -473,6 +473,7 @@ export default function ProClients() {
       {layout === "list" && (
         <ClientsList
           visible={visible}
+          showEnterprise={isSuperadmin}
           onOpen={(cid) => { switchCompany(cid); window.location.href = "/dashboard"; }}
           onResend={resendWelcome}
           resending={resending}
@@ -631,7 +632,7 @@ export default function ProClients() {
 // Preserves the "Awaiting payment" and Ready/Onboarding pills so the
 // two views surface the same signals.
 // --------------------------------------------------------------------------
-function ClientsList({ visible, onOpen, onResend, resending }) {
+function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = false }) {
   if (!visible.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="pro-clients-list">
@@ -640,6 +641,7 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
           <tr>
             <th className="text-left px-4 py-2 font-medium">Company</th>
             <th className="text-left px-4 py-2 font-medium">Owner</th>
+            {showEnterprise && <th className="text-left px-4 py-2 font-medium">Enterprise</th>}
             <th className="text-left px-4 py-2 font-medium">Type</th>
             <th className="text-right px-4 py-2 font-medium">Txns</th>
             <th className="text-right px-4 py-2 font-medium">Review</th>
@@ -666,6 +668,17 @@ function ClientsList({ visible, onOpen, onResend, resending }) {
                   <div className="text-slate-800">{c.owner_name || "—"}</div>
                   <div className="text-[11px] text-slate-400">{c.owner_email || ""}</div>
                 </td>
+                {showEnterprise && (
+                  <td className="px-4 py-2" data-testid={`pro-clients-list-enterprise-${c.id}`}>
+                    {c.enterprise_name ? (
+                      <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-0.5 max-w-[200px] truncate" title={c.enterprise_name}>
+                        <Shield size={11} className="shrink-0" /> <span className="truncate">{c.enterprise_name}</span>
+                      </span>
+                    ) : (
+                      <span className="text-[12px] text-slate-400">SmartBooks direct</span>
+                    )}
+                  </td>
+                )}
                 <td className="px-4 py-2 text-slate-500 truncate max-w-[180px]">{c.business_type || "—"}</td>
                 <td className="px-4 py-2 text-right font-mono-num text-slate-700">{c.transactions ?? 0}</td>
                 <td className={`px-4 py-2 text-right font-mono-num ${(c.needs_review ?? 0) > 0 ? "text-cyan-700" : "text-slate-400"}`}>
