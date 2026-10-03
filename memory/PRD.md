@@ -798,3 +798,8 @@ need to type into the chat box to invoke the matching help flow.
 ## 2026-10-03 — Pricing page entity picker + popup copy
 - PricingPlans.jsx: when `companies.length > 1`, a "Plan for" `CompanySwitcher` (imported from Layout.jsx) renders next to the firm logo (`pricing-entity-picker`); checkout + sponsored check already key off `currentId`, so switching changes the plan target.
 - Post-checkout popup copy fixed to the user's exact wording (no rows-dependent variant).
+
+## 2026-10-03 — Client "Add new company" popup with owner delegation ✅ verified (API + UI)
+- `CompanyCreate.owner_email`. In `POST /companies`: for role=client, a different owner email → existing user becomes Owner, or a new client account is created (`must_set_password`, placeholder pw) and emailed a branded set-password invite (`client_welcome_first_time`, firm branding/host); existing users get `client_welcome_returning`. Caller gets an `editor` membership (`via: owner_delegation`). Non-clients get 400 on delegation. Self-add "returning" email is skipped when delegated.
+- Enterprise inheritance: when no firm slug is in body/Origin/user, a client's new company inherits `enterprise_id`/`signup_firm_slug` from a sibling company they belong to (pro membership for the enterprise owner added).
+- Frontend: `AddCompanyModal.jsx` (add-company-name / add-company-owner-email / add-company-owner-hint / add-company-submit). `CompanySwitcher` "Add new company" opens it for clients only; pros/superadmins still go to `/pro/clients?new=1`. On submit → refresh → switchCompany → `/onboarding`.
