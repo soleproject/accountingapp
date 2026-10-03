@@ -244,6 +244,7 @@ function App() {
               <Route path="/admin/partners/:pid" element={<AdminPartnerDetail />} />
               <Route path="/admin/enterprises/:eid" element={<AdminEnterpriseDetail />} />
               <Route path="/admin/client-payments" element={<AdminClientPayments />} />
+              <Route path="/pro/client-payments" element={<AdminClientPayments />} />
               <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/admin/cron-runs" element={<AdminCronRuns />} />

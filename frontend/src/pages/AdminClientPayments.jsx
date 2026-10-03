@@ -64,8 +64,8 @@ export default function AdminClientPayments() {
   const [ent, setEnt] = useState("all");
   const [selected, setSelected] = useState(params.get("client") || null);
 
-  const load = async () => {
-    setLoading(true);
+  const load = async (silent = false) => {
+    if (!silent) setLoading(true);
     try { const r = await api.get("/admin/client-payments"); setData(r.data); }
     catch (e) { toast.error(e.response?.data?.detail || "Couldn't load client payments"); }
     finally { setLoading(false); }
@@ -103,7 +103,8 @@ export default function AdminClientPayments() {
   const closeClient = () => { setSelected(null); setParams((p) => { p.delete("client"); return p; }, { replace: true }); };
 
   const m = data?.metrics || {};
-  const noSnapshot = rows.filter((r) => r.stripe_subscription_id && !r.has_snapshot).length;
+  const isPlatform = data?.scope !== "enterprise";
+  const noSnapshot = isPlatform ? rows.filter((r) => r.stripe_subscription_id && !r.has_snapshot).length : 0;
 
   return (
     <div className="p-6 lg:p-8 max-w-[1400px]" data-testid="admin-client-payments-page">
@@ -112,8 +113,9 @@ export default function AdminClientPayments() {
           <h1 className="font-heading text-3xl font-bold text-slate-900 flex items-center gap-3">
             <CreditCard size={26} className="text-indigo-600" /> Client Payments
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Every self-serve and pro-billed subscription · who's current, who's behind, what's due next.</p>
+          <p className="text-sm text-slate-500 mt-1">{isPlatform ? "Every self-serve and pro-billed subscription · who's current, who's behind, what's due next." : "Your clients' subscriptions · who's current, who's behind, what's due next."}</p>
         </div>
+        {isPlatform && (
         <div className="ml-auto flex items-center gap-2">
           {data?.stripe_mode && (
             <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded ${data.stripe_mode === "live" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`} data-testid="cp-stripe-mode">
@@ -127,6 +129,7 @@ export default function AdminClientPayments() {
             Open Stripe <ExternalLink size={13} />
           </a>
         </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
@@ -192,11 +195,13 @@ export default function AdminClientPayments() {
           <option value="monthly">Monthly</option>
           <option value="annual">Annual</option>
         </select>
+        {isPlatform && (
         <select value={ent} onChange={(e) => setEnt(e.target.value)} className="text-sm rounded-md border border-slate-200 bg-white px-2.5 py-2" data-testid="cp-filter-enterprise">
           <option value="all">All enterprises</option>
           <option value="direct">SmartBooks direct</option>
           {enterprises.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        )}
         <span className="text-xs text-slate-500 ml-auto tabular-nums" data-testid="cp-count">{visible.length} of {rows.length}</span>
       </div>
 
@@ -205,7 +210,7 @@ export default function AdminClientPayments() {
           <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wide">
             <tr>
               <th className="text-left px-4 py-2.5 font-medium">Client</th>
-              <th className="text-left px-4 py-2.5 font-medium">Enterprise</th>
+              {isPlatform && <th className="text-left px-4 py-2.5 font-medium">Enterprise</th>}
               <th className="text-left px-4 py-2.5 font-medium">Plan</th>
               <th className="text-left px-4 py-2.5 font-medium">Status</th>
               <th className="text-left px-4 py-2.5 font-medium">Next charge</th>
@@ -213,15 +218,17 @@ export default function AdminClientPayments() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400"><Loader2 size={18} className="animate-spin inline" /></td></tr>}
-            {!loading && !visible.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">No clients match these filters.</td></tr>}
+            {loading && <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-10 text-center text-slate-400"><Loader2 size={18} className="animate-spin inline" /></td></tr>}
+            {!loading && !visible.length && <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-10 text-center text-slate-400">No clients match these filters.</td></tr>}
             {visible.map((r) => (
               <tr key={r.company_id} onClick={() => openClient(r.company_id)} className="hover:bg-slate-50 cursor-pointer transition" data-testid={`cp-row-${r.company_id}`}>
                 <td className="px-4 py-2.5">
                   <div className="font-medium text-slate-900">{r.company_name}</div>
                   <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{r.owner_name || "—"}{r.owner_email ? ` · ${r.owner_email}` : ""}</div>
                 </td>
+                {isPlatform && (
                 <td className="px-4 py-2.5 text-slate-600">{r.enterprise_name || <span className="text-slate-400">SmartBooks direct</span>}</td>
+                )}
                 <td className="px-4 py-2.5">
                   <div className="text-slate-800">{r.product_label || <span className="text-slate-400">—</span>}</div>
                   <div className="text-[11px] text-slate-400">{r.amount_cents != null ? `${r.cadence === "annual" ? "Annual" : "Monthly"} · ${money(r.amount_cents)}${r.cadence === "annual" ? "/yr" : "/mo"}` : (r.cadence === "annual" ? "Annual" : "Monthly")}</div>
@@ -242,20 +249,101 @@ export default function AdminClientPayments() {
         </table>
       </div>
 
-      {selected && <ClientDrawer cid={selected} onClose={closeClient} />}
+      {selected && <ClientDrawer cid={selected} onClose={closeClient} showStripe={isPlatform} onChanged={() => load(true)} />}
     </div>
   );
 }
 
-function ClientDrawer({ cid, onClose }) {
+function BillingActions({ client: c, onChanged }) {
+  const [busy, setBusy] = useState(null); // "cancel" | "plan" | "portal"
+  const [showPlan, setShowPlan] = useState(false);
+  const [product, setProduct] = useState(c.product || "simple_start");
+  const [cadence, setCadence] = useState(c.cadence || "monthly");
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const ended = c.status === "canceled";
+
+  const run = async (key, fn, okMsg) => {
+    setBusy(key);
+    try { const r = await fn(); toast.success(typeof okMsg === "function" ? okMsg(r.data) : okMsg); await onChanged?.(); return r; }
+    catch (e) { toast.error(e.response?.data?.detail || "Stripe request failed"); }
+    finally { setBusy(null); }
+  };
+  const toggleCancel = () => run("cancel",
+    () => api.post(`/admin/client-payments/${c.company_id}/cancel`, { cancel: !c.cancel_at_period_end }),
+    (d) => d.cancel_at_period_end ? `Cancels ${fmtDate(d.current_period_end)} — access continues until then.` : "Cancellation reversed — subscription will renew.")
+    .then(() => setConfirmCancel(false));
+  const changePlan = () => run("plan",
+    () => api.post(`/admin/client-payments/${c.company_id}/change-plan`, { product, cadence }),
+    (d) => `Plan changed to ${PLAN_OPTIONS.find((p) => p.value === d.product)?.label} · ${d.cadence} (${money(d.amount_cents)}). Proration applied.`)
+    .then(() => setShowPlan(false));
+  const portal = () => run("portal",
+    () => api.post(`/admin/client-payments/${c.company_id}/portal`, { return_url: window.location.origin + "/billing" }).then((r) => { window.open(r.data.url, "_blank", "noopener"); return r; }),
+    "Customer portal opened in a new tab.");
+  const same = product === c.product && cadence === c.cadence;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-slate-100" data-testid="cp-actions">
+      <div className="flex flex-wrap gap-2">
+        {!ended && (
+          <button onClick={() => (c.cancel_at_period_end ? toggleCancel() : setConfirmCancel(true))} disabled={busy} className={`text-xs px-2.5 py-1.5 rounded-md border disabled:opacity-60 ${c.cancel_at_period_end ? "border-emerald-200 text-emerald-700 hover:bg-emerald-50" : "border-rose-200 text-rose-700 hover:bg-rose-50"}`} data-testid="cp-action-cancel">
+            {busy === "cancel" ? <Loader2 size={12} className="animate-spin inline" /> : c.cancel_at_period_end ? "Undo cancellation" : "Cancel at period end"}
+          </button>
+        )}
+        {!ended && (
+          <button onClick={() => setShowPlan((v) => !v)} disabled={busy} className="text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50 disabled:opacity-60" data-testid="cp-action-change-plan">Change plan</button>
+        )}
+        <button onClick={portal} disabled={busy} className="text-xs px-2.5 py-1.5 rounded-md border border-indigo-200 text-indigo-700 hover:bg-indigo-50 inline-flex items-center gap-1 disabled:opacity-60" data-testid="cp-action-portal">
+          {busy === "portal" ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />} Customer portal
+        </button>
+      </div>
+      {confirmCancel && (
+        <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800" data-testid="cp-cancel-confirm">
+          Cancel <b>{c.company_name}</b>'s {c.product_label} plan at the end of the current period ({fmtDate(c.current_period_end || c.trial_end)})? They keep access until then and are not charged again.
+          <div className="mt-2 flex gap-2">
+            <button onClick={toggleCancel} disabled={busy} className="px-2.5 py-1 rounded bg-rose-600 text-white" data-testid="cp-cancel-confirm-yes">Yes, cancel at period end</button>
+            <button onClick={() => setConfirmCancel(false)} className="px-2.5 py-1 rounded border border-rose-200 bg-white">Keep plan</button>
+          </div>
+        </div>
+      )}
+      {showPlan && (
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3" data-testid="cp-plan-form">
+          <div className="flex flex-wrap gap-2 items-center">
+            <select value={product} onChange={(e) => setProduct(e.target.value)} className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1.5" data-testid="cp-plan-product">
+              {PLAN_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label} · {money(p.monthly)}/mo</option>)}
+            </select>
+            <select value={cadence} onChange={(e) => setCadence(e.target.value)} className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1.5" data-testid="cp-plan-cadence">
+              <option value="monthly">Monthly</option>
+              <option value="annual">Annual (2 months free)</option>
+            </select>
+            <button onClick={changePlan} disabled={busy || same} className="text-xs px-2.5 py-1.5 rounded-md bg-slate-900 text-white disabled:opacity-50" data-testid="cp-plan-apply">
+              {busy === "plan" ? <Loader2 size={12} className="animate-spin inline" /> : "Apply change"}
+            </button>
+          </div>
+          <div className="text-[11px] text-slate-500 mt-2">Stripe prorates the difference on the next invoice{c.status === "trialing" ? "; the trial keeps its end date" : ""}.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PLAN_OPTIONS = [
+  { value: "simple_start", label: "Core", monthly: 3800 },
+  { value: "assistant", label: "AI Assistant", monthly: 7900 },
+  { value: "bookkeeper", label: "AI Bookkeeper", monthly: 9900 },
+  { value: "advanced", label: "Advanced", monthly: 14900 },
+];
+
+function ClientDrawer({ cid, onClose, showStripe = true, onChanged }) {
   const [d, setD] = useState(null);
+  const load = () => api.get(`/admin/client-payments/${cid}`).then((r) => setD(r.data)).catch(() => { toast.error("Couldn't load client"); onClose(); });
   useEffect(() => {
     setD(null);
-    api.get(`/admin/client-payments/${cid}`).then((r) => setD(r.data)).catch(() => { toast.error("Couldn't load client"); onClose(); });
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cid]);
   const c = d?.client;
   const stripeCustomerUrl = c?.stripe_customer_id ? `https://dashboard.stripe.com/customers/${c.stripe_customer_id}` : null;
+  const refresh = async () => { await load(); onChanged?.(); };
   return (
     <div className="fixed inset-0 z-[900] flex justify-end" data-testid="cp-drawer">
       <div className="absolute inset-0 bg-slate-900/30 backdrop-blur-[2px]" onClick={onClose} />
@@ -264,10 +352,10 @@ function ClientDrawer({ cid, onClose }) {
           <div className="min-w-0">
             <div className="font-heading text-xl font-bold text-slate-900 truncate" data-testid="cp-drawer-name">{c?.company_name || "…"}</div>
             {c && <div className="text-xs text-slate-500 mt-0.5">{c.owner_name || "—"} · {c.owner_email || "—"}</div>}
-            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {c.enterprise_name || "SmartBooks direct"} · Payer: {c.payer?.replace("_", " ") || "—"}</div>}
+            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {showStripe ? `${c.enterprise_name || "SmartBooks direct"} · ` : ""}Payer: {c.payer?.replace("_", " ") || "—"}</div>}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            {stripeCustomerUrl && <a href={stripeCustomerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50" data-testid="cp-drawer-stripe">Stripe <ExternalLink size={11} /></a>}
+            {showStripe && stripeCustomerUrl && <a href={stripeCustomerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50" data-testid="cp-drawer-stripe">Stripe <ExternalLink size={11} /></a>}
             <button onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" data-testid="cp-drawer-close"><X size={16} /></button>
           </div>
         </div>
@@ -294,6 +382,7 @@ function ClientDrawer({ cid, onClose }) {
                   </div>
                 )}
               </dl>
+              {c.stripe_subscription_id && <BillingActions client={c} onChanged={refresh} />}
             </section>
 
             <section data-testid="cp-drawer-payments">

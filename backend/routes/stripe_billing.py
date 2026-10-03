@@ -954,6 +954,8 @@ def _sub_snapshot(sub: dict) -> dict:
     elif recurring.get("interval") == "year":
         out["billing_cadence"] = "annual"
     pm = sub.get("default_payment_method")
+    if not pm and isinstance(sub.get("customer"), dict):
+        pm = ((sub["customer"].get("invoice_settings") or {}).get("default_payment_method"))
     if isinstance(pm, dict):
         card = pm.get("card") or {}
         out["sub_card_brand"], out["sub_card_last4"] = card.get("brand"), card.get("last4")
@@ -967,7 +969,7 @@ def _sub_snapshot(sub: dict) -> dict:
 
 
 def _fetch_sub_snapshot(sub_id: str) -> dict:
-    sub = stripe.Subscription.retrieve(sub_id, expand=["default_payment_method"])
+    sub = stripe.Subscription.retrieve(sub_id, expand=["default_payment_method", "customer.invoice_settings.default_payment_method"])
     return _sub_snapshot(sub.to_dict_recursive() if hasattr(sub, "to_dict_recursive") else dict(sub))
 
 
