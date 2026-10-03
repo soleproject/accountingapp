@@ -961,9 +961,19 @@ async def responsibilities_status(
                 green_c = sum(1 for k in ("txns_reviewed", "invoices", "bills", "recon", "closed") if (cps.get(k) or {}).get("green"))
                 closed_sign = (cps.get("closed") or {}).get("green")
                 prev_label = datetime(py, pm, 1).strftime("%B %Y")
+                # No bank/ledger activity in that month → nothing to close;
+                # keep the card off the To Do list.
+                prev_start = f"{py:04d}-{pm:02d}-01"
+                prev_end = f"{py + (pm // 12):04d}-{(pm % 12) + 1:02d}-01"
+                month_txns = await db.transactions.count_documents(
+                    {"company_id": cid, "date": {"$gte": prev_start, "$lt": prev_end}})
                 if closed_sign:
                     status = "done"
                     detail = f"{prev_label} closed"
+                elif month_txns == 0:
+                    status = "done"
+                    detail = f"{prev_label}: no activity to close"
+                    green_c = total_c
                 elif green_c == 0:
                     status = "not_started"
                     detail = f"{prev_label} not started"
