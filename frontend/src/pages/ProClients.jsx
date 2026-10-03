@@ -41,9 +41,13 @@ export default function ProClients() {
   // the previous superadmin token so `<ImpersonateBanner>` can flip
   // back with one click.
   const openAsOwner = async (ent) => {
-    if (!ent?.owner_user_id) return;
+    if (!ent?.id) return;
     try {
-      const r = await api.post(`/admin/impersonate/${ent.owner_user_id}`);
+      // Ownerless enterprises (SmartBooks default) get a service owner
+      // provisioned server-side; everything else impersonates directly.
+      const r = ent.owner_user_id
+        ? await api.post(`/admin/impersonate/${ent.owner_user_id}`)
+        : await api.post(`/admin/enterprises/${ent.id}/open`);
       const newTok = r.data?.token;
       const newUsr = r.data?.user;
       if (!newTok || !newUsr) throw new Error("Bad impersonate response");
@@ -828,9 +832,9 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner, layout = "grid" 
                   <span className="text-slate-400 ml-1">({e.free_remaining} left)</span>
                 </td>
                 <td className="px-4 py-2 text-right whitespace-nowrap">
-                  {e.owner_user_id && (
+                  {onOpenAsOwner && (
                     <button
-                      onClick={() => onOpenAsOwner && onOpenAsOwner(e)}
+                      onClick={() => onOpenAsOwner(e)}
                       data-testid={`enterprise-open-as-owner-row-${e.id}`}
                       className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium mr-1"
                     >
@@ -924,7 +928,7 @@ function EnterprisesGrid({ enterprises, loading, onOpenAsOwner, layout = "grid" 
               <div className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 group-hover:text-indigo-900">
                 Open enterprise <ArrowRight size={12} className="transition-transform group-hover:translate-x-0.5" />
               </div>
-              {e.owner_user_id && (
+              {onOpenAsOwner && (
                 <button
                   data-testid={`enterprise-open-as-owner-${e.id}`}
                   onClick={(evt) => {

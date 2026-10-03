@@ -2208,6 +2208,38 @@ async def impersonate_user(
     }
 
 
+@router.post("/admin/enterprises/{eid}/open")
+async def open_enterprise_as_owner(eid: str, user: dict = Depends(require_role("superadmin"))):
+    """"Open" for an enterprise that has no owner (the SmartBooks default).
+    Provisions a login-less `pro` service account that owns the
+    enterprise on first use, then returns an impersonation token for it
+    — identical shape to /admin/impersonate so the frontend reuses the
+    same flow. Enterprises that already have an owner just impersonate."""
+    ent = await db.enterprises.find_one({"id": eid})
+    if not ent:
+        raise HTTPException(404, "Enterprise not found")
+    owner = await db.users.find_one({"id": ent.get("owner_user_id")}) if ent.get("owner_user_id") else None
+    if not owner or owner.get("role") == "superadmin":
+        slug = (ent.get("slug") or eid)[:40]
+        email = f"team+{slug}@smartbookssoftware.ai"
+        owner = await db.users.find_one({"email": email})
+        if not owner:
+            import secrets as _secrets
+            owner = {
+                "id": str(uuid.uuid4()), "email": email,
+                "name": f"{ent.get('name') or 'Enterprise'} Team",
+                "role": "pro", "enterprise_id": eid,
+                # Unguessable random secret → no one can sign in as it.
+                "password": hash_password(_secrets.token_urlsafe(32)),
+                "login_disabled": True, "is_service_account": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await db.users.insert_one(owner)
+        await db.enterprises.update_one({"id": eid}, {"$set": {"owner_user_id": owner["id"]}})
+    return await impersonate_user(owner["id"], user)
+
+
+
 class SuperadminGrantIn(BaseModel):
     email: EmailStr
     # Optional display name — only used when creating a brand-new user
