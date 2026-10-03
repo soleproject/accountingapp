@@ -1,0 +1,38 @@
+{
+  "summary": "Full backend + frontend validation of Superadmin → Client Payments feature. All 11 backend pytests passed and every frontend assertion from the review request was verified against the live preview app.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "backend_verification": {
+    "GET /api/admin/client-payments": "200 for superadmin, 401 unauthenticated, 403 for pro@axiom.ai. Shape includes metrics, attention, rows, stripe_mode. QA Trial Bakery LLC → status=trialing, cadence=annual, amount_cents=99000, next_charge_at==trial_end, enterprise_name=CypherPro. QA Late Plumbing Inc → status=past_due, last_failure present, ltv_cents=15800. QA Steady Dental PC → status=active, ltv_cents=19000. metrics.mrr_cents=11700, metrics.past_due=1, metrics.past_due_cents=7900, metrics.trialing=1. attention[0]=QA Late Plumbing Inc.",
+    "GET /api/admin/client-payments/{id}": "QA Steady Dental PC detail returns 5 payments newest first with product_label 'Core'. Timeline includes 'Company created' and 'Paid $38.00' entries. 404 returned for unknown id.",
+    "POST /api/admin/client-payments/backfill": "200 OK, response has synced/failed/total keys. All seeded sub_qa_* ids reported in `failed` list (expected), no 500."
+  },
+  "frontend_verification": {
+    "sidebar": "Sidebar renders 'Client Payments' link under Superadmin section and navigates to /admin/client-payments.",
+    "metrics_tiles": "cp-metric-mrr shows '$117', cp-metric-past-due shows '1 / $79 outstanding'.",
+    "attention_strip": "cp-attention shows '1 client needs attention' with QA Late Plumbing Inc first.",
+    "filters": "Status=trialing → 1 row ('1 of 7'). Plan=assistant → QA Late Plumbing Inc. Search='dental' → QA Steady Dental PC. Enterprise=CypherPro → QA Trial Bakery LLC.",
+    "drawer_trial_bakery": "cp-drawer opens, cp-drawer-name='QA Trial Bakery LLC', cp-drawer-plan shows 'AI Bookkeeper · annual · $990/yr', card 'Visa •••• 4242', next charge Oct 8 2026 · $990. URL param ?client= set and removed on close via cp-drawer-close.",
+    "drawer_dental": "cp-drawer-payments has 5 rows each with Receipt link (Core · monthly · $38). cp-drawer-timeline renders Company created + 5 Paid $38.00 entries.",
+    "sync_and_stripe_link": "cp-sync-btn POSTs backfill (returns 200, failures expected for fake subs, no crash). cp-open-stripe href = https://dashboard.stripe.com/subscriptions.",
+    "regression": "/pro/clients still loads with Clients/Enterprises/Partners tabs (Enterprise view accessible)."
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_admin_client_payments.py",
+    "/app/test_reports/pytest/cp_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "admin_client_payments.py is clean (218 lines), uses async DB, no _id leakage, proper 404/503 error codes, role-guarded via require_role('superadmin').",
+    "Minor: /api/admin/client-payments/backfill iterates subscriptions sequentially via asyncio.to_thread - acceptable for current scale but could be parallelized with asyncio.gather if subscription count grows large.",
+    "Minor: _amount_cents hard-codes a 3000 override for simple_start with billing_discount - consider pulling this from PLAN_MONTHLY_CENTS to centralize pricing."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Superadmin admin@axiom.ai / admin123, Pro pro@axiom.ai / pro123 (both verified working).",
+  "seed_data_creation": "None. Used existing QA companies: QA Trial Bakery LLC, QA Late Plumbing Inc, QA Steady Dental PC.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "test_admin_client_payments.py in /app/backend/tests covers list/detail/backfill endpoints and metric assertions - reuse as regression. Frontend data-testids all follow cp-* convention and are stable.",
+  "rca of the issue": "No issues found; feature functions as specified."
+}
