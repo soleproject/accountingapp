@@ -623,6 +623,81 @@ def stripe_welcome(
 
 
 # --------------------------------------------------------------------------
+# Self-serve checkout welcome — fired from checkout.session.completed when
+# a company (not a legacy private-label user) finishes paying. Shows the
+# firm's logo, a plan summary card, and a deep link to Transactions.
+# --------------------------------------------------------------------------
+def checkout_welcome(
+    *,
+    name: str,
+    company_name: str,
+    firm_name: str,
+    logo_url: Optional[str],
+    plan_label: str,
+    cadence: str,
+    amount_cents: Optional[int],
+    trial_end: Optional[str],
+    next_charge: Optional[str],
+    card: Optional[str],
+    transactions_url: str,
+    is_private_label: bool,
+) -> tuple[str, str]:
+    def _d(iso: Optional[str]) -> str:
+        if not iso:
+            return "—"
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(iso.replace("Z", "+00:00")).strftime("%b %-d, %Y")
+        except Exception:  # noqa: BLE001
+            return iso[:10]
+    price = (f"${amount_cents / 100:,.0f}" if amount_cents is not None else "—") + ("/yr" if cadence == "annual" else "/mo")
+    trial = bool(trial_end)
+    header = (
+        f'<img src="{escape(logo_url)}" alt="{escape(firm_name)}" style="max-height:44px;max-width:220px;display:block;margin-bottom:18px;">'
+        if logo_url else
+        f'<div style="font-size:15px;font-weight:700;color:#0f172a;letter-spacing:.2px;margin-bottom:18px;">{escape(firm_name)}</div>'
+    )
+    rows = [
+        ("Business", company_name),
+        ("Plan", f"{plan_label} · {'Annual' if cadence == 'annual' else 'Monthly'}"),
+        ("Price", price),
+    ]
+    if trial:
+        rows.append(("Free trial ends", f"{_d(trial_end)} — first charge of {price.split('/')[0]} that day"))
+    elif next_charge:
+        rows.append(("Next charge", _d(next_charge)))
+    if card:
+        rows.append(("Card on file", card))
+    table = "".join(
+        f'<tr><td style="padding:7px 0;font-size:12px;color:#64748b;width:140px;">{escape(k)}</td>'
+        f'<td style="padding:7px 0;font-size:13px;color:#0f172a;font-weight:600;">{escape(v)}</td></tr>'
+        for k, v in rows
+    )
+    inner = f"""
+      {header}
+      <div style="{_H1}">{"Your free trial has started" if trial else "You're all set"} — welcome aboard</div>
+      <div style="{_P}">
+        Hi {escape(name)},<br><br>
+        Thanks for choosing {escape(firm_name)}. <b>{escape(company_name)}</b> is set up and your books are ready.
+        Everything starts on the <b>Transactions</b> page — connect a bank or drop in a statement and we'll categorize as it lands.
+      </div>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0"
+             style="width:100%;margin:8px 0 4px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px 16px;">
+        {table}
+      </table>
+      <div style="padding:16px 0 6px;">
+        <a href="{transactions_url}" style="{_BTN}">Open my Transactions →</a>
+      </div>
+      <div style="{_MUTE}">
+        {"You won't be charged until your trial ends, and you can cancel any time before then. " if trial else ""}
+        Need to change your plan or card? Reply to this email and we'll take care of it.
+      </div>
+    """
+    subject = f"Welcome to {firm_name} — {'your free trial has started' if trial else 'your plan is active'}"
+    return subject, _wrap(inner, brand_name=firm_name if is_private_label else None)
+
+
+# --------------------------------------------------------------------------
 # Affiliate welcome — fired right after an ``/api/auth/signup`` where the
 # role is ``affiliate``. The goal is *day-0 activation*: give the new
 # affiliate everything they need (unique link, QR code, payout tier
