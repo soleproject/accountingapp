@@ -6,6 +6,8 @@ import { Plus, Trash2, X, Paperclip, Loader2, FileText, Pencil, Sparkles, Camera
 import { toast } from "sonner";
 import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 import useVoiceRecorder from "@/hooks/useVoiceRecorder";
+import ReceiptMatchPicker from "@/components/ReceiptMatchPicker";
+import { Link2 } from "lucide-react";
 
 export default function Receipts() {
 
@@ -18,6 +20,14 @@ export default function Receipts() {
   const [contacts, setContacts] = useState([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null); // receipt object being edited
+  const [matching, setMatching] = useState(null); // receipt id being manually matched
+  const confirmSuggested = async (r, sm) => {
+    try {
+      await api.post(`/companies/${currentId}/receipts/${r.id}/match`, { transaction_id: sm.transaction_id });
+      toast.success("Receipt attached to the transaction.");
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't attach the receipt."); }
+  };
   const load = async () => {
     if (!currentId) return;
     const [r, a, c] = await Promise.all([
@@ -52,6 +62,7 @@ export default function Receipts() {
               <th className="px-3 py-2 text-left">Paid from</th>
               <th className="px-3 py-2 text-left">Notes</th>
               <th className="px-3 py-2 text-center">Receipt</th>
+              <th className="px-3 py-2 text-left">Bank match</th>
               <th className="px-3 py-2 text-right">Amount</th>
               <th></th>
             </tr>
@@ -87,6 +98,25 @@ export default function Receipts() {
                       </a>
                     ) : <span className="text-slate-300 text-xs">—</span>}
                   </td>
+                  <td className="px-3 py-2 text-xs" data-testid={`receipt-match-cell-${r.id}`}>
+                    {r.matched_transaction_id ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 text-[11px]"><Link2 size={11} /> Matched</span>
+                    ) : r.suggested_matches?.length ? (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-amber-700 truncate max-w-[200px]" title={r.suggested_matches[0].description}>
+                          Suggested: {fmtDate(r.suggested_matches[0].date)} · {r.suggested_matches[0].description || "transaction"} ({r.suggested_matches[0].score}%)
+                        </span>
+                        <div className="flex gap-1">
+                          <button onClick={() => confirmSuggested(r, r.suggested_matches[0])} className="text-[11px] px-2 py-0.5 rounded bg-emerald-600 text-white" data-testid={`receipt-match-confirm-${r.id}`}>Confirm</button>
+                          <button onClick={() => setMatching(r.id)} className="text-[11px] px-2 py-0.5 rounded border border-slate-200" data-testid={`receipt-match-other-${r.id}`}>Other…</button>
+                        </div>
+                      </div>
+                    ) : r.paid_personally ? (
+                      <span className="text-slate-400 text-[11px]">Personal — n/a</span>
+                    ) : (
+                      <button onClick={() => setMatching(r.id)} className="text-[11px] text-indigo-600 hover:underline inline-flex items-center gap-1" data-testid={`receipt-match-attach-${r.id}`}><Link2 size={11} /> Attach to transaction…</button>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right font-mono-num">{fmtMoney(r.amount)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <button
@@ -108,6 +138,7 @@ export default function Receipts() {
       </div>
       {creating && <RecModal currentId={currentId} accts={accts} contacts={contacts} onClose={() => { setCreating(false); load(); }} />}
       {editing && <RecModal currentId={currentId} accts={accts} contacts={contacts} initial={editing} onClose={() => { setEditing(null); load(); }} />}
+      {matching && <ReceiptMatchPicker companyId={currentId} mode="receipt" id={matching} onClose={() => setMatching(null)} onDone={load} />}
     </div>
   );
 }

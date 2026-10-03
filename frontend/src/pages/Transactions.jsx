@@ -17,7 +17,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2,
 } from "lucide-react";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
@@ -42,6 +42,7 @@ import { useLetsReviewNav } from "@/pages/LetsReview";
 import { useNoContactReviewNav, NoContactReviewListToggle, ListModeView } from "@/pages/NoContactReview";
 import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
+import ReceiptMatchPicker from "@/components/ReceiptMatchPicker";
 import { useAuth } from "@/lib/auth";
 
 const UNCAT_CODES = new Set(["9999", "6999", "4999"]);
@@ -4500,6 +4501,8 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   );
   const [attaching, setAttaching] = useState(false);
   const attachInputRef = useRef(null);
+  const [receiptPickerOpen, setReceiptPickerOpen] = useState(false);
+  const [linkedReceiptId, setLinkedReceiptId] = useState(initialTxn?.matched_receipt_id || null);
   const onPickAttachment = (file) => {
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) {
@@ -4975,6 +4978,30 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
                     ? <><Loader2 size={11} className="animate-spin" /> Uploading…</>
                     : <><Paperclip size={11} /> Add receipt</>}
                 </button>
+                {!linkedReceiptId ? (
+                  <button
+                    type="button"
+                    onClick={() => setReceiptPickerOpen(true)}
+                    className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                    data-testid="txn-attach-existing-receipt"
+                    title="Link a receipt you already uploaded on the Receipts page"
+                  >
+                    <Link2 size={11} /> Attach existing receipt
+                  </button>
+                ) : (
+                  <span className="text-[11px] inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700" data-testid="txn-receipt-linked">
+                    <Link2 size={11} /> Receipt linked
+                  </span>
+                )}
+                {receiptPickerOpen && (
+                  <ReceiptMatchPicker
+                    companyId={currentId}
+                    mode="transaction"
+                    id={initialTxn.id}
+                    onClose={() => setReceiptPickerOpen(false)}
+                    onDone={(r) => setLinkedReceiptId(r.receipt_id)}
+                  />
+                )}
               </>
             )}
           </div>

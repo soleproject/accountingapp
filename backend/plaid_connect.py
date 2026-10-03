@@ -619,6 +619,7 @@ async def categorize_and_insert_plaid_txns(
                 match = await find_pending_receipt_match(
                     cid, txn.get("bank_account_id"),
                     txn.get("date"), txn.get("amount"),
+                    txn.get("description") or txn.get("merchant_name"),
                 )
                 if match:
                     await link_receipt_to_transaction(cid, match, txn)

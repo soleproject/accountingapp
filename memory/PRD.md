@@ -813,3 +813,10 @@ need to type into the chat box to invoke the matching help flow.
 - `/companies/{cid}/billing/state` adds `trialing, trial_end, trial_gate (client-side + trialing), plan_amount_cents, plan_cadence, plan_label, card`.
 - NEW `POST /companies/{cid}/billing/end-trial` (owner/editor or superadmin): `Subscription.modify(trial_end="now", proration_behavior="none", payment_behavior="error_if_incomplete")` → 402 on card decline; re-snapshots sub, sets billing_state, `trial_ended_early_at`.
 - `TrialReportsGate.jsx` wraps `/reports` route (App.js): blurs page, modal with plan/price/card, "Pay now & unlock Reports" (trial-gate-pay-now), "I'll wait until {date}" (navigate back), "Back to Transactions". Pros/superadmins/sponsored unaffected.
+
+## 2026-10-03 — Fuzzy receipt ↔ transaction matching ✅ verified (API + UI)
+- `receipt_match.py`: new scored engine `score_pair()` (amount exact +50 / ≤1% +40 / tip ≤+30% +25; date same +30 / 1d +25 / 2-3d +15 / 4-5d +8; same account +15 (different −10); merchant token similarity +20/+10/−5). `rank_transactions_for_receipt()` / `rank_receipts_for_transaction()` return candidates with `score`, `confidence` (high ≥85, medium ≥55), `reasons`. `find_matching_transaction()` / `find_pending_receipt_match()` now auto-link only on a clear high-confidence winner (≥10 pts ahead). Window ±5 days.
+- `POST /companies/{cid}/receipts` auto-links high; otherwise stamps `receipts.suggested_matches[]` (top 3). Also runs when no payment account is given. Plaid ingest passes description to the matcher.
+- NEW endpoints: `GET /receipts/{rid}/match-candidates`, `POST /receipts/{rid}/match {transaction_id}` (manual/confirm; 400 if either side already matched), `GET /transactions/{tid}/receipt-candidates`.
+- UI: Receipts table "Bank match" column (Matched / Suggested + Confirm / Other… / Attach to transaction…; personal receipts n/a). `ReceiptMatchPicker.jsx` modal (both directions). Transaction editor: "Attach existing receipt" button next to "Add receipt" → picker; shows "Receipt linked" chip.
+- Backlog (step 4): Quick Check-in "Missing receipt" → photograph + OCR + link to that transaction.

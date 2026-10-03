@@ -507,25 +507,86 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     # ledger only counts the purchase once. Personal-account receipts
     # (paid_personally=True) skip this — their CR side is the
     # Due-to-Owner liability, not a real bank transaction.
-    if inp.payment_account_id and not inp.paid_personally:
+    if not inp.paid_personally:
         try:
             from receipt_match import (
-                find_matching_transaction, link_receipt_to_transaction,
+                find_matching_transaction, link_receipt_to_transaction, rank_transactions_for_receipt,
             )
             match = await find_matching_transaction(
-                cid, inp.payment_account_id, inp.date, inp.amount,
+                cid, inp.payment_account_id, inp.date, inp.amount, inp.merchant,
             )
             if match:
                 # Re-read the receipt so we pass the freshest doc
                 # (post_receipt_je may have added `posted_je_id`).
                 fresh = await db.receipts.find_one({"id": rid, "company_id": cid})
                 await link_receipt_to_transaction(cid, fresh or doc, match)
+            else:
+                ranked = await rank_transactions_for_receipt(
+                    cid, account_id=inp.payment_account_id, date=inp.date, amount=inp.amount, merchant=inp.merchant, limit=3)
+                if ranked:
+                    await db.receipts.update_one({"id": rid}, {"$set": {"suggested_matches": [
+                        {"transaction_id": x["txn"]["id"], "score": x["score"], "confidence": x["confidence"],
+                         "reasons": x["reasons"], "date": x["txn"].get("date"), "amount": x["txn"].get("amount"),
+                         "description": x["txn"].get("description")} for x in ranked]}})
         except Exception:  # noqa: BLE001
             import logging
             logging.getLogger(__name__).exception(
                 "receipt→transaction auto-match failed for %s", rid)
 
     return {"id": rid}
+
+
+@router.get("/companies/{cid}/receipts/{rid}/match-candidates")
+async def receipt_match_candidates(cid: str, rid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    r = await db.receipts.find_one({"id": rid, "company_id": cid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Receipt not found")
+    from receipt_match import rank_transactions_for_receipt
+    ranked = await rank_transactions_for_receipt(
+        cid, account_id=r.get("payment_account_id"), date=r.get("date"), amount=r.get("amount"),
+        merchant=r.get("merchant"), limit=8)
+    return {"candidates": [
+        {"transaction_id": x["txn"]["id"], "date": x["txn"].get("date"), "amount": x["txn"].get("amount"),
+         "description": x["txn"].get("description"), "score": x["score"], "confidence": x["confidence"], "reasons": x["reasons"]}
+        for x in ranked]}
+
+
+class ReceiptMatchIn(BaseModel):
+    transaction_id: str
+
+
+@router.post("/companies/{cid}/receipts/{rid}/match")
+async def receipt_match_manual(cid: str, rid: str, inp: ReceiptMatchIn, user: dict = Depends(get_current_user)):
+    """Attach an existing receipt to a chosen transaction (manual or confirmed suggestion)."""
+    await require_company(user, cid)
+    r = await db.receipts.find_one({"id": rid, "company_id": cid})
+    t = await db.transactions.find_one({"id": inp.transaction_id, "company_id": cid})
+    if not r or not t:
+        raise HTTPException(404, "Receipt or transaction not found")
+    if r.get("matched_transaction_id"):
+        raise HTTPException(400, "This receipt is already attached to a transaction.")
+    if t.get("matched_receipt_id"):
+        raise HTTPException(400, "That transaction already has a receipt attached.")
+    from receipt_match import link_receipt_to_transaction
+    await link_receipt_to_transaction(cid, r, t)
+    await db.receipts.update_one({"id": rid}, {"$unset": {"suggested_matches": ""}, "$set": {"matched_by": user["id"], "matched_at": datetime.now(timezone.utc).isoformat()}})
+    return {"ok": True, "receipt_id": rid, "transaction_id": inp.transaction_id}
+
+
+@router.get("/companies/{cid}/transactions/{tid}/receipt-candidates")
+async def transaction_receipt_candidates(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    t = await db.transactions.find_one({"id": tid, "company_id": cid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Transaction not found")
+    from receipt_match import rank_receipts_for_transaction
+    ranked = await rank_receipts_for_transaction(cid, t, limit=8)
+    return {"candidates": [
+        {"receipt_id": x["receipt"]["id"], "date": x["receipt"].get("date"), "amount": x["receipt"].get("amount"),
+         "merchant": x["receipt"].get("merchant"), "has_image": bool(x["receipt"].get("attachment_filename")),
+         "score": x["score"], "confidence": x["confidence"], "reasons": x["reasons"]}
+        for x in ranked]}
 
 
 @router.post("/companies/{cid}/accounts/owner-liability")

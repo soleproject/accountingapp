@@ -111,78 +111,170 @@ async def get_or_create_owner_liability(company_id: str) -> dict:
     return doc
 
 
-async def find_matching_transaction(
-    company_id: str, account_id: str, date: str, amount: float,
-) -> Optional[dict]:
-    """Return a `db.transactions` doc that likely represents the same
-    real-world purchase as the given receipt, or None.
+# Fuzzy matching (Oct 2026) — mirrors how Dext/Hubdoc/QBO pair receipts:
+# ±DATE_WINDOW days, exact-or-tip amount tolerance, merchant-name
+# similarity and same-account bonus, rolled into a 0-100 score.
+_DATE_WINDOW_DAYS = 5
+_TIP_MAX_RATIO = 1.30          # card charge may exceed receipt by up to 30% (tip)
+HIGH_CONFIDENCE = 85           # auto-link
+MEDIUM_CONFIDENCE = 55         # show as "Suggested match"
 
-    Match rule: same company, same account (Plaid or manual — both
-    `bank_account_id` and `plaid_account_id` are checked), same date,
-    absolute amount within $_AMT_TOL. Skip transactions already linked
-    to a different receipt.
-    """
-    if not (account_id and date and amount):
+_STOP = {"the", "inc", "llc", "ltd", "co", "corp", "store", "pos", "purchase", "debit", "card", "payment", "online", "www", "com"}
+
+
+def _tokens(s: Optional[str]) -> set[str]:
+    import re as _re
+    return {t for t in _re.findall(r"[a-z0-9]+", (s or "").lower()) if len(t) > 1 and t not in _STOP and not t.isdigit()}
+
+
+def _name_sim(a: Optional[str], b: Optional[str]) -> Optional[float]:
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
         return None
+    inter = len(ta & tb)
+    if inter == 0:
+        # prefix containment ("starbucks" vs "starbucks #1234 seattle")
+        return 1.0 if any(x.startswith(y) or y.startswith(x) for x in ta for y in tb if min(len(x), len(y)) >= 4) else 0.0
+    return inter / min(len(ta), len(tb))
+
+
+def _days_between(a: str, b: str) -> Optional[int]:
+    try:
+        return abs((datetime.fromisoformat(a[:10]) - datetime.fromisoformat(b[:10])).days)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _date_range(date: str) -> tuple[str, str]:
+    from datetime import timedelta
+    d = datetime.fromisoformat(date[:10])
+    return (d - timedelta(days=_DATE_WINDOW_DAYS)).date().isoformat(), (d + timedelta(days=_DATE_WINDOW_DAYS)).date().isoformat()
+
+
+def score_pair(*, r_amount: float, r_date: str, r_merchant: Optional[str], r_account: Optional[str],
+               t_amount: float, t_date: str, t_desc: Optional[str], t_accounts: set[str]) -> tuple[int, list[str]]:
+    """Score how likely a receipt and a transaction are the same purchase."""
+    ra, ta = abs(float(r_amount or 0)), abs(float(t_amount or 0))
+    if not ra or not ta:
+        return 0, []
+    pts, why = 0, []
+    diff = abs(ra - ta)
+    if diff <= _AMT_TOL:
+        pts += 50; why.append("exact amount")
+    elif diff / ra <= 0.01:
+        pts += 40; why.append("amount within 1%")
+    elif ra < ta <= ra * _TIP_MAX_RATIO:
+        pts += 25; why.append(f"amount +${ta - ra:.2f} (tip?)")
+    else:
+        return 0, []
+    days = _days_between(r_date, t_date)
+    if days is None or days > _DATE_WINDOW_DAYS:
+        return 0, []
+    pts += {0: 30, 1: 25, 2: 15, 3: 15}.get(days, 8)
+    why.append("same day" if days == 0 else f"{days} day{'s' if days != 1 else ''} apart")
+    if r_account:
+        if r_account in t_accounts:
+            pts += 15; why.append("same account")
+        else:
+            pts -= 10
+    sim = _name_sim(r_merchant, t_desc)
+    if sim is not None:
+        if sim >= 0.8:
+            pts += 20; why.append("merchant matches")
+        elif sim >= 0.5:
+            pts += 10; why.append("merchant similar")
+        elif sim == 0.0:
+            pts -= 5
+    return max(0, min(100, pts)), why
+
+
+def _confidence(score: int) -> Optional[str]:
+    if score >= HIGH_CONFIDENCE:
+        return "high"
+    if score >= MEDIUM_CONFIDENCE:
+        return "medium"
+    return None
+
+
+async def rank_transactions_for_receipt(
+    company_id: str, *, account_id: Optional[str], date: str, amount: float,
+    merchant: Optional[str] = None, limit: int = 5,
+) -> list[dict]:
+    """Unmatched transactions within the window, scored and sorted."""
+    if not (date and amount):
+        return []
+    lo, hi = _date_range(date)
     amt = abs(float(amount))
     cursor = db.transactions.find({
         "company_id": company_id,
-        "date": date,
-        "$or": [
-            {"bank_account_id":  account_id},
-            {"plaid_account_id": account_id},
-        ],
-        "matched_receipt_id": {"$in": [None, ""]},
-    })
+        "date": {"$gte": lo, "$lte": hi},
+        "$or": [{"matched_receipt_id": {"$in": [None, ""]}}, {"matched_receipt_id": {"$exists": False}}],
+    }, {"_id": 0})
+    out = []
     async for t in cursor:
-        if abs(abs(float(t.get("amount") or 0)) - amt) <= _AMT_TOL:
-            return t
-    # Second pass — allow the "matched_receipt_id" field to be missing
-    # entirely (older transactions predate the field).
-    cursor = db.transactions.find({
+        ta = abs(float(t.get("amount") or 0))
+        if ta < amt - 0.5 or ta > amt * _TIP_MAX_RATIO + 0.5:
+            continue
+        score, why = score_pair(
+            r_amount=amt, r_date=date, r_merchant=merchant, r_account=account_id,
+            t_amount=ta, t_date=t.get("date") or "", t_desc=t.get("description") or t.get("merchant_name"),
+            t_accounts={t.get("bank_account_id"), t.get("plaid_account_id")} - {None, ""},
+        )
+        conf = _confidence(score)
+        if conf:
+            out.append({"txn": t, "score": score, "confidence": conf, "reasons": why})
+    out.sort(key=lambda x: -x["score"])
+    return out[:limit]
+
+
+async def rank_receipts_for_transaction(company_id: str, txn: dict, *, limit: int = 5) -> list[dict]:
+    """Unmatched receipts that plausibly belong to this transaction."""
+    date, amt = txn.get("date") or "", abs(float(txn.get("amount") or 0))
+    if not (date and amt):
+        return []
+    lo, hi = _date_range(date)
+    cursor = db.receipts.find({
         "company_id": company_id,
-        "date": date,
-        "$or": [
-            {"bank_account_id":  account_id},
-            {"plaid_account_id": account_id},
-        ],
-        "matched_receipt_id": {"$exists": False},
-    })
-    async for t in cursor:
-        if abs(abs(float(t.get("amount") or 0)) - amt) <= _AMT_TOL:
-            return t
+        "date": {"$gte": lo, "$lte": hi},
+        "$or": [{"matched_transaction_id": {"$in": [None, ""]}}, {"matched_transaction_id": {"$exists": False}}],
+    }, {"_id": 0, "attachment_data_url": 0})
+    t_accounts = {txn.get("bank_account_id"), txn.get("plaid_account_id")} - {None, ""}
+    out = []
+    async for r in cursor:
+        score, why = score_pair(
+            r_amount=r.get("amount") or 0, r_date=r.get("date") or "", r_merchant=r.get("merchant"),
+            r_account=r.get("payment_account_id"), t_amount=amt, t_date=date,
+            t_desc=txn.get("description") or txn.get("merchant_name"), t_accounts=t_accounts,
+        )
+        conf = _confidence(score)
+        if conf:
+            out.append({"receipt": r, "score": score, "confidence": conf, "reasons": why})
+    out.sort(key=lambda x: -x["score"])
+    return out[:limit]
+
+
+async def find_matching_transaction(
+    company_id: str, account_id: str, date: str, amount: float, merchant: Optional[str] = None,
+) -> Optional[dict]:
+    """High-confidence transaction for a receipt (auto-link), else None."""
+    ranked = await rank_transactions_for_receipt(
+        company_id, account_id=account_id, date=date, amount=amount, merchant=merchant, limit=2)
+    if ranked and ranked[0]["confidence"] == "high" and (len(ranked) == 1 or ranked[0]["score"] - ranked[1]["score"] >= 10):
+        return ranked[0]["txn"]
     return None
 
 
 async def find_pending_receipt_match(
-    company_id: str, account_id: str, date: str, amount: float,
+    company_id: str, account_id: str, date: str, amount: float, description: Optional[str] = None,
 ) -> Optional[dict]:
-    """Symmetric to `find_matching_transaction` — called from Plaid
-    ingest when a new transaction lands. Returns an unmatched receipt
-    (already saved with its own JE) that should now be linked to this
-    transaction.
-    """
-    if not (account_id and date and amount):
-        return None
-    amt = abs(float(amount))
-    cursor = db.receipts.find({
-        "company_id": company_id,
-        "date": date,
-        "payment_account_id": account_id,
-        "matched_transaction_id": {"$in": [None, ""]},
-    })
-    async for r in cursor:
-        if abs(abs(float(r.get("amount") or 0)) - amt) <= _AMT_TOL:
-            return r
-    cursor = db.receipts.find({
-        "company_id": company_id,
-        "date": date,
-        "payment_account_id": account_id,
-        "matched_transaction_id": {"$exists": False},
-    })
-    async for r in cursor:
-        if abs(abs(float(r.get("amount") or 0)) - amt) <= _AMT_TOL:
-            return r
+    """Symmetric to `find_matching_transaction` — called from Plaid ingest
+    when a new transaction lands. High-confidence unmatched receipt or None."""
+    ranked = await rank_receipts_for_transaction(company_id, {
+        "date": date, "amount": amount, "description": description,
+        "bank_account_id": account_id, "plaid_account_id": account_id,
+    }, limit=2)
+    if ranked and ranked[0]["confidence"] == "high" and (len(ranked) == 1 or ranked[0]["score"] - ranked[1]["score"] >= 10):
+        return await db.receipts.find_one({"id": ranked[0]["receipt"]["id"]})
     return None
 
 
