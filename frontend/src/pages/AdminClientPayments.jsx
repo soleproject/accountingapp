@@ -103,7 +103,8 @@ export default function AdminClientPayments() {
   const closeClient = () => { setSelected(null); setParams((p) => { p.delete("client"); return p; }, { replace: true }); };
 
   const m = data?.metrics || {};
-  const noSnapshot = rows.filter((r) => r.stripe_subscription_id && !r.has_snapshot).length;
+  const isPlatform = data?.scope !== "enterprise";
+  const noSnapshot = isPlatform ? rows.filter((r) => r.stripe_subscription_id && !r.has_snapshot).length : 0;
 
   return (
     <div className="p-6 lg:p-8 max-w-[1400px]" data-testid="admin-client-payments-page">
@@ -112,8 +113,9 @@ export default function AdminClientPayments() {
           <h1 className="font-heading text-3xl font-bold text-slate-900 flex items-center gap-3">
             <CreditCard size={26} className="text-indigo-600" /> Client Payments
           </h1>
-          <p className="text-sm text-slate-500 mt-1">Every self-serve and pro-billed subscription · who's current, who's behind, what's due next.</p>
+          <p className="text-sm text-slate-500 mt-1">{isPlatform ? "Every self-serve and pro-billed subscription · who's current, who's behind, what's due next." : "Your clients' subscriptions · who's current, who's behind, what's due next."}</p>
         </div>
+        {isPlatform && (
         <div className="ml-auto flex items-center gap-2">
           {data?.stripe_mode && (
             <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-1 rounded ${data.stripe_mode === "live" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`} data-testid="cp-stripe-mode">
@@ -127,6 +129,7 @@ export default function AdminClientPayments() {
             Open Stripe <ExternalLink size={13} />
           </a>
         </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-6">
@@ -192,11 +195,13 @@ export default function AdminClientPayments() {
           <option value="monthly">Monthly</option>
           <option value="annual">Annual</option>
         </select>
+        {isPlatform && (
         <select value={ent} onChange={(e) => setEnt(e.target.value)} className="text-sm rounded-md border border-slate-200 bg-white px-2.5 py-2" data-testid="cp-filter-enterprise">
           <option value="all">All enterprises</option>
           <option value="direct">SmartBooks direct</option>
           {enterprises.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
+        )}
         <span className="text-xs text-slate-500 ml-auto tabular-nums" data-testid="cp-count">{visible.length} of {rows.length}</span>
       </div>
 
@@ -205,7 +210,7 @@ export default function AdminClientPayments() {
           <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wide">
             <tr>
               <th className="text-left px-4 py-2.5 font-medium">Client</th>
-              <th className="text-left px-4 py-2.5 font-medium">Enterprise</th>
+              {isPlatform && <th className="text-left px-4 py-2.5 font-medium">Enterprise</th>}
               <th className="text-left px-4 py-2.5 font-medium">Plan</th>
               <th className="text-left px-4 py-2.5 font-medium">Status</th>
               <th className="text-left px-4 py-2.5 font-medium">Next charge</th>
@@ -213,15 +218,17 @@ export default function AdminClientPayments() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400"><Loader2 size={18} className="animate-spin inline" /></td></tr>}
-            {!loading && !visible.length && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">No clients match these filters.</td></tr>}
+            {loading && <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-10 text-center text-slate-400"><Loader2 size={18} className="animate-spin inline" /></td></tr>}
+            {!loading && !visible.length && <tr><td colSpan={isPlatform ? 6 : 5} className="px-4 py-10 text-center text-slate-400">No clients match these filters.</td></tr>}
             {visible.map((r) => (
               <tr key={r.company_id} onClick={() => openClient(r.company_id)} className="hover:bg-slate-50 cursor-pointer transition" data-testid={`cp-row-${r.company_id}`}>
                 <td className="px-4 py-2.5">
                   <div className="font-medium text-slate-900">{r.company_name}</div>
                   <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{r.owner_name || "—"}{r.owner_email ? ` · ${r.owner_email}` : ""}</div>
                 </td>
+                {isPlatform && (
                 <td className="px-4 py-2.5 text-slate-600">{r.enterprise_name || <span className="text-slate-400">SmartBooks direct</span>}</td>
+                )}
                 <td className="px-4 py-2.5">
                   <div className="text-slate-800">{r.product_label || <span className="text-slate-400">—</span>}</div>
                   <div className="text-[11px] text-slate-400">{r.amount_cents != null ? `${r.cadence === "annual" ? "Annual" : "Monthly"} · ${money(r.amount_cents)}${r.cadence === "annual" ? "/yr" : "/mo"}` : (r.cadence === "annual" ? "Annual" : "Monthly")}</div>
@@ -242,12 +249,12 @@ export default function AdminClientPayments() {
         </table>
       </div>
 
-      {selected && <ClientDrawer cid={selected} onClose={closeClient} />}
+      {selected && <ClientDrawer cid={selected} onClose={closeClient} showStripe={isPlatform} />}
     </div>
   );
 }
 
-function ClientDrawer({ cid, onClose }) {
+function ClientDrawer({ cid, onClose, showStripe = true }) {
   const [d, setD] = useState(null);
   useEffect(() => {
     setD(null);
@@ -264,10 +271,10 @@ function ClientDrawer({ cid, onClose }) {
           <div className="min-w-0">
             <div className="font-heading text-xl font-bold text-slate-900 truncate" data-testid="cp-drawer-name">{c?.company_name || "…"}</div>
             {c && <div className="text-xs text-slate-500 mt-0.5">{c.owner_name || "—"} · {c.owner_email || "—"}</div>}
-            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {c.enterprise_name || "SmartBooks direct"} · Payer: {c.payer?.replace("_", " ") || "—"}</div>}
+            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {showStripe ? `${c.enterprise_name || "SmartBooks direct"} · ` : ""}Payer: {c.payer?.replace("_", " ") || "—"}</div>}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            {stripeCustomerUrl && <a href={stripeCustomerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50" data-testid="cp-drawer-stripe">Stripe <ExternalLink size={11} /></a>}
+            {showStripe && stripeCustomerUrl && <a href={stripeCustomerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50" data-testid="cp-drawer-stripe">Stripe <ExternalLink size={11} /></a>}
             <button onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" data-testid="cp-drawer-close"><X size={16} /></button>
           </div>
         </div>

@@ -1493,6 +1493,9 @@ export default function Sidebar({ collapsed, onToggle }) {
             matchPath: "/cockpit/client",
           }} />
         )}
+        {user?.role === "pro" && (
+          <Item item={{ to: "/pro/client-payments", label: "Client Payments", icon: CreditCard }} />
+        )}
 
         {/* Communications — cross-client transcript archive of every
             batch review conversation. Widely available: firm staff see

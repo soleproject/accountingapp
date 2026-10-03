@@ -133,9 +133,22 @@ async def _load_context(companies: list[dict]) -> tuple[dict, dict, dict]:
     return owners, ents, ltv
 
 
+async def _scope_query(user: dict) -> dict:
+    """Superadmin sees everything; pros see their enterprise's companies + ones they manage."""
+    if user.get("role") == "superadmin":
+        return _BILLABLE_Q
+    ms = await db.memberships.find(
+        {"user_id": user["id"], "role": "pro", "$or": [{"archived_at": {"$exists": False}}, {"archived_at": None}]},
+        {"_id": 0, "company_id": 1}).to_list(5000)
+    ors = [{"id": {"$in": [m["company_id"] for m in ms]}}]
+    if user.get("enterprise_id"):
+        ors.append({"enterprise_id": user["enterprise_id"]})
+    return {"$and": [{"$or": ors}, _BILLABLE_Q]}
+
+
 @router.get("/admin/client-payments")
-async def list_client_payments(user: dict = Depends(require_role("superadmin"))):
-    companies = await db.companies.find(_BILLABLE_Q, {"_id": 0}).to_list(5000)
+async def list_client_payments(user: dict = Depends(require_role("superadmin", "pro"))):
+    companies = await db.companies.find(await _scope_query(user), {"_id": 0}).to_list(5000)
     owners, ents, ltv = await _load_context(companies)
     rows = [_row(c, owners.get(c["id"], {}), ents.get(c.get("enterprise_id") or "", {}), ltv.get(c["id"], 0))
             for c in companies]
@@ -167,13 +180,14 @@ async def list_client_payments(user: dict = Depends(require_role("superadmin")))
         "attention": attention[:20],
         "rows": rows,
         "stripe_mode": "live" if (_STRIPE_KEY or "").startswith("sk_live_") else "test",
+        "scope": "platform" if user.get("role") == "superadmin" else "enterprise",
         "generated_at": now_iso(),
     }
 
 
 @router.get("/admin/client-payments/{cid}")
-async def client_payment_detail(cid: str, user: dict = Depends(require_role("superadmin"))):
-    c = await db.companies.find_one({"id": cid}, {"_id": 0})
+async def client_payment_detail(cid: str, user: dict = Depends(require_role("superadmin", "pro"))):
+    c = await db.companies.find_one({"$and": [{"id": cid}, await _scope_query(user)]} if user.get("role") != "superadmin" else {"id": cid}, {"_id": 0})
     if not c:
         raise HTTPException(404, "Company not found")
     owners, ents, ltv = await _load_context([c])

@@ -278,6 +278,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         { to: "/cockpit",        label: "Today",          icon: Sunrise },
         { to: "/pro/clients",    label: "Clients",        icon: Users   },
         { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
+        { to: "/pro/client-payments", label: "Client Payments", icon: Wallet },
       ];
   // Collapse state per section — persisted to localStorage so it sticks
   // across reloads. Default: all sections open.
