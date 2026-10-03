@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
+import { CompanySwitcher } from "@/components/Layout";
 import { api } from "@/lib/api";
 
 // ─── Plan catalog ──────────────────────────────────────────────────
@@ -203,7 +204,7 @@ export default function PricingPlans() {
   // reaches this page AFTER company creation, so `currentId` should
   // always be set; we still guard against it below and surface a
   // toast if it's missing rather than silently no-op.
-  const { currentId } = useCompany();
+  const { currentId, companies } = useCompany();
 
   // Annual is the recommended default — it's the plan we WANT people
   // on (better retention, cheaper to serve monthly infra). Sits atop
@@ -363,6 +364,12 @@ export default function PricingPlans() {
                 Go
               </button>
             </form>
+          )}
+          {companies?.length > 1 && (
+            <div className="flex items-center gap-3 pl-3 border-l border-slate-200" data-testid="pricing-entity-picker">
+              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold hidden sm:inline">Plan for</span>
+              <CompanySwitcher />
+            </div>
           )}
         </div>
       )}

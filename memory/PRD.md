@@ -794,3 +794,7 @@ need to type into the chat box to invoke the matching help flow.
 - Template `email_templates.checkout_welcome(...)`: firm logo (hosted) or firm name, plan summary card (business, plan·cadence, price, trial end/first charge or next charge, card), "Open my Transactions →" deep link (`public_base_url(slug)` + `?firm=` when PRIVATE_LABEL_HOST_TEMPLATE unset), white-label footer.
 - NEW public `GET /api/branding/logo/{slug}` serves the firm's logo_light data-URL as a real image (email clients block data: URIs). Dispatcher kind `checkout_welcome`.
 - Prod env reminder (Railway backend): set `PUBLIC_APP_URL=https://app.smartbookssoftware.ai` and `PRIVATE_LABEL_HOST_TEMPLATE=https://{slug}.accountingapp.ai` so email links/logo URLs resolve (currently falls back to PUBLIC_BACKEND_URL with a warning).
+
+## 2026-10-03 — Pricing page entity picker + popup copy
+- PricingPlans.jsx: when `companies.length > 1`, a "Plan for" `CompanySwitcher` (imported from Layout.jsx) renders next to the firm logo (`pricing-entity-picker`); checkout + sponsored check already key off `currentId`, so switching changes the plan target.
+- Post-checkout popup copy fixed to the user's exact wording (no rows-dependent variant).
