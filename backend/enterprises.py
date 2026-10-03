@@ -387,13 +387,16 @@ async def rollup_stats(enterprise_id: str) -> dict:
     pro_ids = await db.users.distinct("id", {"role": "pro", "enterprise_id": enterprise_id})
     pros_count = len(pro_ids)
 
-    # Companies where any of our pros has a `pro` membership.
+    # Companies where any of our pros has a `pro` membership, plus any
+    # company stamped directly with this enterprise_id (white-label signups).
     if pro_ids:
         company_ids = await db.memberships.distinct(
             "company_id", {"user_id": {"$in": pro_ids}, "role": "pro"}
         )
     else:
         company_ids = []
+    stamped = await db.companies.distinct("id", {"enterprise_id": enterprise_id})
+    company_ids = list({*company_ids, *stamped})
     companies_count = len(company_ids)
 
     # Distinct client owners across those companies.

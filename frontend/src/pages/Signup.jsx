@@ -165,6 +165,7 @@ export default function Signup() {
         role: enterpriseMode ? "pro" : affiliateMode ? "affiliate" : "client",
         enterprise_name: enterpriseMode ? firmName.trim() : undefined,
         ref: ref || undefined,
+        firm_slug: firmSlug || undefined,
       });
       routingRef.current = true;
       localStorage.setItem("axiom_token", r.data.token);

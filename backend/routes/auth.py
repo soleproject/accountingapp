@@ -208,6 +208,15 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
     enterprise_signup = (inp.role == "pro" and (inp.enterprise_name or "").strip())
     if enterprise_signup:
         doc["branding"] = {"firm_name": inp.enterprise_name.strip()}
+    # Remember which white-label host the user signed up from so later
+    # company creations inherit the firm even without an explicit slug.
+    try:
+        from routes.companies import _firm_slug_from_request
+        _sfs = (inp.firm_slug or "").strip().lower() or _firm_slug_from_request(request)
+    except Exception:  # noqa: BLE001
+        _sfs = None
+    if _sfs:
+        doc["signup_firm_slug"] = _sfs
     await db.users.insert_one(doc)
     token = create_token(uid, inp.role)
 

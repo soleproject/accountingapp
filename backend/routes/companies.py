@@ -97,8 +97,25 @@ async def list_companies(user: dict = Depends(get_current_user)):
     return {"companies": enriched}
 
 
+def _firm_slug_from_request(request: Request | None) -> str | None:
+    # Origin/Referer host acme.accountingapp.ai → "acme"
+    if request is None:
+        return None
+    from urllib.parse import urlparse
+    from subdomain_util import subdomain_from_host
+    for hdr in ("origin", "referer"):
+        val = request.headers.get(hdr)
+        if not val:
+            continue
+        host = urlparse(val).hostname or ""
+        label = subdomain_from_host(host)
+        if label:
+            return label
+    return None
+
+
 @router.post("/companies")
-async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_user)):
+async def create_company(inp: CompanyCreate, request: Request, user: dict = Depends(get_current_user)):
     cid = str(uuid.uuid4())
     now = now_iso()
     # Count how many companies the caller already owns so we can decide
@@ -114,8 +131,13 @@ async def create_company(inp: CompanyCreate, user: dict = Depends(get_current_us
     # a Pro-created client.
     firm_pro: dict | None = None
     firm_fields: dict = {}
-    if inp.firm_slug:
-        slug = inp.firm_slug.strip().lower()
+    slug_in = (
+        (inp.firm_slug or "").strip().lower()
+        or _firm_slug_from_request(request)
+        or (user.get("signup_firm_slug") or "").strip().lower()
+    )
+    if slug_in:
+        slug = slug_in
         firm_pro = await db.users.find_one({"$or": [
             {"branding.signin_subdomain": slug},
             {"branding.subdomain": slug},

@@ -478,6 +478,13 @@ export default function ProClients() {
         <ClientsList
           visible={visible}
           showEnterprise={isSuperadmin}
+          enterprises={enterprises}
+          onEnterpriseChange={(cid, data) => {
+            setClients((prev) => prev.map((c) => c.id === cid
+              ? { ...c, enterprise_id: data.enterprise_id, enterprise_name: data.enterprise_name }
+              : c));
+            loadEnterprises();
+          }}
           onOpen={(cid) => { switchCompany(cid); window.location.href = "/dashboard"; }}
           onResend={resendWelcome}
           resending={resending}
@@ -636,7 +643,44 @@ export default function ProClients() {
 // Preserves the "Awaiting payment" and Ready/Onboarding pills so the
 // two views surface the same signals.
 // --------------------------------------------------------------------------
-function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = false }) {
+function EnterpriseCell({ client, enterprises, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const change = async (e) => {
+    const eid = e.target.value || null;
+    setBusy(true);
+    try {
+      const r = await api.patch(`/admin/companies/${client.id}/enterprise`, { enterprise_id: eid });
+      onChange?.(client.id, r.data);
+      toast.success(eid ? `Moved to ${r.data.enterprise_name}` : "Set to SmartBooks direct");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Couldn't update enterprise");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <Shield size={11} className={client.enterprise_id ? "text-indigo-700 shrink-0" : "text-slate-300 shrink-0"} />
+      <select
+        value={client.enterprise_id || ""}
+        onChange={change}
+        disabled={busy}
+        title="Reassign this company to another enterprise"
+        data-testid={`pro-clients-enterprise-select-${client.id}`}
+        className={`text-[12px] rounded-md border px-1.5 py-0.5 max-w-[200px] truncate bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 ${
+          client.enterprise_id ? "font-medium text-indigo-800 bg-indigo-50 border-indigo-100" : "text-slate-400 border-transparent hover:border-slate-200"
+        }`}
+      >
+        <option value="">SmartBooks direct</option>
+        {enterprises.map((e) => (
+          <option key={e.id} value={e.id}>{e.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = false, enterprises = [], onEnterpriseChange }) {
   if (!visible.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="pro-clients-list">
@@ -674,13 +718,7 @@ function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = fa
                 </td>
                 {showEnterprise && (
                   <td className="px-4 py-2" data-testid={`pro-clients-list-enterprise-${c.id}`}>
-                    {c.enterprise_name ? (
-                      <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-md px-2 py-0.5 max-w-[200px] truncate" title={c.enterprise_name}>
-                        <Shield size={11} className="shrink-0" /> <span className="truncate">{c.enterprise_name}</span>
-                      </span>
-                    ) : (
-                      <span className="text-[12px] text-slate-400">SmartBooks direct</span>
-                    )}
+                    <EnterpriseCell client={c} enterprises={enterprises} onChange={onEnterpriseChange} />
                   </td>
                 )}
                 <td className="px-4 py-2 text-slate-500 truncate max-w-[180px]">{c.business_type || "—"}</td>

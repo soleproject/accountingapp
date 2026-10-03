@@ -22,6 +22,8 @@ class SignupIn(BaseModel):
     # Optional affiliate referral slug — set on the user as
     # `referred_by_user_id` for later revenue-share crediting.
     ref: str | None = None
+    # White-label host slug the signup form resolved (acme.accountingapp.ai → "acme").
+    firm_slug: str | None = None
     # Enterprise (firm) name — only used when ``role='pro'`` on the
     # ``/signup/enterprise`` path. When provided, we auto-provision an
     # Enterprise record owned by the new Pro user right after signup

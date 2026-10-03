@@ -2240,6 +2240,46 @@ async def open_enterprise_as_owner(eid: str, user: dict = Depends(require_role("
     return await impersonate_user(owner["id"], user)
 
 
+class CompanyEnterpriseIn(BaseModel):
+    enterprise_id: Optional[str] = None
+
+
+@router.patch("/admin/companies/{cid}/enterprise")
+async def admin_set_company_enterprise(
+    cid: str, inp: CompanyEnterpriseIn, user: dict = Depends(require_role("superadmin")),
+):
+    """Re-attribute a company to an enterprise (or to SmartBooks direct with
+    null). Moves the enterprise owner's pro membership along with it."""
+    comp = await db.companies.find_one({"id": cid}, {"_id": 0, "id": 1, "enterprise_id": 1})
+    if not comp:
+        raise HTTPException(404, "Company not found")
+    now = datetime.now(timezone.utc).isoformat()
+    old_eid = comp.get("enterprise_id")
+    new_eid = (inp.enterprise_id or "").strip() or None
+    new_ent = None
+    if new_eid:
+        new_ent = await db.enterprises.find_one({"id": new_eid}, {"_id": 0, "id": 1, "name": 1, "owner_user_id": 1})
+        if not new_ent:
+            raise HTTPException(404, "Enterprise not found")
+    if old_eid and old_eid != new_eid:
+        old_ent = await db.enterprises.find_one({"id": old_eid}, {"_id": 0, "owner_user_id": 1})
+        if old_ent and old_ent.get("owner_user_id"):
+            await db.memberships.delete_many({
+                "company_id": cid, "user_id": old_ent["owner_user_id"], "role": "pro",
+            })
+    if new_eid:
+        await db.companies.update_one({"id": cid}, {"$set": {"enterprise_id": new_eid, "updated_at": now}})
+        owner_id = new_ent.get("owner_user_id")
+        if owner_id and not await db.memberships.find_one({"company_id": cid, "user_id": owner_id, "role": "pro"}):
+            await db.memberships.insert_one({
+                "id": str(uuid.uuid4()), "user_id": owner_id, "company_id": cid,
+                "role": "pro", "created_at": now, "via": "admin_reassign",
+            })
+    else:
+        await db.companies.update_one({"id": cid}, {"$unset": {"enterprise_id": ""}, "$set": {"updated_at": now}})
+    return {"ok": True, "company_id": cid, "enterprise_id": new_eid, "enterprise_name": (new_ent or {}).get("name")}
+
+
 
 class SuperadminGrantIn(BaseModel):
     email: EmailStr
