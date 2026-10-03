@@ -108,6 +108,15 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin", "pa
             eid = pro_users.get(m["user_id"])
             if eid and eid in ents and m["company_id"] not in ent_by_cid:
                 ent_by_cid[m["company_id"]] = ents[eid]
+        # Direct stamp on the company wins (Pro-created + white-label signups).
+        direct_eids = {c.get("enterprise_id") for c in companies if c.get("enterprise_id")} - set(ents)
+        if direct_eids:
+            ents.update({e["id"]: e for e in await db.enterprises.find(
+                {"id": {"$in": list(direct_eids)}}, {"_id": 0, "id": 1, "name": 1, "slug": 1}).to_list(500)})
+        for c in companies:
+            eid = c.get("enterprise_id")
+            if eid and eid in ents:
+                ent_by_cid[c["id"]] = ents[eid]
     result = []
     for c in companies:
         # Kept the per-company count queries — they're indexed on
@@ -1036,6 +1045,7 @@ async def branding_by_host(host: str = Query(..., description="Full hostname (e.
             b = _branding_out(owner)
             return {
                 "mode": "firm",
+                "slug": label,
                 "firm_name": owner.get("name") or owner.get("firm_name") or label.title(),
                 "logos": b["logos"],
                 "theme_preset": b["theme_preset"],

@@ -1,0 +1,26 @@
+{
+  "summary": "Verified white-label signup -> enterprise attribution bug fix. Backend: 4/4 pytest cases pass covering (1) signup+create company with firm_slug=cypherpro -> company carries enterprise_id and /api/pro/clients returns enterprise_name='Northgate Advisory' for superadmin, and pro@axiom.ai also sees the new company in its own /pro/clients (confirms the pro-membership was inserted); (2) same flow without firm_slug -> enterprise_name null (shown as 'SmartBooks direct'); (3) firm_slug='nosuchfirm' does NOT 500 — company created with no attribution; (4) regression: Michael Co 2, LLC -> 'Northgate Advisory', Northgate Advisory Ltd -> 'SmartBooks direct'. Frontend (Playwright): /signup?firm=cypherpro renders [data-testid=signup-firm-branding] with text 'Northgate Advisory'; full-form signup posts and lands on /onboarding; relogin as admin@axiom.ai -> /pro/clients -> List view shows the new 'QA UI Signup <ts>' row with Enterprise pill 'Northgate Advisory' at data-testid=pro-clients-list-enterprise-<cid>; seed rows Michael Co 2 LLC (Northgate Advisory) and Northgate Advisory Ltd (SmartBooks direct) unchanged.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_white_label_signup_attribution.py",
+    "/app/test_reports/pytest/wl_signup.xml"
+  ],
+  "action_items": [
+    "Cleanup throwaway data created during this test run (safe to delete)."
+  ],
+  "critical_code_review_comments": [
+    "companies.create_company (routes/companies.py L117-133): firm_slug lookup uses $or across three branding fields — good; however there is no index guaranteed on branding.signin_subdomain/subdomain/subdomain_slug. For a hot signup path consider adding a compound index or at least a single-key index on branding.signin_subdomain (lowercased on write) to avoid collection scans as firm count grows.",
+    "companies.create_company L173: pro membership is only inserted when firm_pro role in (pro, partner, superadmin). This is sensible but there's no idempotency guard — if a company is somehow re-created with the same (firm_pro, cid) pair you'd get a duplicate membership. Minor; current flow is one-shot."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_white_label_signup_attribution.py (new)"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100%"},
+  "test_credentials": "admin@axiom.ai/admin123, pro@axiom.ai/pro123",
+  "seed_data_creation": "Throwaway users/companies created during this run (safe to delete): emails qa+wlyes<ts>@example.com, qa+wlno<ts>@example.com, qa+wlbad<ts>@example.com, qa+ui<ts>@example.com; companies 'QA Firm Signup 1791026101101', 'QA Direct Signup 1791026102919', 'QA Unknown Slug 1791026103887', 'QA UI Signup 1791026143245' (id 5bc10a15-b186-4d12-8bd1-038a4957567b). None of the protected demo companies (Michael Co*, Bright Beans Coffee Co.) were modified.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "White-label signup attribution flow is verified end-to-end. Signup page expects data-testids signup-name/signup-business/signup-email/signup-password/signup-firm-branding. ProClients list rows have per-row enterprise pill at [data-testid^='pro-clients-list-enterprise-']. Login response uses key 'token'. BASE_URL loader in the new test file reads /app/frontend/.env since pytest process doesn't inherit the frontend env.",
+  "rca of the issue": "N/A — fix verified."
+}
