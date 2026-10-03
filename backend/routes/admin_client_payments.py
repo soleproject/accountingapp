@@ -8,11 +8,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+import stripe
 
 from db import db, now_iso, coerce
 from auth import require_role
 from routes.stripe_billing import (
-    PLAN_LABELS, PLAN_MONTHLY_CENTS, _fetch_sub_snapshot, _STRIPE_KEY,
+    PLAN_LABELS, PLAN_MONTHLY_CENTS, _fetch_sub_snapshot, _STRIPE_KEY, _price_id, _platform_base_url,
 )
 
 router = APIRouter(prefix="/api")
@@ -211,6 +213,99 @@ async def client_payment_detail(cid: str, user: dict = Depends(require_role("sup
         timeline.append({"at": c["sub_canceled_at"], "label": "Subscription canceled"})
     timeline.sort(key=lambda t: t.get("at") or "")
     return {"client": row, "payments": [coerce(p) for p in payments], "timeline": timeline}
+
+
+class CancelIn(BaseModel):
+    cancel: bool = True
+
+
+class ChangePlanIn(BaseModel):
+    product: str
+    cadence: str = "monthly"
+
+
+class PortalIn(BaseModel):
+    return_url: Optional[str] = None
+
+
+async def _scoped_company(cid: str, user: dict) -> dict:
+    q = {"id": cid} if user.get("role") == "superadmin" else {"$and": [{"id": cid}, await _scope_query(user)]}
+    c = await db.companies.find_one(q, {"_id": 0})
+    if not c:
+        raise HTTPException(404, "Company not found")
+    if not _STRIPE_KEY:
+        raise HTTPException(503, "Stripe is not configured on this environment.")
+    return c
+
+
+async def _apply_snapshot(cid: str, sub_id: str) -> dict:
+    snap = await asyncio.to_thread(_fetch_sub_snapshot, sub_id)
+    await db.companies.update_one({"id": cid}, {"$set": {**snap, "updated_at": now_iso()}})
+    return snap
+
+
+@router.post("/admin/client-payments/{cid}/cancel")
+async def cancel_client_subscription(cid: str, inp: CancelIn, user: dict = Depends(require_role("superadmin", "pro"))):
+    """Schedule (or undo) cancellation at the end of the current period — never cuts access mid-cycle."""
+    c = await _scoped_company(cid, user)
+    sub_id = c.get("stripe_subscription_id")
+    if not sub_id:
+        raise HTTPException(400, "This client has no Stripe subscription.")
+    try:
+        await asyncio.to_thread(stripe.Subscription.modify, sub_id, cancel_at_period_end=inp.cancel)
+    except stripe.error.StripeError as e:
+        raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+    snap = await _apply_snapshot(cid, sub_id)
+    return {"ok": True, "cancel_at_period_end": snap.get("sub_cancel_at_period_end"), "current_period_end": snap.get("sub_current_period_end")}
+
+
+@router.post("/admin/client-payments/{cid}/change-plan")
+async def change_client_plan(cid: str, inp: ChangePlanIn, user: dict = Depends(require_role("superadmin", "pro"))):
+    """Swap the subscription's price (prorated). Trialing subs keep their trial."""
+    c = await _scoped_company(cid, user)
+    sub_id = c.get("stripe_subscription_id")
+    if not sub_id:
+        raise HTTPException(400, "This client has no Stripe subscription.")
+    product, cadence = inp.product.lower(), ("annual" if inp.cadence == "annual" else "monthly")
+    if product not in PLAN_LABELS:
+        raise HTTPException(400, "Unknown plan.")
+    price_id = _price_id(product, bool(c.get("billing_discount")), cadence)
+    if not price_id:
+        raise HTTPException(400, f"No Stripe price configured for {PLAN_LABELS[product]} · {cadence}.")
+    try:
+        sub = await asyncio.to_thread(stripe.Subscription.retrieve, sub_id)
+        item_id = sub["items"]["data"][0]["id"]
+        await asyncio.to_thread(
+            stripe.Subscription.modify, sub_id,
+            items=[{"id": item_id, "price": price_id}],
+            proration_behavior="create_prorations",
+            cancel_at_period_end=False,
+        )
+    except stripe.error.StripeError as e:
+        raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+    await db.companies.update_one({"id": cid}, {"$set": {"billing_product": product, "billing_cadence": cadence}})
+    snap = await _apply_snapshot(cid, sub_id)
+    return {"ok": True, "product": product, "cadence": cadence, "amount_cents": snap.get("sub_amount_cents")}
+
+
+@router.post("/admin/client-payments/{cid}/portal")
+async def client_billing_portal(cid: str, inp: PortalIn, user: dict = Depends(require_role("superadmin", "pro"))):
+    """Stripe Customer Portal link for this client's customer (update card, invoices, cancel)."""
+    c = await _scoped_company(cid, user)
+    cust = c.get("stripe_customer_id")
+    if not cust:
+        raise HTTPException(400, "This client has no Stripe customer yet.")
+    try:
+        sess = await asyncio.to_thread(
+            stripe.billing_portal.Session.create, customer=cust,
+            return_url=(inp.return_url or _platform_base_url()).rstrip("/"),
+        )
+    except stripe.error.StripeError as e:
+        msg = e.user_message or str(e)
+        if "configuration" in msg.lower():
+            msg += " — enable the Customer Portal once in Stripe Dashboard → Settings → Billing → Customer portal."
+        raise HTTPException(502, f"Stripe error: {msg}")
+    return {"url": sess.url}
 
 
 @router.post("/admin/client-payments/backfill")

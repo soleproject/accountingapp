@@ -779,3 +779,9 @@ need to type into the chat box to invoke the matching help flow.
 - `/admin/client-payments` + `/{cid}` now allow role `pro`; `_scope_query()` limits to companies the pro has a pro-membership on OR `enterprise_id == user.enterprise_id`. Response carries `scope: platform|enterprise`.
 - Route alias `/pro/client-payments` → same AdminClientPayments page; enterprise scope hides Sync/Open Stripe, Stripe mode badge, enterprise filter+column, drawer Stripe link, and snapshot hint.
 - Sidebar: "Client Payments" under Client Cockpit for pros (Todo2CardList proSectionLinks + Sidebar.jsx role=pro item). Verified pro@axiom.ai sees only its 4 companies; client role → 403.
+
+## 2026-10-03 — Client Payments: Billing Actions (step 3) ✅ verified against Stripe test mode
+- NEW endpoints (superadmin + pro, scoped): `POST /admin/client-payments/{cid}/cancel {cancel: bool}` (Subscription.modify cancel_at_period_end, undo supported), `POST …/change-plan {product, cadence}` (swaps item price via `_price_id`, proration_behavior=create_prorations, resets cancel flag, updates billing_product/cadence), `POST …/portal {return_url}` (billing_portal.Session.create → url; friendly hint if portal config missing). Each re-snapshots the sub.
+- `_fetch_sub_snapshot` now also expands `customer.invoice_settings.default_payment_method` so card last4 shows when the PM lives on the customer.
+- Drawer `BillingActions` (cp-action-cancel / cp-cancel-confirm-yes / cp-action-change-plan / cp-plan-product / cp-plan-cadence / cp-plan-apply / cp-action-portal) with inline confirm + plan form; refreshes drawer + table silently.
+- Prod prerequisite for portal: enable Customer Portal once in Stripe Dashboard → Settings → Billing → Customer portal (live mode).
