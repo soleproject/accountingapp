@@ -741,3 +741,4 @@ need to type into the chat box to invoke the matching help flow.
 - Sidebar 'Checks' card now opens /accounting/review-chat?tab=checks (Review Chat Checks tab with payee/category allocator) instead of the embedded check-in; the /accounting/checks-review route remains available but unlinked.
 - Embedded check-in column widened (max-w-4xl via `colW`; standalone client page stays max-w-2xl); question prompt text reduced to 14px.
 - Third liability tile 'Not a liability statement' with confirm popup → POST /client-review/{token}/items/{item_id}/not-liability (new): marks item answered (action_taken=not_liability), flags the txn needs_review with review_note for the pro; 409 if already finalized. Completion gate + bus refresh follow.
+- Sidebar Checks card count now = Review Chat 'Checks' tab queue (chat_review_queue checks, computed once per status call via _chat_counts_once) with detail 'N checks need a payee' — matches the tab it opens.
