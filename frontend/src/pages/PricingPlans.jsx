@@ -249,8 +249,10 @@ export default function PricingPlans() {
         if (cancelled) return;
         const payer = r.data?.billing_payer;
         const isSponsored = payer === "enterprise" || payer === "free_spot";
-        setSponsored(isSponsored);
+        const alreadyPaid = r.data?.billing_state === "active" || !!r.data?.stripe_subscription_id;
+        setSponsored(isSponsored || alreadyPaid);
         if (isSponsored) nav(NEXT_AFTER_PRICING, { replace: true });
+        else if (alreadyPaid) nav("/accounting/transactions", { replace: true });
       })
       .catch(() => { if (!cancelled) setSponsored(false); });
     return () => { cancelled = true; };

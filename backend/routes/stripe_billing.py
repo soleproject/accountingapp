@@ -1836,12 +1836,23 @@ async def get_company_billing_state(
         or role_on_company in ("pro", "reviewer")
     )
     locked = is_service_lock or (is_pending_activation and not is_pro_side)
+    # Self-serve company that finished onboarding but never completed
+    # Stripe checkout → client-side users get routed back to pricing.
+    needs_checkout = (
+        state == "pending"
+        and not c.get("stripe_subscription_id")
+        and payer not in ("enterprise", "free_spot", "client_email")
+        and bool(c.get("onboarding_complete"))
+        and not is_pro_side
+        and user.get("role") == "client"
+    )
     return {
         "billing_state": state,
         "billing_payer": payer,
         "billing_product": c.get("billing_product"),
         "billing_discount": bool(c.get("billing_discount")),
         "locked": locked,
+        "needs_checkout": needs_checkout,
         "stripe_subscription_id": c.get("stripe_subscription_id"),
         "stripe_customer_id": c.get("stripe_customer_id"),
         "last_session_id": c.get("billing_last_session_id"),
