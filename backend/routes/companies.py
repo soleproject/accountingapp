@@ -143,6 +143,27 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
             {"branding.subdomain": slug},
             {"branding.subdomain_slug": slug},
         ]}, {"_id": 0, "id": 1, "enterprise_id": 1, "partner_id": 1, "role": 1})
+    if not firm_pro and user.get("role") == "client":
+        # No firm context on this request — inherit the enterprise from a
+        # company the caller already belongs to (keeps additional
+        # businesses under the same firm as the first one).
+        mine = await db.memberships.find({"user_id": user["id"]}, {"_id": 0, "company_id": 1}).to_list(200)
+        sibling = await db.companies.find_one(
+            {"id": {"$in": [m["company_id"] for m in mine]}, "enterprise_id": {"$exists": True, "$ne": None}},
+            {"_id": 0, "enterprise_id": 1, "signup_firm_slug": 1},
+        )
+        if sibling:
+            ent = await db.enterprises.find_one({"id": sibling["enterprise_id"]}, {"_id": 0, "owner_user_id": 1})
+            if ent and ent.get("owner_user_id"):
+                firm_pro = await db.users.find_one(
+                    {"id": ent["owner_user_id"]},
+                    {"_id": 0, "id": 1, "enterprise_id": 1, "partner_id": 1, "role": 1, "branding.signin_subdomain": 1},
+                )
+                if firm_pro:
+                    firm_pro["enterprise_id"] = firm_pro.get("enterprise_id") or sibling["enterprise_id"]
+                    slug_in = sibling.get("signup_firm_slug") or ((firm_pro.get("branding") or {}).get("signin_subdomain")) or ""
+    if firm_pro:
+        slug = slug_in
         if firm_pro:
             ent_id = firm_pro.get("enterprise_id")
             if not ent_id:
@@ -153,6 +174,34 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
             if firm_pro.get("partner_id"):
                 firm_fields["partner_id"] = firm_pro["partner_id"]
             firm_fields["signup_firm_slug"] = slug
+    # Resolve the Owner. Clients may hand ownership to a different email;
+    # that person gets (or already has) an account and the caller becomes
+    # an Editor instead of Owner.
+    owner_user: dict = user
+    delegated_new_account = False
+    owner_email_in = (inp.owner_email or "").strip().lower()
+    if owner_email_in and owner_email_in != (user.get("email") or "").lower():
+        if user.get("role") != "client":
+            raise HTTPException(400, "Owner delegation is only available for client accounts.")
+        if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", owner_email_in):
+            raise HTTPException(400, "Enter a valid owner email address.")
+        existing = await db.users.find_one({"email": owner_email_in}, {"_id": 0})
+        if existing:
+            owner_user = existing
+        else:
+            import secrets as _secrets
+            from auth import hash_password
+            owner_user = {
+                "id": str(uuid.uuid4()), "email": owner_email_in,
+                "name": owner_email_in.split("@")[0].replace(".", " ").title(),
+                "password": hash_password(_secrets.token_urlsafe(48)), "role": "client",
+                "must_set_password": True, "created_at": now, "updated_at": now,
+            }
+            if firm_fields.get("signup_firm_slug"):
+                owner_user["signup_firm_slug"] = firm_fields["signup_firm_slug"]
+            await db.users.insert_one(dict(owner_user))
+            delegated_new_account = True
+    delegated = owner_user["id"] != user["id"]
     await db.companies.insert_one({
         "id": cid, "name": inp.name,
         **firm_fields,
@@ -185,13 +234,18 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
         # dict so a future Phase-1 UI can pass region="UK" and get GBP
         # + DD/MM/YYYY in one shot.
         **_region_defaults_for(inp.region),
-        "owner_user_id": user["id"], "onboarding_complete": False,
+        "owner_user_id": owner_user["id"], "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })
     await db.memberships.insert_one({
-        "id": str(uuid.uuid4()), "user_id": user["id"], "company_id": cid,
+        "id": str(uuid.uuid4()), "user_id": owner_user["id"], "company_id": cid,
         "role": "owner", "created_at": now,
     })
+    if delegated:
+        await db.memberships.insert_one({
+            "id": str(uuid.uuid4()), "user_id": user["id"], "company_id": cid,
+            "role": "editor", "created_at": now, "via": "owner_delegation",
+        })
     if firm_pro and firm_pro["id"] != user["id"] and firm_pro.get("role") in ("pro", "partner", "superadmin"):
         await db.memberships.insert_one({
             "id": str(uuid.uuid4()), "user_id": firm_pro["id"], "company_id": cid,
@@ -222,7 +276,50 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
     # Resend really failed.
     email_status = "skipped_first_company" if prior_owner_count == 0 else "skipped_no_email"
     email_error: str | None = None
-    if prior_owner_count > 0 and user.get("email"):
+    if delegated:
+        # Tell the new Owner. New accounts get a branded set-password
+        # invite; existing accounts get the "another company added" note.
+        email_status = "skipped_no_email"
+        try:
+            from email_dispatcher import dispatch, public_base_url
+            import email_templates as _tmpl
+            fbrand = {}
+            if firm_pro:
+                fp = await db.users.find_one({"id": firm_pro["id"]}, {"_id": 0, "branding": 1})
+                fbrand = (fp or {}).get("branding") or {}
+            firm_name = (fbrand.get("firm_name") or "").strip() or None
+            fslug = firm_fields.get("signup_firm_slug")
+            base = public_base_url(fslug).rstrip("/")
+            suffix = f"?firm={fslug}" if fslug and "{slug}" not in (os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE") or "") else ""
+            inviter = user.get("name") or user.get("email") or "A teammate"
+            if delegated_new_account:
+                from routes.auth import mint_password_set_token
+                token = await mint_password_set_token(owner_user["id"], purpose="client_welcome", ttl_days=14)
+                subject, html = _tmpl.client_welcome_first_time(
+                    client_name=owner_user.get("name") or "there", pro_name=inviter, firm_name=firm_name,
+                    company_name=inp.name, set_password_url=f"{base}/set-password/{token}{suffix}", brand_name=firm_name,
+                )
+                kind = "client_welcome"
+            else:
+                subject, html = _tmpl.client_welcome_returning(
+                    client_name=owner_user.get("name") or "there", pro_name=inviter, firm_name=firm_name,
+                    brand_name=firm_name, company_name=inp.name, other_company_count=1,
+                    dashboard_url=f"{base}/dashboard{suffix}",
+                )
+                kind = "client_welcome_returning"
+            result = await dispatch(
+                kind=kind, to=owner_user["email"], subject=subject, html=html,
+                initiating_user_id=user["id"], company_id=cid,
+                related={"owner_delegation": True, "new_account": delegated_new_account},
+                firm_name_override=firm_name,
+            )
+            email_status = result.get("status", "failed")
+            email_error = result.get("error")
+        except Exception as _exc:  # noqa: BLE001
+            import logging as _lg
+            _lg.getLogger(__name__).exception("Owner-delegation email failed (company creation still succeeded)")
+            email_status, email_error = "failed", str(_exc)
+    elif prior_owner_count > 0 and user.get("email"):
         try:
             from email_dispatcher import dispatch, public_base_url
             import email_templates as _tmpl

@@ -45,6 +45,9 @@ class CompanyCreate(BaseModel):
     # Self-serve signup from a white-labelled host (acme.accountingapp.ai
     # or ?firm=acme): links the new company to that firm's enterprise.
     firm_slug: Optional[str] = None
+    # Client "Add new company": a different owner email makes that person
+    # the Owner and the caller an Editor. Same/blank → caller is Owner.
+    owner_email: Optional[str] = None
 
 
 class TransactionUpdate(BaseModel):

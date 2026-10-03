@@ -24,12 +24,14 @@ import { useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
 import { useFeedbackUnread } from "@/lib/useFeedbackUnread";
 import FeedbackModal from "./FeedbackModal";
+import AddCompanyModal from "./AddCompanyModal";
 
 export function CompanySwitcher() {
   const { companies, current, switchCompany } = useCompany();
   const { user } = useAuth();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef(null);
   const containerRef = useRef(null);
@@ -200,7 +202,11 @@ export function CompanySwitcher() {
                  NewClientModal on that page. */}
             <button
               type="button"
-              onClick={() => { setOpen(false); navigate("/pro/clients?new=1"); }}
+              onClick={() => {
+                setOpen(false);
+                if (user?.role === "client") setAddOpen(true);
+                else navigate("/pro/clients?new=1");
+              }}
               className="w-full text-left px-3 py-2 text-sm text-cyan-700 hover:bg-cyan-50 flex items-center gap-1.5 border-t border-slate-100 sticky bottom-0 bg-white"
               data-testid="company-switcher-add-new"
             >
@@ -209,6 +215,7 @@ export function CompanySwitcher() {
           </div>
         </div>
       )}
+      <AddCompanyModal open={addOpen} onClose={() => setAddOpen(false)} />
     </div>
   );
 }
