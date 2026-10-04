@@ -1,0 +1,24 @@
+{
+  "summary": "Tested cash-flow projections tuning (Plaid patterns, >60d AR exclusion, conservative band, confidence badge, sales-tax settings). 9/9 backend pytest cases pass. Frontend: confidence badge 'High', hover reasons tooltip, excluded-ar panel (3 rows), 14 'via Plaid' detection tags, band legend, assumptions modal with sales-tax frequency+due day all render correctly. One borderline FE observation: after saving an expected-date and reloading, the row still appeared in excluded-ar panel (restored via API afterward); needs verification by main agent (could be caching or save payload issue).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "excluded-ar save expected-date", "issue": "After filling date + clicking excluded-ar-save-{iid} and page reload, the invoice row was still shown in projections-excluded-ar panel. Backend endpoint itself works perfectly (verified via API test). Could be: (a) save handler not sending the date in correct format, (b) frontend not re-fetching cashflow after save, or (c) a known delayed cache. Please verify.", "affected_selectors": ["[data-testid^=\"excluded-ar-save-\"]", "[data-testid^=\"excluded-ar-date-\"]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_projections_tuning.py", "/app/test_reports/pytest/projections_tuning.xml"],
+  "action_items": ["Verify excluded-ar save+reload flow in the UI persists properly (backend API is correct)."],
+  "critical_code_review_comments": [
+    "projection_patterns override endpoint uses 'override_cadence' field (not 'cadence'); the request spec worded the field as 'cadence' — ensure docs/frontend use the correct key.",
+    "ar_haircuts bucket keys are prefixed 'd' (d0_30, d30_60, d60_90, d90_plus); legacy keys would be rejected 400 — document for API consumers."
+  ],
+  "updated_files": ["/app/backend/tests/test_projections_tuning.py"],
+  "success_rate": {"backend": "100%", "frontend": "~95%"},
+  "test_credentials": "pro@axiom.ai / pro123",
+  "seed_data_creation": "None; expected-date and settings restored after each test case.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend pytest at /app/backend/tests/test_projections_tuning.py covers 9 scenarios including detect-patterns, patterns list, cashflow structure (timeline_conservative, excluded_ar, confidence, pattern_summary.plaid, settings_summary.sales_tax, burn_reconciliation.lookback_days=90, event weights), invoice lateness, expected-date flow (set/clear + 400/404), settings validation (sales_tax + ar_haircuts), pattern override (reject/active/cadence annual/daily 400), cockpit snapshot regression, empty-company confidence=low. Note: override endpoint uses field name 'override_cadence'; ar_haircut buckets use 'd0_30' etc."
+}
