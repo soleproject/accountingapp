@@ -7,6 +7,7 @@ import {
   DollarSign, TrendingUp, Zap as Cpu,
 } from "lucide-react";
 import { NewClientModal, NewEnterpriseModal } from "@/pages/ProClients";
+import AffiliatesTable from "@/components/AffiliatesTable";
 import { toast } from "sonner";
 
 /**
@@ -608,6 +609,14 @@ export default function PartnerDash() {
             </div>
           )}
         </div>
+      </section>
+
+      <section className="rounded-xl border border-slate-200 bg-white p-5" data-testid="partner-affiliates-section">
+        <div className="mb-3">
+          <h2 className="text-xl font-semibold text-slate-900">Affiliates</h2>
+          <p className="text-xs text-slate-500">People promoting your brand with a referral link, and what their links have produced.</p>
+        </div>
+        <AffiliatesTable base="/firm/affiliates" showFirmColumn={false} />
       </section>
 
       <div className="text-xs text-slate-400">

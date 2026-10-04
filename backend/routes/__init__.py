@@ -61,6 +61,7 @@ from routes.superadmin_diagnostics import router as superadmin_diagnostics_route
 from routes.public_demo import router as public_demo_router  # noqa: F401
 from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
+from routes.affiliates_admin import router as affiliates_admin_router  # noqa: F401
 from routes.classes import router as classes_router  # noqa: F401
 from routes.projects import router as projects_router  # noqa: F401
 from routes.budgets import router as budgets_router  # noqa: F401
@@ -165,6 +166,7 @@ ALL_ROUTERS = [
     public_demo_router,
     help_router,
     leads_router,
+    affiliates_admin_router,
     classes_router,
     projects_router,
     budgets_router,
