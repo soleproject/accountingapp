@@ -79,8 +79,17 @@ _KIND_MAP: dict[int, list[str]] = {
 BATCH_MIN_ITEMS         = 3
 BATCH_MIN_DAYS_BETWEEN  = 5
 BATCH_EXPIRY_DAYS       = 14
-AGED_UNCATEGORIZED_DAYS = 7
+AGED_UNCATEGORIZED_DAYS = 7      # window by TRANSACTION DATE for categorization items
+INGEST_GRACE_HOURS      = 48     # AI/pro get first crack before the owner is asked
+COMPLIANCE_LOOKBACK_DAYS = 60    # receipts / meals / travel / W-9 / liability may be older
+COMPLIANCE_PER_TYPE_CAP = 2      # ...but only a couple per batch so fresh items lead
+BATCH_MAX_ITEMS         = 7      # overall ceiling; the rest carry to the next batch
 INITIAL_DOWNLOAD_HOURS  = 24   # skip anything ingested < 24h post company create
+
+# Categorization-flavored finding types live in the 7-day transaction-date
+# window; compliance types use the longer lookback with a per-type cap.
+_CATEGORIZATION_TYPES = {1, 2, 11, 12, 13}   # uncategorized, no-vendor, owner's draw, deposits, checks
+_COMPLIANCE_TYPES     = {3, 4, 9, 10, 14}    # missing receipt, W-9, liability split, meals, travel
 
 
 def now_iso() -> str:
@@ -107,21 +116,20 @@ def _hours_after(iso: str | datetime, hours: int) -> str:
 # --------------------------------------------------------------------------
 
 async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
-    """Item 1. Aged uncategorized transactions — Review-Chat-style
-    grouped card.
+    """Item 1. Uncategorized transactions from the LAST 7 DAYS BY
+    TRANSACTION DATE (owner decision 2026-10: a weekly nudge asks about
+    this week's activity, never a historical backlog).
 
     Rules (per row eligibility):
       * `needs_review == True`
       * `human_reviewed != True` — CPA hasn't touched it
-      * `created_at < now - 7d` — the per-txn asker had first crack
+      * `date >= today - 7d` — recent activity only
+      * `created_at < now - 48h` — AI/pro had first crack
       * `created_at > company.created_at + 24h` — never anything from the
         initial Plaid backfill
       * `client_question_id` empty — no per-txn ask pending or answered
-
-    Grouping: rows are bundled by `(contact_id, direction)` where
-    direction is 'in' for amount ≥ 0 else 'out'. One batch item per
-    group. Rows with no contact_id land in a synthetic "no-contact"
-    bucket per direction so the client still sees them.
+    Anything older than the window is the pro's job (Cockpit / Clean Up),
+    not the owner's.
     """
     company = await db.companies.find_one({"id": company_id}, {"created_at": 1})
     if not company:
@@ -129,12 +137,13 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
     initial_download_end = _hours_after(
         company["created_at"], INITIAL_DOWNLOAD_HOURS,
     )
-    cutoff_aged = _days_ago(AGED_UNCATEGORIZED_DAYS)
+    ingest_grace = _hours_after(now_iso(), -INGEST_GRACE_HOURS)
     query = {
         "company_id":         company_id,
         "needs_review":       True,
         "human_reviewed":     {"$ne": True},
-        "created_at":         {"$lt": cutoff_aged, "$gt": initial_download_end},
+        "date":               {"$gte": _days_ago(AGED_UNCATEGORIZED_DAYS)[:10]},
+        "created_at":         {"$lt": ingest_grace, "$gt": initial_download_end},
         "client_question_id": {"$in": [None, ""]},
     }
     # ONE ITEM PER TRANSACTION (2026-02 refactor):
@@ -363,6 +372,10 @@ async def _collect_agent_findings(company_id: str, item_type: int) -> list[dict]
     kinds = _KIND_MAP.get(item_type)
     if not kinds:
         return []
+    # Categorization-type findings: this week's transactions only.
+    # Compliance-type findings: longer lookback (they carry deadlines).
+    days = COMPLIANCE_LOOKBACK_DAYS if item_type in _COMPLIANCE_TYPES else AGED_UNCATEGORIZED_DAYS
+    floor = _days_ago(days)[:10]
     items: list[dict] = []
     async for f in db.agent_findings.find({
         "company_id": company_id,
@@ -370,6 +383,10 @@ async def _collect_agent_findings(company_id: str, item_type: int) -> list[dict]
         "status":     "open",
         # Not already picked up by a live batch
         "batch_id":   {"$in": [None, ""]},
+        "$or": [
+            {"meta.txn_date": {"$gte": floor}},
+            {"meta.txn_date": {"$in": [None, ""]}, "created_at": {"$gte": floor}},
+        ],
     }).sort("created_at", -1).limit(20):
         items.append({
             "item_id":           str(uuid.uuid4()),
@@ -613,7 +630,26 @@ async def collect_batch_items(company_id: str) -> list[dict]:
         return (prim, amt_key, created)
 
     deduped.sort(key=_sort_key)
-    return deduped
+
+    # Ceiling: fresh categorization items lead; compliance items are
+    # capped per type so a receipt backlog can't crowd out this week's
+    # questions. Anything beyond BATCH_MAX_ITEMS stays in the pool for
+    # the next batch (nothing is lost — items are only stamped with a
+    # batch_id once they are actually minted).
+    per_type: dict[int, int] = {}
+    capped: list[dict] = []
+    for it in deduped:
+        t = it.get("item_type") or 0
+        if t in _COMPLIANCE_TYPES and per_type.get(t, 0) >= COMPLIANCE_PER_TYPE_CAP:
+            continue
+        per_type[t] = per_type.get(t, 0) + 1
+        capped.append(it)
+    if len(capped) > BATCH_MAX_ITEMS:
+        # Keep type blocks contiguous but trim the tail; categorization
+        # items (lower _TYPE_ORDER) are already first except receipts (0.5)
+        # which the per-type cap has limited to 2.
+        capped = capped[:BATCH_MAX_ITEMS]
+    return capped
 
 
 # --------------------------------------------------------------------------
