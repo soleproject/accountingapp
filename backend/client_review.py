@@ -1362,6 +1362,12 @@ async def client_review_tick() -> dict:
     f = await send_follow_up_reminders()
     e = await expire_stale_batches()
     try:
+        from compliance_watcher import scan_all as _compliance_scan
+        c = await _compliance_scan()
+    except Exception:  # noqa: BLE001
+        c = {"error": "compliance_failed"}
+        logger.exception("compliance_watcher failed")
+    try:
         g = await graduate_to_cleanup()
     except Exception:  # noqa: BLE001
         g = {"error": "graduate_failed"}
@@ -1374,7 +1380,7 @@ async def client_review_tick() -> dict:
     except Exception:  # noqa: BLE001
         v = {"error": "vendor_outreach_tick_failed"}
         logger.exception("vendor_outreach_tick failed")
-    return {"reminders": r, "nudges": n, "follow_ups": f, "expired": e, "graduated": g,
+    return {"reminders": r, "nudges": n, "follow_ups": f, "expired": e, "graduated": g, "compliance": c,
             "triggered": t, "vendor_outreach": v}
 
 

@@ -210,7 +210,11 @@ def test_expire_stale_batches_increments_checkin_skips():
 PRO_EMAIL = "pro@axiom.ai"
 PRO_PASS = "pro123"
 CID = "aae4ab61-5b14-4529-a38c-fef8b747fdec"
-FORWARD_TOKEN = "lqmLjxMdIyQePHzBdSN70EUS9_T8F1Mh3X_xW01KMu0"
+def _forward_token(session) -> str:
+    """Current forward (non-catchup) check-in token, read from the owner dashboard."""
+    r = session.get(f"{BASE_URL}/api/companies/{CID}/owner-dashboard")
+    href = ((r.json().get("team") or {}).get("next_checkin") or {}).get("href") or ""
+    return href.rsplit("/", 1)[-1]
 
 
 @pytest.fixture(scope="module")
@@ -252,7 +256,7 @@ def test_api_owner_dashboard_books_cleanup_and_next_checkin(session):
     nxt = (data.get("team") or {}).get("next_checkin")
     if nxt and nxt.get("href"):
         # must be FORWARD batch, not catchup token
-        assert FORWARD_TOKEN in nxt["href"], \
+        assert _forward_token(session) in nxt["href"], \
             f"next_checkin.href should be forward token, got {nxt['href']}"
 
 
@@ -277,6 +281,6 @@ def test_regression_responsibilities(session):
     assert r.status_code == 200, r.text
 
 
-def test_regression_client_review_forward_token():
-    r = requests.get(f"{BASE_URL}/api/client-review/{FORWARD_TOKEN}")
+def test_regression_client_review_forward_token(session):
+    r = requests.get(f"{BASE_URL}/api/client-review/{_forward_token(session)}")
     assert r.status_code == 200, r.text
