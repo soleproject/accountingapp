@@ -175,6 +175,45 @@ def _serialize_account_balances(a) -> dict:
     }
 
 
+def _d(v) -> str | None:
+    return str(v)[:10] if v else None
+
+
+def get_recurring_streams(access_token: str) -> list[dict]:
+    """`/transactions/recurring/get` — Plaid's pre-computed recurring inflow/
+    outflow streams (frequency, predicted_next_date, average_amount). Amounts
+    returned here are signed in our convention: inflow positive, outflow negative."""
+    from plaid.model.transactions_recurring_get_request import TransactionsRecurringGetRequest
+    resp = _client.transactions_recurring_get(
+        TransactionsRecurringGetRequest(access_token=access_token)
+    ).to_dict()
+    out: list[dict] = []
+    for sign, key in (("in", "inflow_streams"), ("out", "outflow_streams")):
+        for s in resp.get(key) or []:
+            avg = abs(float(((s.get("average_amount") or {}).get("amount")) or 0))
+            last = abs(float(((s.get("last_amount") or {}).get("amount")) or 0))
+            pfc = s.get("personal_finance_category") or {}
+            out.append({
+                "stream_id": s.get("stream_id"),
+                "account_id": s.get("account_id"),
+                "sign": sign,
+                "description": s.get("description") or "",
+                "merchant_name": s.get("merchant_name") or "",
+                "frequency": str(s.get("frequency") or "UNKNOWN"),
+                "status": str(s.get("status") or "UNKNOWN"),
+                "is_active": bool(s.get("is_active", True)),
+                "average_amount": avg if sign == "in" else -avg,
+                "last_amount": last if sign == "in" else -last,
+                "first_date": _d(s.get("first_date")),
+                "last_date": _d(s.get("last_date")),
+                "predicted_next_date": _d(s.get("predicted_next_date")),
+                "occurrence_count": len(s.get("transaction_ids") or []),
+                "pfc_primary": str(pfc.get("primary") or ""),
+                "pfc_detailed": str(pfc.get("detailed") or ""),
+            })
+    return out
+
+
 def get_accounts_balance_snapshot(access_token: str) -> list[dict]:
     """Free `/accounts/get` (via `get_accounts`) — returns Plaid's cached account
     balances (last refreshed by Plaid, typically < 4h old). Used as the

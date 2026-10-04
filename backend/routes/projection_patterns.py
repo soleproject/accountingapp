@@ -85,6 +85,105 @@ CADENCE_BUCKETS = [
     ("quarterly", 85, 95),
 ]
 
+# Categories that are cash moving between the company's own pockets (or
+# equity) — never a real recurring in/outflow for forecasting purposes.
+EXCLUDED_DETAIL_TYPES = {"credit_card", "cash_and_bank", "bank", "opening_balance_equity"}
+TRANSFER_RE = re.compile(r"\b(transfer|xfer|online\s+banking\s+transfer|zelle\s+to\s+self)\b", re.I)
+
+PLAID_FREQ = {
+    "WEEKLY": "weekly", "BIWEEKLY": "biweekly", "SEMI_MONTHLY": "semimonthly",
+    "MONTHLY": "monthly", "ANNUALLY": "annual",
+}
+PLAID_EXCLUDED_PFC = {"TRANSFER_IN", "TRANSFER_OUT"}
+
+
+def _is_internal_movement(t: dict, acct_meta: dict[str, dict]) -> bool:
+    """Transfers between own accounts, CC payments, owner equity moves."""
+    if t.get("transfer_pair_id"):
+        return True
+    meta = acct_meta.get(t.get("category_account_id") or "")
+    if meta:
+        if meta.get("type") == "equity" or meta.get("detail_type") in EXCLUDED_DETAIL_TYPES:
+            return True
+    elif TRANSFER_RE.search(t.get("description") or t.get("memo") or ""):
+        return True
+    return False
+
+
+async def _plaid_patterns(cid: str, today: date, acct_meta: dict[str, dict]) -> tuple[list[dict], set[str]]:
+    """Plaid Recurring Transactions → pattern docs. Returns (patterns,
+    ledger_account_ids_covered). Covered accounts suppress local detection
+    so Plaid is the primary source wherever it is available."""
+    import plaid_service
+    import logging
+    log = logging.getLogger(__name__)
+    ledger_by_last4 = {
+        str(a.get("last4") or "").strip(): aid
+        for aid, a in acct_meta.items()
+        if a.get("detail_type") in ("cash_and_bank", "bank", "credit_card") and a.get("last4")
+    }
+    has_cc_ledger = any(a.get("detail_type") == "credit_card" for a in acct_meta.values())
+    patterns: list[dict] = []
+    covered: set[str] = set()
+    async for item in db.plaid_items.find({"company_id": cid}):
+        token = plaid_service.token_from_item(item)
+        if not token:
+            continue
+        plaid_to_ledger: dict[str, str | None] = {}
+        for pa in item.get("accounts") or []:
+            plaid_to_ledger[pa.get("account_id")] = ledger_by_last4.get(str(pa.get("mask") or "").strip())
+        try:
+            streams = plaid_service.get_recurring_streams(token)
+        except Exception as e:  # noqa: BLE001 — product not enabled / item errored
+            log.warning("plaid recurring unavailable for item %s: %s", item.get("item_id"), e)
+            continue
+        covered.update(v for v in plaid_to_ledger.values() if v)
+        for s in streams:
+            if s["status"] != "MATURE" or not s["is_active"]:
+                continue
+            if s["pfc_primary"] in PLAID_EXCLUDED_PFC:
+                continue
+            if s["pfc_detailed"] == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" and has_cc_ledger:
+                continue
+            cadence = PLAID_FREQ.get(s["frequency"])
+            if not cadence or not s["average_amount"]:
+                continue
+            try:
+                next_est = date.fromisoformat(s["predicted_next_date"] or "")
+            except (TypeError, ValueError):
+                continue
+            step = {"weekly": 7, "biweekly": 14, "semimonthly": 15, "monthly": 30, "annual": 365}[cadence]
+            while next_est <= today:
+                next_est += timedelta(days=step)
+            occ = s["occurrence_count"]
+            label = (s["merchant_name"] or s["description"] or "Recurring")[:60]
+            patterns.append({
+                "company_id": cid,
+                "pattern_key": f"plaid|{s['stream_id']}",
+                "grouping": "plaid",
+                "source": "plaid",
+                "contact_id": None,
+                "description_fingerprint": None,
+                "label": label,
+                "sign": s["sign"],
+                "cadence": cadence,
+                "median_interval_days": step,
+                "interval_cv": 0.0,
+                "median_amount": round(float(s["average_amount"]), 2),
+                "amount_cv": 0.0,
+                "occurrence_count": occ,
+                "first_seen_date": s["first_date"],
+                "last_seen_date": s["last_date"],
+                "next_expected_date": _iso(next_est),
+                "preferred_day_of_month": next_est.day,
+                "preferred_day_of_week": next_est.weekday(),
+                "account_id": plaid_to_ledger.get(s["account_id"]),
+                "confidence": "high" if occ >= 6 else "medium",
+                "status": "active",
+                "updated_at": now_iso(),
+            })
+    return patterns, covered
+
 
 # =============================================================================
 # Helpers
@@ -203,6 +302,14 @@ async def detect_patterns(cid: str) -> dict:
         "company_id": cid,
         "date": {"$gte": _iso(start), "$lte": _iso(today)},
     }).to_list(20000)
+    acct_meta = {
+        a["id"]: {"type": a.get("type"), "detail_type": a.get("detail_type"), "last4": a.get("last4")}
+        async for a in db.accounts.find({"company_id": cid}, {"id": 1, "type": 1, "detail_type": 1, "last4": 1})
+    }
+    scanned = len(txns)
+    txns = [t for t in txns if not _is_internal_movement(t, acct_meta)]
+    excluded_internal = scanned - len(txns)
+    plaid_patterns, plaid_covered = await _plaid_patterns(cid, today, acct_meta)
 
     # Group txns by recurrence key. Prefer contact_id when present since
     # it's the highest-signal grouping key. We STILL bucket by amount
@@ -279,6 +386,8 @@ async def detect_patterns(cid: str) -> dict:
         acct_ids = [t.get("bank_account_id") or t.get("account_id") for t in group
                     if t.get("bank_account_id") or t.get("account_id")]
         account_id = Counter(acct_ids).most_common(1)[0][0] if acct_ids else None
+        if account_id and account_id in plaid_covered:
+            continue  # Plaid streams are the source of truth for this account
 
         # Human-readable label.
         sign = key[2]
@@ -326,9 +435,12 @@ async def detect_patterns(cid: str) -> dict:
             "preferred_day_of_week": dow_mode,
             "account_id": account_id,
             "confidence": conf,
+            "source": "local",
             "status": "active",  # auto-applied per user setting
             "updated_at": now_iso(),
         })
+
+    detected = plaid_patterns + detected
 
     # Snapshot: delete existing patterns for this company, re-insert.
     # Approve/reject states are stored separately in `pattern_overrides`
@@ -343,6 +455,7 @@ async def detect_patterns(cid: str) -> dict:
         ov = overrides.get(pk)
         if ov:
             d["status"] = ov.get("status", "active")
+            d["user_confirmed"] = d["status"] == "active"
             # Allow user amount/cadence overrides too.
             if ov.get("override_amount") is not None:
                 d["median_amount"] = float(ov["override_amount"])
@@ -354,7 +467,9 @@ async def detect_patterns(cid: str) -> dict:
         await db.recurring_patterns.insert_many(detected)
 
     return {
-        "scanned_txns": len(txns),
+        "scanned_txns": scanned,
+        "excluded_internal": excluded_internal,
+        "plaid_streams": len(plaid_patterns),
         "detected": len(detected),
         "high":     sum(1 for d in detected if d["confidence"] == "high"),
         "medium":   sum(1 for d in detected if d["confidence"] == "medium"),
@@ -427,7 +542,7 @@ async def override_pattern(
     if inp.override_amount is not None:
         update["override_amount"] = float(inp.override_amount)
     if inp.override_cadence:
-        if inp.override_cadence not in {"weekly", "biweekly", "semimonthly", "monthly", "quarterly"}:
+        if inp.override_cadence not in {"weekly", "biweekly", "semimonthly", "monthly", "quarterly", "annual"}:
             raise HTTPException(400, f"Bad cadence: {inp.override_cadence}")
         update["override_cadence"] = inp.override_cadence
     await db.pattern_overrides.update_one(
@@ -442,6 +557,8 @@ async def override_pattern(
         live_update["median_amount"] = update["override_amount"]
     if "override_cadence" in update:
         live_update["cadence"] = update["override_cadence"]
+    if "status" in live_update:
+        live_update["user_confirmed"] = live_update["status"] == "active"
     if live_update:
         await db.recurring_patterns.update_one(
             {"company_id": cid, "pattern_key": pattern_key},
