@@ -18,6 +18,14 @@ import { Lock, Loader2, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 
 const POLL_MS = 20_000;
+const PAYER_LABELS = {
+  client_card: "You (card on file)",
+  client_email: "You (activation link)",
+  enterprise: "Your firm (enterprise)",
+  free_spot: "Your firm (included seat)",
+  pro: "Your accountant",
+  firm: "Your accountant",
+};
 
 export default function BillingLockedModal() {
   const { currentId } = useCompany();
@@ -76,7 +84,7 @@ export default function BillingLockedModal() {
     }
   };
 
-  if (!state?.locked) return null;
+  if (!state?.locked || state?.needs_checkout) return null;
 
   // Distinguish the two blocking cases so copy matches intent:
   //   * `pending` (first-time activation for client-email payer) is a
@@ -126,18 +134,24 @@ export default function BillingLockedModal() {
           )}
         </p>
 
-        <div className="mt-4 rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 text-left">
-          <div className="flex justify-between">
-            <span className="text-slate-500">Product</span>
-            <span className="font-mono-num text-slate-700">
-              {state.billing_product || "—"}{state.billing_discount ? " · disc" : ""}
-            </span>
+        {(state.plan_label || state.billing_payer) && (
+          <div className="mt-4 rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 text-left" data-testid="billing-locked-plan-box">
+            {state.plan_label && (
+              <div className="flex justify-between">
+                <span className="text-slate-500">Plan</span>
+                <span className="font-medium text-slate-700">
+                  {state.plan_label}{state.plan_cadence ? ` · ${state.plan_cadence}` : ""}{state.billing_discount ? " · discounted" : ""}
+                </span>
+              </div>
+            )}
+            {PAYER_LABELS[state.billing_payer] && (
+              <div className="flex justify-between mt-1">
+                <span className="text-slate-500">Billed to</span>
+                <span className="font-medium text-slate-700">{PAYER_LABELS[state.billing_payer]}</span>
+              </div>
+            )}
           </div>
-          <div className="flex justify-between mt-1">
-            <span className="text-slate-500">Payer</span>
-            <span className="font-mono-num text-slate-700">{state.billing_payer || "—"}</span>
-          </div>
-        </div>
+        )}
 
         {!state.stripe_configured && (
           <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800 text-left">
