@@ -119,6 +119,7 @@ CATALOG = [
     {"key": "cleanup_liability_payments", "label": "Clean Up · Liability Payments", "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
     {"key": "cleanup_receipt_followup",   "label": "Clean Up · Receipt Follow-up",  "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
     {"key": "cleanup_irs_compliance",     "label": "Clean Up · IRS Compliance",     "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
+    {"key": "cleanup_uncategorized",      "label": "Clean Up · Uncategorized",      "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
 ]
 
 # Keys of the 4 new check-in item cards. Kept as a set so the status
@@ -138,6 +139,7 @@ CLEANUP_ITEM_KEYS = {
     "cleanup_liability_payments",
     "cleanup_receipt_followup",
     "cleanup_irs_compliance",
+    "cleanup_uncategorized",
 }
 # Cleanup key → the forward-looking bucket helper's key. Lets us reuse
 # `_open_checkin_items_by_bucket` shape when scanning the cleanup batch.
@@ -145,6 +147,7 @@ CLEANUP_KEY_TO_BUCKET = {
     "cleanup_liability_payments": "liability_payments",
     "cleanup_receipt_followup":   "receipt_followup",
     "cleanup_irs_compliance":     "irs_compliance",
+    "cleanup_uncategorized":      "uncategorized",
 }
 
 CATALOG_BY_KEY = {c["key"]: c for c in CATALOG}
@@ -426,12 +429,13 @@ async def _open_cleanup_items_by_bucket(cid: str) -> dict[str, list[dict]]:
     """
     from client_review import (  # local import to avoid boot cycles
         ITEM_LIABILITY_SPLIT, ITEM_MISSING_RECEIPT,
-        ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
+        ITEM_IRS_MEALS, ITEM_IRS_TRAVEL, ITEM_UNCATEGORIZED,
     )
     buckets: dict[str, list[dict]] = {
         "cleanup_liability_payments": [],
         "cleanup_receipt_followup":   [],
         "cleanup_irs_compliance":     [],
+        "cleanup_uncategorized":      [],
     }
     batch = await db.client_review_batches.find_one(
         {"company_id": cid, "kind": "cleanup",
@@ -445,12 +449,17 @@ async def _open_cleanup_items_by_bucket(cid: str) -> dict[str, list[dict]]:
             continue
         t = it.get("item_type")
         ctx = it.get("context") or {}
+        meta = ctx.get("meta") or {}
+        amount = ctx.get("amount")
+        if amount is None:
+            amount = meta.get("txn_amount", meta.get("amount"))
         row = {
             "id":          it.get("item_id") or it.get("source_id"),
             "source_id":   it.get("source_id"),
-            "date":        ctx.get("date"),
-            "description": ctx.get("description") or ctx.get("vendor") or it.get("prompt") or "",
-            "amount":      ctx.get("amount"),
+            "date":        ctx.get("date") or meta.get("txn_date"),
+            "description": (ctx.get("description") or ctx.get("vendor") or meta.get("vendor")
+                            or meta.get("merchant") or ctx.get("title") or it.get("prompt") or ""),
+            "amount":      amount,
             "prompt":      it.get("prompt") or "",
             "item_type":   t,
         }
@@ -460,6 +469,10 @@ async def _open_cleanup_items_by_bucket(cid: str) -> dict[str, list[dict]]:
             buckets["cleanup_receipt_followup"].append(row)
         elif t in (ITEM_IRS_MEALS, ITEM_IRS_TRAVEL):
             buckets["cleanup_irs_compliance"].append(row)
+        elif t == ITEM_UNCATEGORIZED:
+            row["direction"] = ctx.get("direction")
+            row["account"] = ctx.get("account")
+            buckets["cleanup_uncategorized"].append(row)
     return buckets
 
 
@@ -1212,11 +1225,11 @@ async def submit_checkin_item(
 
     batch = await db.client_review_batches.find_one(
         {"company_id": cid, "status": {"$in": ["open", "scheduled"]},
-         "kind": {"$nin": ["cleanup", "catchup"]}},
+         "items.item_id": item_id},
         sort=[("created_at", -1)],
     )
     if not batch:
-        raise HTTPException(404, "No open check-in batch for this company")
+        raise HTTPException(404, "Item not in any open check-in or clean-up batch")
     item = next((i for i in (batch.get("items") or [])
                  if i.get("item_id") == item_id), None)
     if not item:
@@ -1536,11 +1549,11 @@ async def post_checkin_check_assign(
     from routes.client_review import apply_check_assign, CheckAssignBody
     batch = await db.client_review_batches.find_one(
         {"company_id": cid, "status": {"$in": ["open", "scheduled"]},
-         "kind": {"$nin": ["cleanup", "catchup"]}},
+         "items.item_id": item_id},
         sort=[("created_at", -1)],
     )
     if not batch:
-        raise HTTPException(404, "No open check-in batch for this company")
+        raise HTTPException(404, "Item not in any open check-in or clean-up batch")
     item = next((i for i in (batch.get("items") or [])
                  if i.get("item_id") == item_id), None)
     if not item:

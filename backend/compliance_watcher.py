@@ -62,8 +62,8 @@ async def _existing_txn_ids(cid: str, kind: str) -> set[str]:
         {"company_id": cid, "kind": kind, "meta.txn_id": {"$exists": True}}, {"meta.txn_id": 1}) if f.get("meta", {}).get("txn_id")}
 
 
-async def scan_company(cid: str) -> dict:
-    since = _since()
+async def scan_company(cid: str, since: str | None = None, limit: int = 300) -> dict:
+    since = since or _since()
     base = {"company_id": cid, "date": {"$gte": since}, "posted": {"$ne": False},
             "transfer_pair_id": {"$in": [None, ""]}, "deleted_at": {"$in": [None, ""]}}
     created = {"missing_receipt": 0, "meals_compliance": 0, "travel_compliance": 0, "sanity_flagged": 0, "closed": 0}
@@ -78,7 +78,7 @@ async def scan_company(cid: str) -> dict:
     have = await _existing_txn_ids(cid, "missing_receipt")
     async for t in db.transactions.find({**base, "amount": {"$lte": -RECEIPT_THRESHOLD}, **_no_receipt(),
                                          "category_account_id": {"$in": expense_ids},
-                                         "category_account_name": {"$not": {"$regex": TRANSFER_RE, "$options": "i"}}}).limit(300):
+                                         "category_account_name": {"$not": {"$regex": TRANSFER_RE, "$options": "i"}}}).limit(limit):
         if t["id"] in have:
             continue
         who = t.get("merchant") or t.get("contact_name") or t.get("description") or "this purchase"
@@ -91,7 +91,7 @@ async def scan_company(cid: str) -> dict:
         have = await _existing_txn_ids(cid, kind)
         async for t in db.transactions.find({**base, "amount": {"$lt": 0},
                                              "category_account_name": {"$regex": rx, "$options": "i"},
-                                             "irs_substantiation": {"$in": [None, {}]}}).limit(300):
+                                             "irs_substantiation": {"$in": [None, {}]}}).limit(limit):
             if t["id"] in have:
                 continue
             who = t.get("merchant") or t.get("description") or "this charge"
@@ -125,6 +125,15 @@ async def scan_company(cid: str) -> dict:
             await db.agent_findings.update_one({"id": f["id"]}, {"$set": {"status": "resolved", "resolved_at": now_iso(), "resolved_by": "compliance_watcher"}})
             created["closed"] += 1
     return created
+
+
+async def historical_scan(cid: str, since: str) -> dict:
+    """One-time backfill: scan from `since` (YYYY-MM-DD) so older items land
+    on the grey Clean Up pile via graduate_company_to_cleanup. Not run by the tick."""
+    from client_review import graduate_company_to_cleanup
+    r = await scan_company(cid, since=since, limit=5000)
+    r["graduated"] = await graduate_company_to_cleanup(cid)
+    return r
 
 
 async def scan_all() -> dict:

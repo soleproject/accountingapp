@@ -277,6 +277,7 @@ export default function ResponsibilitiesPanel({
               cleanup_liability_payments: "historical liability splits",
               cleanup_receipt_followup:   "historical receipts",
               cleanup_irs_compliance:     "historical compliance items",
+              cleanup_uncategorized:      "historical uncategorized transactions",
             };
             const isCheckin = Object.prototype.hasOwnProperty.call(CHECKIN_LABELS, item.key);
             // Cleanup cards are the grey historical siblings — they
