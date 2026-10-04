@@ -845,3 +845,7 @@ Next: owner dashboard spec/build (Overview tab first) on top of the tuned engine
 - Actions wired: Answer → `/q/{token}` check-in; Send reminder → `POST /communications/dunning`; Expect date on 60+d overdue → `POST /projections/invoices/{id}/expected-date`; statement upload embeds `StatementsTab`; booking link `/book/{slug}`.
 - Static concept mock kept at `frontend/public/mock/owner-overview.html` (reference only).
 - Known gaps / follow-ups: plain-English "why" is deterministic (not LLM); weekly counts use approved_at/human_reviewed_at/cleared_at/matched_at (AI categorization has no timestamp → new-this-week proxy); no job titles on pro users; reports not stored as documents. Ideas: "Can I afford…?" prompt, safe-to-draw number, weekly digest email mirroring Overview, dark white-label theme.
+
+## 2026-10-04 — Billing lock: canceled self-serve → pricing page ✅
+- `GET /billing/state`: `needs_checkout` now also true for `billing_state == "canceled"` on self-serve companies (payer not enterprise/free_spot/client_email) for client-role users → `BillingLockedModal` redirects to `/welcome/pricing` to pick a plan again instead of showing the lock modal. past_due/unpaid keep the modal + Pay now.
+- Modal shows friendly "Plan: Core · monthly" and "Billed to: …" labels (PLAN_LABELS / PAYER_LABELS); raw `simple_start` / `—` rows removed; row hidden when payer unknown.
