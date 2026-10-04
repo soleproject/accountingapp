@@ -38,9 +38,9 @@ export function Why({ children, testId }) {
   );
 }
 
-export function Big({ children, tone, className = "" }) {
+export function Big({ children, tone, className = "", ...rest }) {
   const c = tone === "up" ? "text-emerald-600" : tone === "down" ? "text-rose-600" : "text-slate-900";
-  return <div className={`font-mono-num text-[32px] leading-none font-medium tracking-tight ${c} ${className}`}>{children}</div>;
+  return <div className={`font-mono-num text-[32px] leading-none font-medium tracking-tight ${c} ${className}`} {...rest}>{children}</div>;
 }
 
 export function Kpi({ label, value, tone }) {

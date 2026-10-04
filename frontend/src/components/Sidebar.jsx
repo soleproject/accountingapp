@@ -595,7 +595,8 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
       return (
         <>
           <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
-          <Item item={ACCOUNTING_OWNER} />          <Item item={{ to: "/accounting/todo", label: "Cockpit", icon: CheckSquare, exact: true }} />
+          <Item item={ACCOUNTING_OWNER} />
+          <Item item={{ to: "/accounting/todo", label: "Cockpit", icon: CheckSquare, exact: true }} />
           {/* To Do 2 — same task list, rendered as sidebar cards for
               rapid triage. Doesn't route (uses local sidebar state)
               so we render it as a plain button styled to match Item. */}

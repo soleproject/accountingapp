@@ -65,6 +65,9 @@ export default function OwnerDashboard() {
     if (it.href) navigate(it.href);
   };
 
+  if (!currentId) {
+    return <div className="p-10 text-slate-500 text-sm" data-testid="owner-dashboard-no-company">No company is linked to your account yet. Your bookkeeper will connect one shortly.</div>;
+  }
   if (!data) {
     return <div className="flex items-center gap-2 text-slate-500 p-10" data-testid="owner-dashboard-loading"><Loader2 className="animate-spin" size={16} /> Loading your business…</div>;
   }
