@@ -851,3 +851,9 @@ Next: owner dashboard spec/build (Overview tab first) on top of the tuned engine
 - Modal shows friendly "Plan: Core · monthly" and "Billed to: …" labels (PLAN_LABELS / PAYER_LABELS); raw `simple_start` / `—` rows removed; row hidden when payer unknown.
 - Fix (same day): strobe loop for canceled self-serve clients — `PricingPlans.jsx` treated any `stripe_subscription_id` as "already paid" and bounced to /accounting/transactions, where the lock modal redirected back to pricing. Now only `billing_state === "active"` (or a non-lapsed sub) counts as paid. Verified: canceled client stays on /welcome/pricing, no modal.
 - Open question: pricing page still offers a 7-day trial to re-subscribing canceled customers (Stripe `trial_period_days`).
+
+## 2026-10-04 — No second free trial for returning customers ✅
+- `_trial_eligible(company)` in `stripe_billing.py`: false when any prior sub exists (`stripe_subscription_id`, `sub_last_paid_at`, `sub_started_at`, or billing_state ever active/past_due/canceled/unpaid). `GET /billing/state` returns `trial_eligible`, `previous_product`, `previous_plan_label`, `canceled_at`.
+- `POST /billing/checkout-session` drops `trial_period_days` server-side when not eligible (verified: Stripe test session created with trial_period_days=None, amount_total 3800).
+- `PricingPlans.jsx`: returning copy ("Welcome back — pick up where you left off." + "Your Core plan was canceled… billing starts today"), trial badges/chips hidden, "Your previous plan" tag, buttons "Reactivate X" / "Switch to X".
+- Welcome email: `_send_checkout_welcome` sends `checkout_reactivated` ("You're back — the books are open again") when `checkout_welcome_sent_at` already set; Transactions skips the tour invite if previously seen.
