@@ -79,25 +79,29 @@ async def _mk_finding(cid: str, *, kind: str, status: str = "open",
 async def _e2e_aged_uncategorized_filter():
     cid = f"test-{uuid.uuid4()}"
     await _mk_company(cid, "Aged Test LLC", created_days_ago=90)
-    # Row A: 30 days old, needs_review, not reviewed, no per-txn question
+    # 2026-10 semantics: LAST 7 DAYS BY TRANSACTION DATE, ingested ≥48h ago.
+    # Row A: 4 days old, needs_review, not reviewed, no per-txn question
     #        → should be included.
-    a = await _mk_txn(cid, created_days_ago=30)
-    # Row B: 3 days old (< AGED_UNCATEGORIZED_DAYS) → excluded.
-    b = await _mk_txn(cid, created_days_ago=3)
-    # Row C: 30 days old but has a per-txn question already → excluded.
-    c = await _mk_txn(cid, created_days_ago=30,
+    a = await _mk_txn(cid, created_days_ago=4)
+    # Row B: ingested 1 day ago (< INGEST_GRACE_HOURS) → excluded, AI/pro first.
+    b = await _mk_txn(cid, created_days_ago=1)
+    # Row C: 4 days old but has a per-txn question already → excluded.
+    c = await _mk_txn(cid, created_days_ago=4,
                       client_question_id="qid-existing")
-    # Row D: 30 days old but CPA-reviewed → excluded.
-    d = await _mk_txn(cid, created_days_ago=30, human_reviewed=True)
-    # Row E: 30 days old but needs_review=False → excluded.
-    e = await _mk_txn(cid, created_days_ago=30, needs_review=False)
+    # Row D: 4 days old but CPA-reviewed → excluded.
+    d = await _mk_txn(cid, created_days_ago=4, human_reviewed=True)
+    # Row E: 4 days old but needs_review=False → excluded.
+    e = await _mk_txn(cid, created_days_ago=4, needs_review=False)
+    # Row F: 30 days old → outside the weekly window → pro's job, excluded.
+    f = await _mk_txn(cid, created_days_ago=30)
 
     items = await cr._collect_aged_uncategorized(cid)
     ids = {i["source_id"] for i in items}
-    assert a["id"] in ids, "aged uncategorized txn must be picked up"
-    assert b["id"] not in ids, "fresh txn must be excluded (per-txn owns it)"
+    assert a["id"] in ids, "this week's uncategorized txn must be picked up"
+    assert b["id"] not in ids, "fresh ingest must be excluded (AI/pro first crack)"
     assert c["id"] not in ids, "txn with pending per-txn question excluded"
     assert d["id"] not in ids, "human-reviewed txn excluded"
+    assert f["id"] not in ids, "historical txn excluded from weekly check-in"
     assert e["id"] not in ids, "needs_review=false excluded"
 
     await db.companies.delete_many({"id": cid})

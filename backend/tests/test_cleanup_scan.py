@@ -146,12 +146,14 @@ def test_responsibilities_returns_cleanup_bucket_only_when_populated():
             assert len(b1["cleanup_receipt_followup"]) == 2
             assert len(b1["cleanup_liability_payments"]) == 2
             assert len(b1["cleanup_irs_compliance"]) == 0
+            assert len(b1["cleanup_uncategorized"]) == 0
 
-            # Sanity: the responsibility key set contains all three.
+            # Sanity: the responsibility key set contains all four.
             assert CLEANUP_ITEM_KEYS == {
                 "cleanup_liability_payments",
                 "cleanup_receipt_followup",
                 "cleanup_irs_compliance",
+                "cleanup_uncategorized",
             }
         finally:
             await _cleanup(uid, cid)

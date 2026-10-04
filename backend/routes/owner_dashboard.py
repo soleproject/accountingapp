@@ -21,6 +21,7 @@ from routes.firm_glance import _pct_delta
 from routes.month_close import _month_status
 from routes.plaid import sync_status
 from routes.projections import projections_cashflow
+from client_review import cleanup_progress, mint_catchup_batch, graduate_company_to_cleanup
 
 router = APIRouter(prefix="/api")
 
@@ -414,11 +415,12 @@ async def owner_dashboard(
     proj, sync, batch = await asyncio.gather(
         projections_cashflow(cid=cid, days=120, start_date=None, end_date=None, user=user),
         sync_status(cid=cid, user=user),
-        db.client_review_batches.find_one({"company_id": cid, "status": {"$nin": ["completed", "expired"]}}, sort=[("created_at", -1)]),
+        db.client_review_batches.find_one({"company_id": cid, "status": {"$nin": ["completed", "expired", "empty"]}, "kind": {"$nin": ["cleanup", "catchup"]}}, sort=[("created_at", -1)]),
     )
     sync_info = {"last_sync_at": (sync or {}).get("last_sync_at")}
 
     books = await _books(cid, period_start, period_end, proj.get("cash_breakdown", []), sync_info)
+    books["cleanup"] = await cleanup_progress(cid)
     profit, team, money, documents = await asyncio.gather(
         _profit(cid, period_start, period_end),
         _team(cid, today, batch, books),
@@ -445,4 +447,20 @@ async def owner_dashboard(
         },
         "books": books, "profit": profit, "cash": cash, "attention": attention,
         "team": team, "money": money, "documents": documents,
+    }
+
+
+@router.post("/companies/{cid}/owner-dashboard/catchup")
+async def start_catchup(cid: str, user: dict = Depends(get_current_user)):
+    """Owner-paced catch-up: pull up to 7 grey Clean Up items into a
+    check-in session the owner can work through right now. Never emailed."""
+    await require_company(user, cid)
+    await graduate_company_to_cleanup(cid)
+    batch = await mint_catchup_batch(cid)
+    if not batch:
+        return {"ok": True, "batch_id": None, "review_url": None, "remaining": 0}
+    progress = await cleanup_progress(cid)
+    return {
+        "ok": True, "batch_id": batch["id"], "review_url": f"/client-review/{batch['client_token']}",
+        "items": len(batch.get("items") or []), "remaining": progress["pending"],
     }

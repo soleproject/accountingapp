@@ -17,7 +17,7 @@
  * updated, receipt mirrored to /receipts, IRS substantiation written
  * onto the transaction).
  */
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import axios from "axios";
 // Token-mode (client-review magic-link) uses a plain axios so no JWT
@@ -30,7 +30,9 @@ import {
 } from "lucide-react";
 import useVoiceRecorder from "@/hooks/useVoiceRecorder";
 import ChecksAllocatorInline from "@/components/ChecksAllocatorInline";
+import AccountPicker from "@/components/AccountPicker";
 
+const UNCATEGORIZED = 1;
 const IRS_MEALS = 10;
 const IRS_TRAVEL = 14;
 const MISSING_RECEIPT = 3;
@@ -69,6 +71,15 @@ export default function CheckinAnswerForm({ companyId, token, item, onCancel, on
   const [fees, setFees]                   = useState("");
   const [file, setFile]                   = useState(null);
   const [busy, setBusy]                   = useState(false);
+  // Uncategorized (type 1, Cockpit mode): pro picks the category directly.
+  const [accounts, setAccounts]           = useState([]);
+  const [categoryId, setCategoryId]       = useState("");
+  useEffect(() => {
+    if (t !== UNCATEGORIZED || token || !companyId) return;
+    api.get(`/companies/${companyId}/accounts`)
+      .then(r => setAccounts(r.data?.accounts || []))
+      .catch(() => setAccounts([]));
+  }, [t, token, companyId]);
 
   // Voice-fill state — one mic per form instance. On stop, we hit
   // /voice-extract, sparkle-fill any EMPTY fields with the AI's
@@ -213,6 +224,13 @@ export default function CheckinAnswerForm({ companyId, token, item, onCancel, on
     } else if (t === CHECK_NO_PAYEE) {
       if (!payeeName.trim()) return toast.error("Enter the payee name.");
       payload.payee_name = payeeName.trim();
+    } else if (t === UNCATEGORIZED) {
+      if (!categoryId && !memo.trim()) return toast.error("Pick a category or leave a note.");
+      if (categoryId) {
+        const a = accounts.find(x => x.id === categoryId);
+        payload.account_id = categoryId;
+        payload.account_name = a?.name || "";
+      }
     }
 
     const answerText = memo.trim() || _defaultAnswerString(t, payload);
@@ -359,6 +377,24 @@ export default function CheckinAnswerForm({ companyId, token, item, onCancel, on
         <div className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-2 text-[11px] text-slate-700">
           <Info size={12} className="mt-0.5 shrink-0" />
           <span>Attach the receipt to close this item. It'll also appear on the Receipts page for this client.</span>
+        </div>
+      )}
+
+      {t === UNCATEGORIZED && (
+        <div className={FIELD_ROW} data-testid="uncat-category-field">
+          <label className={LABEL_CLS}>Category</label>
+          {accounts.length ? (
+            <AccountPicker
+              value={categoryId}
+              accounts={accounts}
+              onChange={setCategoryId}
+              companyId={companyId}
+              testId="uncat-category-picker"
+            />
+          ) : (
+            <div className="text-[11px] text-slate-500">Loading chart of accounts…</div>
+          )}
+          <div className="text-[11px] text-slate-500">Pick the account to book this to, or leave a note for the client.</div>
         </div>
       )}
 

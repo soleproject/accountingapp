@@ -40,6 +40,10 @@ async def _mk_company(cid: str, *, email: str | None = None,
     return doc
 
 
+# Compliance kinds are capped at 2 per batch (2026-10); mix so 3 items mint.
+_MIXED_KINDS = ("missing_receipt", "w9_needed", "liability_split_needed")
+
+
 async def _mk_finding(cid: str, kind: str = "missing_receipt") -> dict:
     doc = {
         "id":         str(uuid.uuid4()),
@@ -115,8 +119,8 @@ async def _e2e_dispatch_marks_batch_sent():
     email = "owner@abc.example.com"
     await _mk_company(cid, email=email, firm_name="Bright Books CPA")
 
-    for _ in range(3):
-        await _mk_finding(cid)
+    for kind in _MIXED_KINDS:
+        await _mk_finding(cid, kind)
 
     calls: list[dict] = []
     async def fake_dispatch(**kw):
@@ -163,8 +167,8 @@ def test_dispatch_marks_batch_sent():
 async def _e2e_pause_skips_send():
     cid = f"test-{uuid.uuid4()}"
     await _mk_company(cid, email="owner@paused.example", pause=True)
-    for _ in range(3):
-        await _mk_finding(cid)
+    for kind in _MIXED_KINDS:
+        await _mk_finding(cid, kind)
 
     calls: list[dict] = []
     async def fake_dispatch(**kw):
@@ -197,7 +201,7 @@ async def _e2e_pref_off_expires_batch():
     """
     cid = f"test-{uuid.uuid4()}"
     await _mk_company(cid, email="owner@prefoff.example")
-    findings = [await _mk_finding(cid) for _ in range(3)]
+    findings = [await _mk_finding(cid, k) for k in _MIXED_KINDS]
 
     async def fake_dispatch(**kw):
         return {"status": "skipped_pref_off", "id": "log-p"}
@@ -225,8 +229,8 @@ def test_pref_off_expires_batch():
 async def _e2e_no_client_email_skipped():
     cid = f"test-{uuid.uuid4()}"
     await _mk_company(cid, email=None)   # no email at all
-    for _ in range(3):
-        await _mk_finding(cid)
+    for kind in _MIXED_KINDS:
+        await _mk_finding(cid, kind)
 
     calls: list[dict] = []
     async def fake_dispatch(**kw):
@@ -252,8 +256,8 @@ async def _e2e_batch_carries_token():
     cid = f"test-{uuid.uuid4()}"
     email = "owner@token.example"
     await _mk_company(cid, email=email)
-    for _ in range(3):
-        await _mk_finding(cid)
+    for kind in _MIXED_KINDS:
+        await _mk_finding(cid, kind)
 
     async def fake_dispatch(**kw):
         return {"status": "sent", "id": "log", "resend_id": "re"}
