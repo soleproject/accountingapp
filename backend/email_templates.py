@@ -567,6 +567,23 @@ def month_close_signoff(*, client_name: str, company_name: str, month_label: str
     return f"Sign off requested: {month_label} — {company_name}", _wrap(inner)
 
 
+def checkout_reactivated(*, name: str, company_name: str, plan_label: str, cadence: str,
+                         transactions_url: str, brand_name: Optional[str] = None) -> tuple[str, str]:
+    inner = f"""
+      <div style="{_H1}">You're back — the books are open again</div>
+      <div style="{_P}">Hi {escape(name)},</div>
+      <div style="{_P}">
+        <b>{escape(company_name)}</b> is active again on the <b>{escape(plan_label)}</b> plan
+        ({escape(cadence)}). Everything is exactly as you left it — transactions, receipts,
+        reports and your history.
+      </div>
+      <div style="padding:8px 0 4px;">
+        <a href="{transactions_url}" style="{_BTN}">Open my books →</a>
+      </div>
+    """
+    return f"Welcome back — {company_name} is active again", _wrap(inner, brand_name=brand_name)
+
+
 # --------------------------------------------------------------------------
 # Stripe checkout welcome — sent by the Stripe webhook when a brand-new
 # email pays for a subscription. Includes a magic link to set the

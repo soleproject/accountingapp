@@ -238,6 +238,9 @@ export default function PricingPlans() {
   // spot") never pick a plan — their billing is already settled by the
   // firm. Skip straight to the summary. Hold rendering until we know.
   const [sponsored, setSponsored] = useState(null); // null = checking
+  // Returning customer (had a subscription before) → no second trial,
+  // "welcome back" copy, previous plan highlighted.
+  const [returning, setReturning] = useState(null); // {previous_product, previous_plan_label, canceled_at} | null
   const [codeOpen, setCodeOpen] = useState(false);
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState(false);
@@ -255,6 +258,9 @@ export default function PricingPlans() {
         // the ledger, where the lock modal sends us here again — strobe loop).
         const alreadyPaid = state === "active"
           || (!!r.data?.stripe_subscription_id && !["canceled", "past_due", "unpaid", "pending"].includes(state));
+        if (r.data?.trial_eligible === false) {
+          setReturning({ previous_product: r.data.previous_product, previous_plan_label: r.data.previous_plan_label, canceled_at: r.data.canceled_at });
+        }
         setSponsored(isSponsored || alreadyPaid);
         if (isSponsored) nav(NEXT_AFTER_PRICING, { replace: true });
         else if (alreadyPaid) nav("/accounting/transactions", { replace: true });
@@ -289,7 +295,7 @@ export default function PricingPlans() {
         product: plan.stripeProduct,
         cadence,                                  // "monthly" | "annual" — from cadence toggle
         origin_url: window.location.origin,
-        trial_period_days: plan.trialDays || undefined,
+        trial_period_days: returning ? undefined : (plan.trialDays || undefined),
       });
       if (r.data?.checkout_url) {
         window.location.href = r.data.checkout_url;
@@ -397,20 +403,30 @@ export default function PricingPlans() {
           >
             <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">
-            Select a plan to start your 7-day free trial
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight" data-testid="pricing-headline">
+            {returning ? "Welcome back — pick up where you left off." : "Select a plan to start your 7-day free trial"}
           </h1>
+          {returning && (
+            <p className="mt-2 text-sm text-slate-600 max-w-xl" data-testid="pricing-returning-sub">
+              {returning.previous_plan_label ? <>Your <b>{returning.previous_plan_label}</b> plan was canceled{returning.canceled_at ? ` on ${new Date(returning.canceled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. </> : null}
+              Reactivate it or choose a different plan — billing starts today.
+            </p>
+          )}
 
           {/* Feature pills — soft chips that surface the "why it's
               safe to click" signals without cluttering the plan cards
               themselves. Wrap gracefully at narrower breakpoints. */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
-            {[
+            {(returning ? [
+              "Your books and history are exactly as you left them",
+              "98% Auto-categorization",
+              "Full service accounting option (via partners)",
+            ] : [
               "7-day free trial",
               "98% Auto-categorization",
               "Full service accounting option (via partners)",
               "Cancel anytime",
-            ].map((chip) => (
+            ]).map((chip) => (
               <span
                 key={chip}
                 className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-3.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm"
@@ -461,6 +477,7 @@ export default function PricingPlans() {
               loading={loadingPlanId === p.id}
               anyLoading={loadingPlanId !== null}
               onSelect={startCheckout}
+              returning={returning}
             />
           ))}
         </div>
@@ -530,13 +547,14 @@ function CadenceToggle({ cadence, onChange }) {
  *   * slight scale bump at ≥lg so the eye lands there first
  *   * dark card body with white text
  */
-function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect }) {
+function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect, returning }) {
+  const isPrevious = !!returning && returning.previous_product === plan.stripeProduct;
   const headlinePrice = useMemo(() => {
     return cadence === "annual" ? plan.annual / 12 : plan.monthly;
   }, [cadence, plan]);
 
   const popular = plan.highlight;
-  const hasTrial = !!plan.trialDays;
+  const hasTrial = !!plan.trialDays && !returning;
   const wired    = !!plan.stripeProduct;
 
   return (
@@ -567,6 +585,11 @@ function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect }) 
         {/* Trial ribbon — only rendered when the plan actually carries
             a trial. Sits above the price so the "free" beat lands
             before the dollar amount does. */}
+        {isPrevious && (
+          <div className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${popular ? "bg-white/15 text-white border border-white/30" : "bg-slate-100 text-slate-700 border border-slate-200"}`} data-testid={`pricing-previous-${plan.id}`}>
+            Your previous plan
+          </div>
+        )}
         {hasTrial && (
           <div
             className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${
@@ -621,6 +644,8 @@ function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect }) 
             <>
               <Loader2 size={13} className="animate-spin" /> Redirecting to Stripe…
             </>
+          ) : wired && returning ? (
+            <>{isPrevious ? `Reactivate ${plan.name}` : `Switch to ${plan.name}`} <ArrowRight size={13} /></>
           ) : wired ? (
             <>Start {plan.trialDays}-day free trial <ArrowRight size={13} /></>
           ) : (

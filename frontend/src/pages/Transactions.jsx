@@ -1501,6 +1501,11 @@ export default function Transactions() {
   }, [fromOnboarding, txns.length]);
   useEffect(() => {
     if (!fromCheckout) return;
+    // Returning customers (re-subscribed after a cancel) have already
+    // seen or dismissed the tour — don't re-pitch it.
+    let seen = false;
+    try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
+    if (seen) { navigate("/accounting/transactions", { replace: true }); return; }
     const t = setTimeout(() => setTourInviteOpen(true), 800);
     return () => clearTimeout(t);
   }, [fromCheckout]);

@@ -519,8 +519,9 @@ async def _send_checkout_welcome(company_id: str, snap: dict) -> None:
         import email_templates as _tmpl
 
         company = await db.companies.find_one({"id": company_id}, {"_id": 0})
-        if not company or company.get("checkout_welcome_sent_at"):
+        if not company:
             return
+        returning = bool(company.get("checkout_welcome_sent_at"))
         owner_id = company.get("owner_user_id")
         if not owner_id:
             m = await db.memberships.find_one({"company_id": company_id, "role": "owner"}, {"_id": 0, "user_id": 1})
@@ -550,6 +551,21 @@ async def _send_checkout_welcome(company_id: str, snap: dict) -> None:
         cadence = snap.get("billing_cadence") or company.get("billing_cadence") or "monthly"
         card = (f"{(snap.get('sub_card_brand') or '').title()} •••• {snap.get('sub_card_last4')}"
                 if snap.get("sub_card_last4") else None)
+        if returning:
+            subject, html = _tmpl.checkout_reactivated(
+                name=owner.get("name") or owner["email"].split("@")[0],
+                company_name=company.get("name") or "your business",
+                plan_label=PLAN_LABELS.get(prod, prod), cadence=cadence,
+                transactions_url=txn_url, brand_name=firm_name if is_private_label else None,
+            )
+            await dispatch(
+                kind="checkout_reactivated", to=owner["email"], subject=subject, html=html,
+                initiating_user_id=owner["id"], company_id=company_id,
+                related={"plan": prod, "cadence": cadence, "firm_slug": slug},
+                firm_name_override=firm_name if is_private_label else None,
+            )
+            await db.companies.update_one({"id": company_id}, {"$set": {"checkout_reactivated_at": now_iso()}})
+            return
         subject, html = _tmpl.checkout_welcome(
             name=owner.get("name") or owner["email"].split("@")[0],
             company_name=company.get("name") or "your business",
@@ -962,6 +978,18 @@ PLAN_LABELS = {
     "simple_start": "Core", "assistant": "AI Assistant", "bookkeeper": "AI Bookkeeper",
     "advanced": "Advanced", "essentials": "Essentials", "plus": "Plus",
 }
+
+
+def _trial_eligible(company: dict) -> bool:
+    """First-time companies only. Anything that proves a prior Stripe
+    subscription (even a trial that was canceled before paying) makes the
+    company a returning customer → no second free trial."""
+    return not (
+        company.get("stripe_subscription_id")
+        or company.get("sub_last_paid_at")
+        or company.get("sub_started_at")
+        or (company.get("billing_state") or "pending") in ("active", "past_due", "canceled", "unpaid")
+    )
 # Monthly list price per product (annual = x10) — fallback when Stripe amount unknown.
 PLAN_MONTHLY_CENTS = {
     "simple_start": 3800, "assistant": 7900, "bookkeeper": 9900, "advanced": 14900,
@@ -1461,13 +1489,15 @@ async def create_company_checkout_session(
                 # still collects the card upfront (default for trials in
                 # subscription mode), and auto-charges on day N+1 — that's
                 # exactly the "start a 7-day free trial" onboarding story.
+                # Returning customers (any prior subscription) never get a
+                # second trial — enforced here so the client can't bypass it.
                 **(
                     {"trial_period_days": int(inp.trial_period_days)}
-                    if inp.trial_period_days and int(inp.trial_period_days) > 0
+                    if inp.trial_period_days and int(inp.trial_period_days) > 0 and _trial_eligible(company)
                     else {}
                 ),
             },
-            **customer_kwargs,
+        **customer_kwargs,
         )
     except stripe.error.StripeError as e:
         logger.exception("Stripe checkout session failed for company %s", cid)
@@ -1902,6 +1932,11 @@ async def get_company_billing_state(
         "plan_amount_cents": c.get("sub_amount_cents"),
         "plan_cadence": c.get("billing_cadence"),
         "plan_label": PLAN_LABELS.get(c.get("billing_product") or "", c.get("billing_product")),
+        # Returning-customer signals for the pricing page copy + trial gate.
+        "trial_eligible": _trial_eligible(c),
+        "previous_product": c.get("billing_product") if not _trial_eligible(c) else None,
+        "previous_plan_label": PLAN_LABELS.get(c.get("billing_product") or "", c.get("billing_product")) if not _trial_eligible(c) else None,
+        "canceled_at": c.get("sub_canceled_at"),
         "card": (f"{(c.get('sub_card_brand') or '').title()} •••• {c.get('sub_card_last4')}" if c.get("sub_card_last4") else None),
         "stripe_subscription_id": c.get("stripe_subscription_id"),
         "stripe_customer_id": c.get("stripe_customer_id"),
