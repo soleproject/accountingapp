@@ -222,7 +222,7 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
                 "id": "checkin", "kind": "question", "tone": "brand",
                 "title": "Your bookkeeper has a few quick questions" if len(pending) > 1 else "Your bookkeeper has a quick question",
                 "subtitle": f"{len(pending)} item{'s' if len(pending) > 1 else ''} · about {max(1, len(pending) // 2)} min",
-                "action_label": "Answer", "href": f"/q/{batch.get('client_token')}", "count": len(pending),
+                "action_label": "Answer", "href": f"/client-review/{batch.get('client_token')}", "count": len(pending),
             })
     missing = await db.agent_findings.find(
         {"company_id": cid, "kind": "missing_receipt", "status": "open"}, {"title": 1, "detail": 1, "meta": 1}).limit(5).to_list(5)
@@ -232,7 +232,7 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
             "id": "receipts", "kind": "receipt", "tone": "warn",
             "title": "A receipt is missing" if len(missing) == 1 else f"{len(missing)} receipts are missing",
             "subtitle": (m0.get("title") or m0.get("detail") or "")[:90],
-            "action_label": "Snap it", "href": f"/q/{batch.get('client_token')}" if batch else "/owner/documents", "count": len(missing),
+            "action_label": "Snap it", "href": f"/client-review/{batch.get('client_token')}" if batch else "/owner/documents", "count": len(missing),
         })
     overdue = [e for e in proj.get("events", []) if e.get("kind") == "invoice" and e.get("days_overdue", 0) > 0] + (proj.get("excluded_ar") or [])
     if overdue:
@@ -292,7 +292,7 @@ async def _team(cid: str, today: date, batch: Optional[dict], books: dict) -> di
         next_checkin = {
             "status": batch.get("status"), "total": total, "answered": answered,
             "sent_at": batch.get("email_sent_at") or batch.get("scheduled_for") or batch.get("created_at"),
-            "href": f"/q/{batch.get('client_token')}", "reason": batch.get("scheduled_reason"),
+            "href": f"/client-review/{batch.get('client_token')}", "reason": batch.get("scheduled_reason"),
         }
 
     comms = await db.communications.find({"company_id": cid, "kind": {"$nin": ["internal", "system"]}}).sort("sent_at", -1).limit(5).to_list(5)
@@ -307,7 +307,7 @@ async def _team(cid: str, today: date, batch: Optional[dict], books: dict) -> di
         conversations.append({
             "actor": pro_name if c.get("user_id") else AI_NAME, "at": c.get("sent_at"), "kind": c.get("kind"),
             "subject": c.get("subject") or c.get("kind", "").replace("_", " ").capitalize(),
-            "href": f"/q/{(c.get('related') or {}).get('client_token')}" if (c.get("related") or {}).get("client_token") else None,
+            "href": f"/client-review/{(c.get('related') or {}).get('client_token')}" if (c.get("related") or {}).get("client_token") else None,
         })
 
     working_on = []
@@ -387,7 +387,7 @@ async def _documents(cid: str, period_start: date, batch: Optional[dict]) -> dic
     missing = await db.agent_findings.find({"company_id": cid, "kind": "missing_receipt", "status": "open"}, {"id": 1, "title": 1, "detail": 1, "meta": 1}).limit(5).to_list(5)
     return {
         "missing_receipts": [{"id": m.get("id"), "title": m.get("title"), "detail": m.get("detail"), "amount": (m.get("meta") or {}).get("amount"), "date": (m.get("meta") or {}).get("date"),
-                              "href": f"/q/{batch.get('client_token')}" if batch else None} for m in missing],
+                              "href": f"/client-review/{batch.get('client_token')}" if batch else None} for m in missing],
         "rows": rows,
         "counts": {"receipts": len(receipts), "statements": len(stmts)},
     }
