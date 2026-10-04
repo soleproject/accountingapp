@@ -17,7 +17,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus, Users } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
@@ -361,6 +361,16 @@ export function ProfileMenu() {
               </span>
             )}
           </Link>
+          {showProMenu && (
+            <Link
+              to="/pro/affiliates"
+              onClick={() => setOpen(false)}
+              data-testid="profile-menu-affiliates"
+              className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+            >
+              <Users size={14} className="text-slate-500" /> Affiliates
+            </Link>
+          )}
           {user.role === "superadmin" && (
             <Link
               to="/admin/feedback"

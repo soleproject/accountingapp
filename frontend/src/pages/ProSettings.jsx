@@ -4,8 +4,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
 import PlanComparisonCard from "@/components/PlanComparisonCard";
-import { Loader2, Upload, Trash2, Check, Save, Palette, Image as ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock, Users } from "lucide-react";
-import AffiliatesTable from "@/components/AffiliatesTable";
+import { Loader2, Upload, Trash2, Check, Save, Palette, Image as ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
@@ -977,17 +976,6 @@ export default function ProSettings() {
         </div>
       </section>
       </LockedSection>
-
-      <section className="rounded-xl border bg-white p-6" data-testid="settings-affiliates-card">
-        <div className="flex items-center gap-2 mb-1">
-          <Users size={16} className="text-emerald-600" />
-          <h2 className="font-heading font-semibold">Affiliates</h2>
-        </div>
-        <p className="text-xs text-slate-500 mb-4">
-          People promoting your brand with a referral link, matched by your sign-in address slug.
-        </p>
-        <AffiliatesTable base="/firm/affiliates" showFirmColumn={false} />
-      </section>
     </div>
   );
 }

@@ -76,6 +76,7 @@ import AdminClientPayments from "@/pages/AdminClientPayments";
 import AdminFeedback from "@/pages/AdminFeedback";
 import AdminLeads from "@/pages/AdminLeads";
 import AdminAffiliates from "@/pages/AdminAffiliates";
+import ProAffiliates from "@/pages/ProAffiliates";
 import AdminCronRuns from "@/pages/AdminCronRuns";
 import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
@@ -315,6 +316,7 @@ function App() {
               <Route path="/audit-log" element={<AuditLog />} />
               <Route path="/pro/settings" element={<ProSettings />} />
               <Route path="/pro/team" element={<ProTeam />} />
+              <Route path="/pro/affiliates" element={<ProAffiliates />} />
               <Route path="/company-team" element={<CompanyTeam />} />
               <Route path="/communications-audit" element={<Communications />} />
               {/* Back-compat: old bookmark for the outbound-email
