@@ -849,3 +849,5 @@ Next: owner dashboard spec/build (Overview tab first) on top of the tuned engine
 ## 2026-10-04 — Billing lock: canceled self-serve → pricing page ✅
 - `GET /billing/state`: `needs_checkout` now also true for `billing_state == "canceled"` on self-serve companies (payer not enterprise/free_spot/client_email) for client-role users → `BillingLockedModal` redirects to `/welcome/pricing` to pick a plan again instead of showing the lock modal. past_due/unpaid keep the modal + Pay now.
 - Modal shows friendly "Plan: Core · monthly" and "Billed to: …" labels (PLAN_LABELS / PAYER_LABELS); raw `simple_start` / `—` rows removed; row hidden when payer unknown.
+- Fix (same day): strobe loop for canceled self-serve clients — `PricingPlans.jsx` treated any `stripe_subscription_id` as "already paid" and bounced to /accounting/transactions, where the lock modal redirected back to pricing. Now only `billing_state === "active"` (or a non-lapsed sub) counts as paid. Verified: canceled client stays on /welcome/pricing, no modal.
+- Open question: pricing page still offers a 7-day trial to re-subscribing canceled customers (Stripe `trial_period_days`).

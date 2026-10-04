@@ -248,8 +248,13 @@ export default function PricingPlans() {
       .then((r) => {
         if (cancelled) return;
         const payer = r.data?.billing_payer;
+        const state = r.data?.billing_state;
         const isSponsored = payer === "enterprise" || payer === "free_spot";
-        const alreadyPaid = r.data?.billing_state === "active" || !!r.data?.stripe_subscription_id;
+        // A canceled/past-due sub still carries its old stripe_subscription_id,
+        // so only a live state counts as paid (otherwise we'd bounce back to
+        // the ledger, where the lock modal sends us here again — strobe loop).
+        const alreadyPaid = state === "active"
+          || (!!r.data?.stripe_subscription_id && !["canceled", "past_due", "unpaid", "pending"].includes(state));
         setSponsored(isSponsored || alreadyPaid);
         if (isSponsored) nav(NEXT_AFTER_PRICING, { replace: true });
         else if (alreadyPaid) nav("/accounting/transactions", { replace: true });
