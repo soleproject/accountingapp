@@ -1,0 +1,38 @@
+{
+  "summary": "Tested Owner Dashboard aggregator (/api/companies/{cid}/owner-dashboard) + frontend tabs (Overview/Money/Documents/Team), client redirect, period switching, invoice expected-date save, dunning reminder, mobile responsiveness, and projections cashflow regression. Backend 7/7 pass. Frontend works end-to-end with ONE bug: client user with no company lands in an infinite 'Loading your business…' spinner on /owner instead of the required owner-dashboard-no-company empty state. Fixed one minor test blocker (Big component dropped data-testid).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "OwnerDashboard.jsx", "issue": "When user has no company_id, load() short-circuits without setting loading=false and `data` stays null, so page shows the owner-dashboard-loading spinner forever. Required owner-dashboard-no-company empty state is never rendered. Repros as client@axiom.ai after login (company_id is null) hitting /dashboard (which does redirect to /owner correctly).", "selector": "[data-testid=owner-dashboard-no-company]", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_owner_dashboard.py",
+    "/app/test_reports/pytest/owner_dashboard.xml"
+  ],
+  "action_items": [
+    "Fix OwnerDashboard.jsx: when !currentId render <div data-testid=\"owner-dashboard-no-company\">...</div> instead of the perpetual loading spinner. Simplest patch inside the component before the `if (!data)` return: `if (!currentId) return <div data-testid=\"owner-dashboard-no-company\" className=\"p-10 text-slate-500\">You don't have a company yet.</div>;`"
+  ],
+  "critical_code_review_comments": [
+    "OwnerDashboard.jsx load() returns early when !currentId without clearing loading → infinite spinner (above bug).",
+    "Big component in components/owner/ui.jsx wasn't forwarding extra props so data-testid applied by callers (owner-profit-net, owner-cash-today) was dropped. Fixed by spreading ...rest onto the root div. Verified both testids now resolve in DOM.",
+    "Attention item for check-ins has kind='question' but id='checkin'. The review request wording 'attention includes a checkin item' is satisfied by id. Not a bug but a naming inconsistency worth noting.",
+    "Sidebar: 'My business' (ACCOUNTING_OWNER) item is rendered only inside the Accounting accordion kids (line 598) and the non-accordion accounting block (line 1552). It was not visible in the default sidebar view for a pro user who hadn't expanded the Accounting group. Consider making it a top-level item for pros so it matches the spec's 'Pros also see it via sidebar item My business'."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_owner_dashboard.py (new)",
+    "/app/frontend/src/components/owner/ui.jsx (Big forwards data-testid/rest props)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "92%"},
+  "test_credentials": "pro@axiom.ai/pro123, client@axiom.ai/client123 (per /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Test flow set an expected_payment_date on INV-1006 then restored it to null via API as instructed.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend aggregator is solid. Validated: default period 2026-09, profit.revenue=28184.34, net=24149.03, cash_today=27218, money.ar.total=42637.43 (4 overdue), team includes AI member + Priya Patel CPA, booking_url=/book/priya-patel-cpa, attention has id=checkin href=/q/<token>, period=2026-08 switches profit (Aug net≈24811, revenue ok), invalid period falls back, empty company (Michael Co 3) returns 200 with zeros, 403 for forbidden, 401 for unauth. Regression: cashflow bill labels now 'Bill BILL-2007 · Pacific Freight Co.' (no blank 'Bill '). Frontend: period select switches reload, attention-action-checkin navigates to /q/, attention-action-overdue navigates to /owner/money, Money tab: 9 invoice rows, 3 >60d-overdue have expect-date inputs, Save disabled until a date is chosen then enables and persists (row shows 'expected Dec 15' after reload), Send reminder shows 'Reminder sent for INV-1006.' toast. Documents and Team tabs all testids present. Mobile 390px: 0 horizontal overflow, single column. ONLY failing scenario: client@axiom.ai (no company) → /dashboard → /owner stays on owner-dashboard-loading forever; owner-dashboard-no-company never rendered. Fix in OwnerDashboard.jsx around the `if (!data)` return.",
+  "rca of the issue": "In /app/frontend/src/pages/OwnerDashboard.jsx the useCallback load() returns early with `if (!currentId) return;` while leaving loading=true and data=null. The render path only checks `if (!data)` and emits the owner-dashboard-loading spinner, so a user with no company (e.g. client@axiom.ai after the /dashboard → /owner redirect) is stuck on 'Loading your business…'. Mitigation: add `if (!currentId) return <div data-testid=\"owner-dashboard-no-company\" className=\"p-10 text-slate-500\">You don't have a company yet.</div>;` before the existing !data check, OR flip loading=false inside the early return. Reproduction: login as client@axiom.ai/client123, visit /dashboard, observe URL redirects to /owner and content stays as spinner with owner-dashboard-loading testid."
+}

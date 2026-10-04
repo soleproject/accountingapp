@@ -71,6 +71,16 @@ DEFAULT_HAIRCUTS = {
 
 VALID_CADENCE = {"weekly", "biweekly", "monthly", "quarterly", "one_time"}
 
+DEFAULT_SALES_TAX = {"frequency": "monthly", "due_day": 20}
+VALID_TAX_FREQ = {"monthly", "quarterly", "annual"}
+
+# Pattern weighting by detection confidence (Xero/Float-style: low-confidence
+# detections are listed for review but not booked until the user confirms).
+PATTERN_WEIGHT = {"high": 1.0, "medium": 0.85}
+MAX_LATENESS_DAYS = 60
+AR_EXCLUDE_AFTER_DAYS = 60   # >60d overdue → out of the base case until an expected date is set
+PAYROLL_RE = r"payroll|gusto|adp|paychex|quickbooks payroll|intuit payroll|rippling|justworks|onpay"
+
 
 # =============================================================================
 # Helpers
@@ -92,17 +102,6 @@ def _month_end(d: date) -> date:
     return date(d.year, d.month, monthrange(d.year, d.month)[1])
 
 
-async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
-    """Sum of ledger balance across every `cash_and_bank` asset account.
-
-    Uses the same math the Balance Sheet uses: sum of every posted
-    transaction on those accounts up through today.
-    """
-    accts = await db.accounts.find({
-        "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
-    }).to_list(500)
-    if not accts:
-        return 0.0, []
 async def _cash_balance(cid: str) -> tuple[float, list[dict]]:
     """Sum of ledger balance across every `cash_and_bank` asset account.
 
@@ -170,25 +169,68 @@ async def _get_settings(cid: str) -> dict:
     return {
         "company_id": cid,
         "ar_haircuts": {**DEFAULT_HAIRCUTS, **(doc.get("ar_haircuts") or {})},
+        "sales_tax": {**DEFAULT_SALES_TAX, **(doc.get("sales_tax") or {})},
         "custom_recurring": doc.get("custom_recurring") or [],
         "updated_at": doc.get("updated_at"),
         "updated_by": doc.get("updated_by"),
     }
 
 
-async def _open_invoice_events(cid: str, haircuts: dict, today: date) -> list[dict]:
-    """Expected inflows from open AR, weighted by aging haircut.
+async def _customer_lateness(cid: str) -> tuple[dict[str, int], int]:
+    """Float-style "Smart Expected Dates": median days-late per customer from
+    their paid invoices (≥2 samples), plus the company-wide median fallback.
+    Lateness is clamped to [0, MAX_LATENESS_DAYS]; early payers count as 0."""
+    paid_on: dict[str, str] = {}
+    async for p in db.payments.find({"company_id": cid}, {"date": 1, "applications": 1, "invoice_id": 1, "linked_invoice_id": 1}):
+        d = (p.get("date") or "")[:10]
+        if not d:
+            continue
+        ids = [a.get("invoice_id") for a in (p.get("applications") or []) if a.get("invoice_id")]
+        ids += [p.get("invoice_id"), p.get("linked_invoice_id")]
+        for iid in ids:
+            if iid and d > paid_on.get(iid, ""):
+                paid_on[iid] = d
+    if not paid_on:
+        return {}, 0
+    per_customer: dict[str, list[int]] = defaultdict(list)
+    all_late: list[int] = []
+    async for inv in db.invoices.find(
+        {"company_id": cid, "id": {"$in": list(paid_on)}, "status": "paid"},
+        {"id": 1, "due_date": 1, "issue_date": 1, "customer_id": 1},
+    ):
+        due = (inv.get("due_date") or inv.get("issue_date") or "")[:10]
+        try:
+            late = (date.fromisoformat(paid_on[inv["id"]]) - date.fromisoformat(due)).days
+        except ValueError:
+            continue
+        late = max(0, min(MAX_LATENESS_DAYS, late))
+        all_late.append(late)
+        if inv.get("customer_id"):
+            per_customer[inv["customer_id"]].append(late)
+    from statistics import median
+    by_customer = {c: int(round(median(v))) for c, v in per_customer.items() if len(v) >= 2}
+    company = int(round(median(all_late))) if all_late else 0
+    return by_customer, company
 
-    Rules:
-      • Invoices with due_date in the future → land on due_date at haircut d0_30
-      • Overdue invoices → land at (today + 7 days) but haircut based on
-        how overdue they already are.
+
+async def _open_invoice_events(cid: str, haircuts: dict, today: date) -> tuple[list[dict], list[dict]]:
+    """Expected inflows from open AR.
+
+    Rules (QBO/Xero/Float-aligned):
+      • `expected_payment_date` set on the invoice → lands there, haircut by aging.
+      • Not yet due → due_date + that customer's typical lateness, haircut d0_30.
+      • ≤30d overdue → max(due + lateness, today+3), haircut d0_30.
+      • 31–60d overdue → today + 14, haircut d30_60.
+      • >60d overdue → EXCLUDED from the base case (returned separately so the
+        UI can ask for an expected date), unless `expected_payment_date` is set.
     """
     invs = await db.invoices.find({
         "company_id": cid,
         "status": {"$nin": ["paid", "void", "voided"]},
     }).to_list(5000)
+    lateness_by_customer, company_lateness = await _customer_lateness(cid)
     events: list[dict] = []
+    excluded: list[dict] = []
     for inv in invs:
         bal = float(inv.get("balance_due") or inv.get("total") or 0)
         if bal <= 0:
@@ -201,35 +243,54 @@ async def _open_invoice_events(cid: str, haircuts: dict, today: date) -> list[di
         except ValueError:
             continue
         days_over = (today - due_d).days
-        if days_over <= 0:
-            landing = due_d
-            hc_key = "d0_30"
-        elif days_over <= 30:
-            landing = _add_days(today, 3)
+        if days_over <= 30:
             hc_key = "d0_30"
         elif days_over <= 60:
-            landing = _add_days(today, 7)
             hc_key = "d30_60"
         elif days_over <= 90:
-            landing = _add_days(today, 14)
             hc_key = "d60_90"
         else:
-            landing = _add_days(today, 21)
             hc_key = "d90_plus"
-        prob = float(haircuts.get(hc_key, DEFAULT_HAIRCUTS[hc_key]))
-        events.append({
-            "date": _iso(landing),
-            "amount": round(bal * prob, 2),
+        customer = inv.get("customer_id")
+        lateness = lateness_by_customer.get(customer, company_lateness)
+        expected = None
+        try:
+            if inv.get("expected_payment_date"):
+                expected = date.fromisoformat(str(inv["expected_payment_date"])[:10])
+        except ValueError:
+            expected = None
+        base = {
             "gross": round(bal, 2),
-            "probability": prob,
             "label": f"Invoice #{inv.get('number') or inv.get('id', '')[:8]}",
             "kind": "invoice",
             "haircut_bucket": hc_key,
             "invoice_id": inv.get("id"),
-            "contact_id": inv.get("customer_id"),
+            "contact_id": customer,
             "contact_name": inv.get("customer_name") or "",
+            "due_date": _iso(due_d),
+            "days_overdue": max(0, days_over),
+            "lateness_days": lateness,
+        }
+        if expected:
+            landing = expected if expected > today else _add_days(today, 3)
+            base["expected_payment_date"] = _iso(expected)
+        elif days_over <= 0:
+            landing = _add_days(due_d, lateness)
+        elif days_over <= 30:
+            landing = max(_add_days(due_d, lateness), _add_days(today, 3))
+        elif days_over <= AR_EXCLUDE_AFTER_DAYS:
+            landing = _add_days(today, 14)
+        else:
+            excluded.append({**base, "reason": "overdue_no_expected_date"})
+            continue
+        prob = float(haircuts.get(hc_key, DEFAULT_HAIRCUTS[hc_key]))
+        events.append({
+            **base,
+            "date": _iso(landing),
+            "amount": round(bal * prob, 2),
+            "probability": prob,
         })
-    return events
+    return events, excluded
 
 
 async def _open_bill_events(cid: str, today: date, horizon_end: date) -> list[dict]:
@@ -263,7 +324,7 @@ async def _open_bill_events(cid: str, today: date, horizon_end: date) -> list[di
         events.append({
             "date": _iso(landing),
             "amount": -round(bal, 2),
-            "label": f"Bill {b.get('vendor_name') or b.get('vendor_id', '')[:8]}",
+            "label": f"Bill {b.get('number') or ''} · {b.get('vendor_name') or b.get('contact_name') or ''}".replace("  ", " ").strip(" ·"),
             "kind": "bill",
             "bill_id": b.get("id"),
             "contact_id": b.get("vendor_id"),
@@ -307,83 +368,104 @@ async def _loan_events(cid: str, today: date, horizon_end: date) -> list[dict]:
 
 
 async def _payroll_events(cid: str, today: date, horizon_end: date) -> list[dict]:
-    """Estimate upcoming payroll runs based on `responsibilities.payroll_frequency`
-    + the mean of the last few payroll transactions on this company.
+    """Upcoming payroll runs.
 
-    Heuristic — good enough for a projection; the CPA can override the
-    number via custom_recurring items on the settings sheet.
+    Frequency comes from `responsibilities.payroll_frequency`; when unset we
+    INFER it from the cadence of payroll-tagged transactions (≥3 in the last
+    120 days) rather than silently omitting payroll — the single largest
+    outflow for most small businesses. Amount = mean of the last 6 runs.
     """
     co = await db.companies.find_one({"id": cid}, {"responsibilities": 1})
     freq = ((co or {}).get("responsibilities") or {}).get("payroll_frequency")
-    if not freq:
-        return []
-    delta_days = {"weekly": 7, "biweekly": 14, "semimonthly": 15, "monthly": 30}.get(freq)
-    if not delta_days:
-        return []
-    # Sample the last few payroll-tagged transactions to derive amount +
-    # anchor date. Fall back to zero → we still emit events so the user
-    # sees the cadence, just as a $0 line.
+    delta_map = {"weekly": 7, "biweekly": 14, "semimonthly": 15, "monthly": 30}
     txns = await db.transactions.find({
         "company_id": cid,
+        "amount": {"$lt": 0},
         "$or": [
             {"category_account_name": {"$regex": "payroll", "$options": "i"}},
-            {"description": {"$regex": "payroll|gusto|adp|paychex", "$options": "i"}},
+            {"description": {"$regex": PAYROLL_RE, "$options": "i"}},
         ],
-    }).sort("date", -1).limit(6).to_list(6)
+    }).sort("date", -1).limit(12).to_list(12)
     if not txns:
         return []
-    amounts = [abs(float(t.get("amount") or 0)) for t in txns]
+    inferred = False
+    if not freq or freq not in delta_map:
+        recent = []
+        for t in txns:
+            try:
+                d = date.fromisoformat(t["date"][:10])
+            except (KeyError, ValueError):
+                continue
+            if (today - d).days <= 120:
+                recent.append(d)
+        recent.sort()
+        if len(recent) < 3:
+            return []
+        gaps = sorted((recent[i] - recent[i - 1]).days for i in range(1, len(recent)))
+        med = gaps[len(gaps) // 2]
+        freq = next((f for f, dd in delta_map.items() if abs(med - dd) <= 2), None)
+        if not freq:
+            return []
+        inferred = True
+    delta_days = delta_map[freq]
+    amounts = [abs(float(t.get("amount") or 0)) for t in txns[:6]]
     avg = round(sum(amounts) / len(amounts), 2) if amounts else 0.0
     if avg <= 0:
         return []
-    # Anchor on the most recent payroll date + delta.
     try:
         anchor = date.fromisoformat(txns[0]["date"][:10])
     except (ValueError, KeyError):
         anchor = today
     events: list[dict] = []
     cursor = anchor
-    # Roll forward until we're past today, then emit each payment through
-    # the horizon.
     while cursor <= today:
         cursor = _add_days(cursor, delta_days)
     while cursor <= horizon_end:
         events.append({
             "date": _iso(cursor),
             "amount": -avg,
-            "label": f"Payroll ({freq})",
+            "label": f"Payroll ({freq}{', inferred' if inferred else ''})",
             "kind": "payroll",
+            "inferred": inferred,
         })
         cursor = _add_days(cursor, delta_days)
     return events
 
 
-async def _sales_tax_events(cid: str, today: date, horizon_end: date) -> list[dict]:
-    """Estimate the next sales-tax remittance.
+def _tax_periods(today: date, horizon_end: date, frequency: str, due_day: int):
+    """Yield (remit_date, period_start, period_end) for each remittance in the horizon."""
+    months = {"monthly": 1, "quarterly": 3, "annual": 12}.get(frequency, 1)
+    pm = today.month - 1 or 12
+    y = today.year if today.month > 1 else today.year - 1
+    m = ((pm - 1) // months) * months + 1  # cadence-aligned period containing last month
+    for _ in range(14):
+        p_start = date(y, m, 1)
+        em = m + months - 1
+        p_end = _month_end(date(y, em, 1))
+        ny, nm = (y, em + 1) if em < 12 else (y + 1, 1)
+        remit = date(ny, nm, min(due_day, monthrange(ny, nm)[1]))
+        if remit > horizon_end:
+            return
+        if remit >= today:
+            yield remit, p_start, p_end
+        m += months
+        if m > 12:
+            m -= 12
+            y += 1
 
-    Simple model: on the 20th of every month, remit whatever's currently
-    collected minus already-remitted for the prior month. If the net
-    obligation is negative (credit), no event is emitted.
-    """
+
+async def _sales_tax_events(cid: str, today: date, horizon_end: date, tax_cfg: dict | None = None) -> list[dict]:
+    """Next sales-tax remittances. Filing frequency + due day come from
+    projection settings (`sales_tax`), default monthly on the 20th."""
+    cfg = {**DEFAULT_SALES_TAX, **(tax_cfg or {})}
+    frequency = cfg.get("frequency") if cfg.get("frequency") in VALID_TAX_FREQ else "monthly"
+    due_day = max(1, min(28, int(cfg.get("due_day") or 20)))
     events: list[dict] = []
-    y, m = today.year, today.month
-    for _ in range(4):
-        remit_date = date(y, m, 20)
-        if remit_date < today:
-            remit_date = _month_end(remit_date)
-            # Move to next month.
-            m += 1
-            if m > 12:
-                m = 1
-                y += 1
+    seen: set[str] = set()
+    for remit_date, start, end in _tax_periods(today, horizon_end, frequency, due_day):
+        if _iso(start) in seen:
             continue
-        if remit_date > horizon_end:
-            break
-        # Sum tax on invoices from the PRIOR month.
-        pm = m - 1 or 12
-        py = y if m > 1 else y - 1
-        start = date(py, pm, 1)
-        end = _month_end(start)
+        seen.add(_iso(start))
         invs = await db.invoices.find({
             "company_id": cid,
             "issue_date": {"$gte": _iso(start), "$lte": _iso(end)},
@@ -396,16 +478,13 @@ async def _sales_tax_events(cid: str, today: date, horizon_end: date) -> list[di
         already = sum(float(p.get("amount") or 0) for p in pays)
         net = round(collected - already, 2)
         if net > 0.01:
+            label = start.strftime("%b") if frequency == "monthly" else f"{start.strftime('%b')}–{end.strftime('%b')}"
             events.append({
                 "date": _iso(remit_date),
                 "amount": -net,
-                "label": f"Sales-tax remittance ({start.strftime('%b')})",
+                "label": f"Sales-tax remittance ({label})",
                 "kind": "sales_tax",
             })
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
     return events
 
 
@@ -447,14 +526,13 @@ def _recurring_events_from_custom(custom: list[dict], today: date, horizon_end: 
     return events
 
 
-async def _historical_burn(cid: str, today: date, lookback_days: int = 180) -> dict:
+async def _historical_burn(cid: str, today: date, lookback_days: int = 90) -> dict:
     """Trailing-N-day monthly in / out / net computed straight from bank
     activity. This is the ground-truth burn — no pattern detection, no
     scheduled event dependence, just what actually left/entered the cash
-    accounts.
-
-    180 days by default (vs. 90) gives a more stable average that
-    absorbs single big-month spikes without over-smoothing seasonality.
+    accounts. 90 days (Xero/Float window) keeps it responsive to the
+    business as it is now. Internal transfers between own accounts are
+    excluded so moving money between pockets doesn't read as burn.
     """
     accts = await db.accounts.find({
         "company_id": cid, "type": "asset", "detail_type": "cash_and_bank",
@@ -474,6 +552,7 @@ async def _historical_burn(cid: str, today: date, lookback_days: int = 180) -> d
                 {"account_id":      {"$in": acct_ids}},
             ],
             "date": {"$gte": start, "$lte": end},
+            "transfer_pair_id": {"$in": [None, ""]},
         }},
         {"$group": {
             "_id": {"$cond": [{"$gt": ["$amount", 0]}, "in", "out"]},
@@ -535,20 +614,25 @@ def _pattern_events(
 ) -> list[dict]:
     """Convert detected recurring patterns into forecast events.
 
-    Skip patterns marked `rejected`. Everything else is auto-applied per
-    the user's setting ("Auto-apply everything, review chip lists them").
+    Skip patterns marked `rejected`. Amounts are weighted by detection
+    confidence (high 1.0, medium 0.85); low-confidence patterns are only
+    booked once the user has explicitly confirmed them (`user_confirmed`).
     Emits an event at each expected date up to the horizon.
     """
     out: list[dict] = []
     for p in patterns:
         if p.get("status") == "rejected":
             continue
+        conf = p.get("confidence") or "low"
+        weight = 1.0 if p.get("user_confirmed") else PATTERN_WEIGHT.get(conf)
+        if weight is None:
+            continue
         amount = float(p.get("median_amount") or 0)
         if amount == 0:
             continue
         cadence = p.get("cadence")
         delta = {"weekly": 7, "biweekly": 14, "semimonthly": 15,
-                 "monthly": 30, "quarterly": 91}.get(cadence)
+                 "monthly": 30, "quarterly": 91, "annual": 365}.get(cadence)
         if not delta:
             continue
         try:
@@ -561,19 +645,22 @@ def _pattern_events(
             if cursor >= today:
                 out.append({
                     "date": _iso(cursor),
-                    "amount": round(amount, 2),
+                    "amount": round(amount * weight, 2),
+                    "gross": round(amount, 2),
+                    "weight": weight,
                     "label": p.get("label") or "Recurring",
                     "kind": "pattern",
+                    "source": p.get("source") or "local",
                     "cadence": cadence,
-                    "confidence": p.get("confidence"),
+                    "confidence": conf,
                     "account_id": p.get("account_id"),
                     "pattern_key": p.get("pattern_key"),
                     "contact_id": p.get("contact_id"),
                     "contact_name": p.get("label") if p.get("contact_id") else "",
                 })
-            if cadence in ("monthly", "quarterly") and preferred_dom:
-                # Advance by month (or 3 months) and snap to preferred day.
-                months = 1 if cadence == "monthly" else 3
+            if cadence in ("monthly", "quarterly", "annual") and preferred_dom:
+                # Advance by month (or 3 / 12 months) and snap to preferred day.
+                months = {"monthly": 1, "quarterly": 3, "annual": 12}[cadence]
                 new_y = cursor.year
                 new_m = cursor.month + months
                 while new_m > 12:
@@ -600,7 +687,18 @@ def _dedup_events(events: list[dict]) -> list[dict]:
     explicit = [e for e in events if e.get("kind") != "pattern"]
     patterns = [e for e in events if e.get("kind") == "pattern"]
     kept: list[dict] = list(explicit)
+    import re as _re
+    payroll_rx = _re.compile(PAYROLL_RE, _re.I)
+    has_payroll = any(e.get("kind") == "payroll" for e in explicit)
+    custom_labels = {(e.get("label") or "").strip().lower() for e in explicit if e.get("kind") == "custom"}
     for p in patterns:
+        plabel = (p.get("label") or "").strip().lower()
+        # Payroll is modelled explicitly; a detected payroll stream would double count.
+        if has_payroll and p["amount"] < 0 and payroll_rx.search(plabel):
+            continue
+        # A user-entered custom item for the same vendor wins over detection.
+        if plabel and any(plabel in c or c in plabel for c in custom_labels if c):
+            continue
         try:
             pd = date.fromisoformat(p["date"])
         except ValueError:
@@ -785,6 +883,72 @@ def _insights(
     return out
 
 
+async def _forecast_confidence(cid: str, today: date, cash_breakdown: list[dict],
+                               patterns: list[dict], burn: dict) -> dict:
+    """Xero-style data-quality gate: how much should the owner trust this
+    line? Scores the inputs the forecast depends on and explains each ding."""
+    score = 100
+    reasons: list[str] = []
+    start_90 = _iso(_add_days(today, -90))
+    # 1. Bank freshness
+    live = [a for a in cash_breakdown if a.get("balance_source") == "plaid_live"]
+    if cash_breakdown and not live:
+        score -= 15
+        reasons.append("No live bank balance — cash anchored on the ledger")
+    else:
+        stale = []
+        for a in live:
+            try:
+                as_of = datetime.fromisoformat(str(a.get("balance_as_of")).replace("Z", "+00:00"))
+                if (datetime.now(timezone.utc) - as_of).days > 3:
+                    stale.append(a.get("name"))
+            except (TypeError, ValueError):
+                continue
+        if stale:
+            score -= 10
+            reasons.append(f"Bank sync older than 3 days ({', '.join(str(s) for s in stale[:2])})")
+    # 2. Categorization completeness (last 90 days)
+    total_90 = await db.transactions.count_documents({"company_id": cid, "date": {"$gte": start_90}})
+    if total_90:
+        uncat = await db.transactions.count_documents({
+            "company_id": cid, "date": {"$gte": start_90},
+            "$or": [{"category_account_id": {"$in": [None, ""]}}, {"needs_review": True}],
+        })
+        pct = uncat / total_90
+        if pct > 0.25:
+            score -= 25
+            reasons.append(f"{uncat} of {total_90} recent transactions uncategorized or flagged")
+        elif pct > 0.10:
+            score -= 12
+            reasons.append(f"{uncat} recent transactions still need review")
+    # 3. History depth
+    first = await db.transactions.find_one({"company_id": cid}, {"date": 1}, sort=[("date", 1)])
+    if not first:
+        score -= 40
+        reasons.append("No transaction history yet")
+    else:
+        try:
+            age = (today - date.fromisoformat(first["date"][:10])).days
+        except (KeyError, ValueError):
+            age = 0
+        if age < 90:
+            score -= 20
+            reasons.append(f"Only {age} days of history — recurring detection needs ~90")
+    # 4. Last complete month reconciled / closed?
+    pm = today.month - 1 or 12
+    py = today.year if today.month > 1 else today.year - 1
+    closed = await db.month_close_signoffs.find_one({"company_id": cid, "year": py, "month": pm, "kind": "closed"})
+    if not closed and total_90:
+        score -= 10
+        reasons.append(f"{date(py, pm, 1).strftime('%B')} not yet closed")
+    # 5. Unconfirmed low-confidence detections
+    low_unconfirmed = sum(1 for p in patterns if p.get("confidence") == "low" and not p.get("user_confirmed") and p.get("status") != "rejected")
+    if low_unconfirmed:
+        reasons.append(f"{low_unconfirmed} low-confidence recurring detections awaiting review (not booked)")
+    level = "high" if score >= 80 else ("medium" if score >= 55 else "low")
+    return {"level": level, "score": max(0, score), "reasons": reasons}
+
+
 # =============================================================================
 # Endpoints
 # =============================================================================
@@ -824,23 +988,26 @@ async def projections_cashflow(
     # exist yet, kick off a detection so the user sees signal on their
     # first visit.
     from routes.projection_patterns import load_active_patterns, detect_patterns
+    import logging
     patterns = await load_active_patterns(cid)
     if not patterns:
         # First-visit auto-scan. Cheap for empty ledgers, safe otherwise.
         try:
             await detect_patterns(cid)
             patterns = await load_active_patterns(cid)
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).warning("pattern detection failed for %s: %s", cid, e)
             patterns = []
 
     # Assemble every scheduled event — explicit sources first, then
     # pattern-detected additions on top.
     events: list[dict] = []
-    events += await _open_invoice_events(cid, settings["ar_haircuts"], today)
+    ar_events, excluded_ar = await _open_invoice_events(cid, settings["ar_haircuts"], today)
+    events += ar_events
     events += await _open_bill_events(cid, today, horizon_end)
     events += await _loan_events(cid, today, horizon_end)
     events += await _payroll_events(cid, today, horizon_end)
-    events += await _sales_tax_events(cid, today, horizon_end)
+    events += await _sales_tax_events(cid, today, horizon_end, settings["sales_tax"])
     events += _recurring_events_from_custom(settings["custom_recurring"], today, horizon_end)
     events += _pattern_events(patterns, today, horizon_end)
     # Dedup pattern events that collide with explicit ones (bill vs
@@ -864,16 +1031,41 @@ async def projections_cashflow(
             scheduled_monthly_net += float(e["amount"])
     hist_net = float(burn.get("avg_monthly_net", 0.0))
     residual_monthly = hist_net - scheduled_monthly_net
+    # Cap the residual at the historical gross out/in so one unusual month
+    # in the lookback can't dominate the forward line.
+    cap = max(abs(float(burn.get("avg_monthly_out", 0.0))), abs(float(burn.get("avg_monthly_in", 0.0))), 0.0)
+    residual_capped = residual_monthly != max(-cap, min(cap, residual_monthly))
+    residual_monthly = max(-cap, min(cap, residual_monthly))
     daily_drift = round(residual_monthly / 30.0, 2)
 
     timeline = _compute_timeline(cash, today, horizon_end, events, daily_drift)
+
+    # Conservative case: no AR collected at all, only high-confidence or
+    # user-confirmed recurring items, same explicit obligations + drift.
+    conservative_events = [
+        e for e in events
+        if e.get("kind") != "invoice"
+        and not (e.get("kind") == "pattern" and e.get("amount", 0) > 0 and e.get("confidence") != "high" and e.get("weight", 1) < 1)
+    ]
+    timeline_conservative = [
+        {"date": r["date"], "cash": r["cash"]}
+        for r in _compute_timeline(cash, today, horizon_end, conservative_events, daily_drift)
+    ]
 
     snapshots = [
         _snapshot(timeline, n, cash) for n in (30, 60, 90, 120) if n <= days
     ]
     forward = _forward_metrics(timeline, cash)
     insights = _insights(cash, timeline, forward["runway_days"], events)
+    if excluded_ar:
+        gross_excl = sum(e["gross"] for e in excluded_ar)
+        insights.insert(0, {
+            "severity": "warning",
+            "message": f"{len(excluded_ar)} invoice(s) totalling ${gross_excl:,.2f} are >60 days overdue and "
+                       f"excluded from the forecast until you set an expected payment date.",
+        })
     per_account = _per_account_timelines(cash_breakdown, today, horizon_end, events)
+    confidence = await _forecast_confidence(cid, today, cash_breakdown, patterns, burn)
 
     # Pattern review summary — this is what feeds the "Review detections"
     # chip on the header.
@@ -882,8 +1074,10 @@ async def projections_cashflow(
         "high":   sum(1 for p in patterns if p.get("confidence") == "high"),
         "medium": sum(1 for p in patterns if p.get("confidence") == "medium"),
         "low":    sum(1 for p in patterns if p.get("confidence") == "low"),
+        "plaid":  sum(1 for p in patterns if p.get("source") == "plaid"),
     }
 
+    low_cons_30 = min((r["cash"] for r in timeline_conservative[:31]), default=cash)
     return {
         "as_of": _iso(today),
         "horizon_days": days,
@@ -906,13 +1100,23 @@ async def projections_cashflow(
             "historical_monthly_in":  float(burn.get("avg_monthly_in",  0.0)),
             "scheduled_next_30d_net": round(scheduled_monthly_net, 2),
             "unexplained_residual_monthly": round(residual_monthly, 2),
-            "lookback_days": int(burn.get("lookback_days", 180)),
+            "residual_capped": residual_capped,
+            "lookback_days": int(burn.get("lookback_days", 90)),
         },
         "timeline": timeline,
+        "timeline_conservative": timeline_conservative,
+        "conservative": {
+            "ending_cash": timeline_conservative[-1]["cash"] if timeline_conservative else cash,
+            "low_30d": round(low_cons_30, 2),
+            "assumptions": "No open invoices collected; only high-confidence or confirmed recurring inflows.",
+        },
         "timeline_per_account": per_account,
         "events": events,
+        "excluded_ar": excluded_ar,
+        "confidence": confidence,
         "settings_summary": {
             "ar_haircuts": settings["ar_haircuts"],
+            "sales_tax": settings["sales_tax"],
             "custom_recurring_count": len([r for r in settings["custom_recurring"] if r.get("active") is not False]),
         },
         "pattern_summary": pattern_summary,
@@ -924,6 +1128,34 @@ async def projections_cashflow(
 
 class SettingsIn(BaseModel):
     ar_haircuts: Optional[dict[str, float]] = None
+    sales_tax: Optional[dict[str, Any]] = None
+
+
+class ExpectedDateIn(BaseModel):
+    expected_payment_date: Optional[str] = None  # ISO date or null to clear
+
+
+@router.post("/companies/{cid}/projections/invoices/{iid}/expected-date")
+async def set_invoice_expected_date(
+    cid: str, iid: str, inp: ExpectedDateIn, user: dict = Depends(get_current_user),
+):
+    """QBO/Xero-style: owner tells us when an overdue invoice will really be
+    paid. Lives on the invoice (`expected_payment_date`) — never touches due_date."""
+    await require_company(user, cid)
+    val = None
+    if inp.expected_payment_date:
+        try:
+            val = _iso(date.fromisoformat(inp.expected_payment_date[:10]))
+        except ValueError:
+            raise HTTPException(400, "expected_payment_date must be YYYY-MM-DD")
+    r = await db.invoices.update_one(
+        {"id": iid, "company_id": cid},
+        {"$set": {"expected_payment_date": val, "expected_payment_set_by": user.get("email") or user.get("id"),
+                  "expected_payment_set_at": now_iso()}},
+    )
+    if not r.matched_count:
+        raise HTTPException(404, "Invoice not found")
+    return {"ok": True, "invoice_id": iid, "expected_payment_date": val}
 
 
 @router.get("/companies/{cid}/projections/settings")
@@ -951,6 +1183,17 @@ async def save_projection_settings(
     }
     if inp.ar_haircuts:
         updates["ar_haircuts"] = {**DEFAULT_HAIRCUTS, **inp.ar_haircuts}
+    if inp.sales_tax is not None:
+        freq = str(inp.sales_tax.get("frequency") or DEFAULT_SALES_TAX["frequency"]).lower()
+        if freq not in VALID_TAX_FREQ:
+            raise HTTPException(400, f"sales_tax.frequency must be one of {sorted(VALID_TAX_FREQ)}")
+        try:
+            due_day = int(inp.sales_tax.get("due_day") or DEFAULT_SALES_TAX["due_day"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "sales_tax.due_day must be an integer")
+        if not 1 <= due_day <= 28:
+            raise HTTPException(400, "sales_tax.due_day must be between 1 and 28")
+        updates["sales_tax"] = {"frequency": freq, "due_day": due_day}
     await db.projection_settings.update_one(
         {"company_id": cid},
         {"$set": {"company_id": cid, **updates}},

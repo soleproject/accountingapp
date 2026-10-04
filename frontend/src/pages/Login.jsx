@@ -146,6 +146,7 @@ export default function Login() {
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/pro/clients"
+        : u.role === "client" ? "/owner"
         : (u.default_landing || "/dashboard")
       );
     } catch (e) {
@@ -168,6 +169,7 @@ export default function Login() {
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/pro/clients"
+        : u.role === "client" ? "/owner"
         : (u.default_landing || "/dashboard")
       );
     } catch (err) {

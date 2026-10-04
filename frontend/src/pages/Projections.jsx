@@ -119,6 +119,7 @@ export default function Projections() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ConfidenceBadge confidence={data.confidence} />
           <ReviewDetectionsChip
             summary={data.pattern_summary}
             onClick={() => setDetectionsOpen(true)}
@@ -171,6 +172,9 @@ export default function Projections() {
 
       {/* Number bar */}
       <NumberBar data={data} fmtMoney={fmtMoney} zoomDays={zoomDays} onZoom={setZoomDays} />
+
+      {/* >60d overdue AR excluded from the base case until an expected date is set */}
+      <ExcludedArPanel excluded={data.excluded_ar} companyId={currentId} fmtMoney={fmtMoney} onSaved={load} />
 
       {/* Burn reconciliation — transparent 3-number breakdown */}
       <BurnReconciliationCard data={data} fmtMoney={fmtMoney} />
@@ -460,10 +464,13 @@ function RunwayCard({ data, fmtMoney }) {
 function ChartCard({ data, fmtMoney, zoomDays, onZoom, chartMode, onChartMode, customRange, onCustomRange }) {
   const [customOpen, setCustomOpen] = useState(false);
   const chartData = useMemo(() => {
-    const rows = (data.timeline || []).map(row => ({ date: row.date, cash: row.cash }));
+    const cons = data.timeline_conservative || [];
+    const rows = (data.timeline || []).map((row, i) => ({
+      date: row.date, cash: row.cash, conservative: cons[i]?.cash ?? null,
+    }));
     if (zoomDays && rows.length) return rows.slice(0, zoomDays);
     return rows;
-  }, [data.timeline, zoomDays]);
+  }, [data.timeline, data.timeline_conservative, zoomDays]);
   const markers = useMemo(() => {
     const evs = (data.events || []).slice();
     const cutoff = zoomDays && chartData.length ? chartData[chartData.length - 1].date : null;
@@ -666,14 +673,108 @@ function TotalChart({ chartData, fmtMoney }) {
             domain={[dataMin => Math.min(dataMin, 0), "auto"]}
           />
           <Tooltip
-            formatter={(v) => fmtMoney(v)}
+            formatter={(v, name) => [fmtMoney(v), name === "conservative" ? "Conservative (no AR)" : "Base case"]}
             labelFormatter={(l) => `On ${l}`}
             contentStyle={{ borderRadius: 6, fontSize: 12 }}
           />
           <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="3 3" strokeWidth={1} />
           <Area type="monotone" dataKey="cash" stroke="#0891b2" fill="url(#cashArea)" strokeWidth={2} />
+          <Area type="monotone" dataKey="conservative" stroke="#94a3b8" fill="none" strokeDasharray="5 4" strokeWidth={1.5} connectNulls />
         </AreaChart>
       </ResponsiveContainer>
+      <div className="flex items-center gap-4 text-[11px] text-slate-500 mt-1 px-1" data-testid="projections-band-legend">
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 h-0.5 bg-cyan-600 rounded" /> Base case</span>
+        <span className="inline-flex items-center gap-1.5"><span className="inline-block w-5 border-t border-dashed border-slate-400" /> Conservative — no invoices collected, confirmed recurring only</span>
+      </div>
+    </div>
+  );
+}
+
+
+function ConfidenceBadge({ confidence }) {
+  if (!confidence) return null;
+  const tone = {
+    high:   "bg-emerald-50 text-emerald-700 border-emerald-200",
+    medium: "bg-amber-50 text-amber-700 border-amber-200",
+    low:    "bg-rose-50 text-rose-700 border-rose-200",
+  }[confidence.level] || "bg-slate-50 text-slate-600 border-slate-200";
+  const reasons = confidence.reasons || [];
+  return (
+    <div className="relative group">
+      <span
+        className={`text-[11px] px-2.5 py-1.5 rounded-md border inline-flex items-center gap-1.5 cursor-help ${tone}`}
+        data-testid="projections-confidence-badge"
+      >
+        <Gauge size={12} /> Forecast confidence: <b className="capitalize">{confidence.level}</b>
+      </span>
+      {reasons.length > 0 && (
+        <div className="hidden group-hover:block absolute right-0 top-full mt-1 z-20 w-80 rounded-lg border bg-white shadow-lg p-3 text-xs text-slate-600 space-y-1" data-testid="projections-confidence-reasons">
+          {reasons.map((r, i) => <div key={i} className="flex gap-1.5"><span>•</span><span>{r}</span></div>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function ExcludedArPanel({ excluded, companyId, fmtMoney, onSaved }) {
+  const [drafts, setDrafts] = useState({});
+  const [saving, setSaving] = useState(null);
+  if (!excluded || excluded.length === 0) return null;
+  const gross = excluded.reduce((s, e) => s + (e.gross || 0), 0);
+  const save = async (e) => {
+    const d = drafts[e.invoice_id];
+    if (!d) return;
+    setSaving(e.invoice_id);
+    try {
+      await api.post(`/companies/${companyId}/projections/invoices/${e.invoice_id}/expected-date`, { expected_payment_date: d });
+      toast.success(`${e.label} now expected ${d}.`);
+      onSaved && onSaved();
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Could not save date.");
+    } finally {
+      setSaving(null);
+    }
+  };
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4" data-testid="projections-excluded-ar">
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+        <div className="flex-1">
+          <div className="text-sm font-semibold text-amber-900">
+            {excluded.length} overdue invoice{excluded.length > 1 ? "s" : ""} ({fmtMoney(gross)}) left out of the forecast
+          </div>
+          <p className="text-xs text-amber-800 mt-0.5">
+            Over 60 days late, so we don't assume the money arrives. Set an expected payment date to put it back in.
+          </p>
+          <div className="mt-3 space-y-2">
+            {excluded.map(e => (
+              <div key={e.invoice_id} className="flex items-center gap-3 flex-wrap text-xs bg-white rounded-md border border-amber-100 px-3 py-2" data-testid={`excluded-ar-row-${e.invoice_id}`}>
+                <div className="flex-1 min-w-[160px]">
+                  <span className="font-medium text-slate-800">{e.label}</span>
+                  {e.contact_name && <span className="text-slate-500"> · {e.contact_name}</span>}
+                  <div className="text-slate-500">{fmtMoney(e.gross)} · due {e.due_date} · {e.days_overdue} days overdue</div>
+                </div>
+                <input
+                  type="date"
+                  value={drafts[e.invoice_id] || ""}
+                  onChange={ev => setDrafts(p => ({ ...p, [e.invoice_id]: ev.target.value }))}
+                  className="border rounded px-2 py-1 text-xs"
+                  data-testid={`excluded-ar-date-${e.invoice_id}`}
+                />
+                <button
+                  onClick={() => save(e)}
+                  disabled={!drafts[e.invoice_id] || saving === e.invoice_id}
+                  className="px-2.5 py-1 rounded bg-slate-900 text-white disabled:opacity-40"
+                  data-testid={`excluded-ar-save-${e.invoice_id}`}
+                >
+                  {saving === e.invoice_id ? "Saving…" : "Expect on this date"}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -888,6 +989,12 @@ function DetectionsModal({ companyId, onClose, onChanged }) {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-slate-900 truncate">{p.label}</span>
                       {confBadge(p.confidence)}
+                      {p.source === "plaid" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200" data-testid="detection-source-plaid">via Plaid</span>
+                      )}
+                      {p.confidence === "low" && !p.user_confirmed && p.status !== "rejected" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border" title="Low-confidence detections are not booked until you keep them">not booked</span>
+                      )}
                       <span className="text-[10px] text-slate-500">{p.cadence}</span>
                     </div>
                     <div className="text-[11px] text-slate-500 flex items-center gap-x-2 gap-y-0.5 flex-wrap mt-0.5">
@@ -1063,6 +1170,7 @@ function RecurringPanel({ recurring, onAdd, onDelete }) {
 
 function AssumptionsModal({ companyId, initial, onClose, onSaved }) {
   const [haircuts, setHaircuts] = useState(initial?.ar_haircuts || {});
+  const [salesTax, setSalesTax] = useState({ frequency: "monthly", due_day: 20, ...(initial?.sales_tax || {}) });
   const [busy, setBusy] = useState(false);
 
   const setBucket = (k, v) => setHaircuts(prev => ({ ...prev, [k]: v }));
@@ -1075,7 +1183,10 @@ function AssumptionsModal({ companyId, initial, onClose, onSaved }) {
         const n = Math.max(0, Math.min(1, parseFloat(v)));
         if (!Number.isNaN(n)) clean[k] = n;
       }
-      await api.post(`/companies/${companyId}/projections/settings`, { ar_haircuts: clean });
+      await api.post(`/companies/${companyId}/projections/settings`, {
+        ar_haircuts: clean,
+        sales_tax: { frequency: salesTax.frequency, due_day: parseInt(salesTax.due_day, 10) || 20 },
+      });
       toast.success("Assumptions saved.");
       onSaved && onSaved();
     } catch (e) {
@@ -1116,6 +1227,30 @@ function AssumptionsModal({ companyId, initial, onClose, onSaved }) {
               </span>
             </div>
           ))}
+        </div>
+        <div className="border-t pt-3">
+          <h4 className="text-sm font-semibold">Sales-tax remittance</h4>
+          <p className="text-xs text-slate-500 mt-0.5 mb-2">How often you file, and the day of the month it's due.</p>
+          <div className="flex items-center gap-3">
+            <select
+              value={salesTax.frequency}
+              onChange={(e) => setSalesTax(s => ({ ...s, frequency: e.target.value }))}
+              className="border rounded-md px-2 py-1 text-sm flex-1"
+              data-testid="projections-salestax-frequency"
+            >
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="annual">Annual</option>
+            </select>
+            <label className="text-xs text-slate-600">Due day</label>
+            <input
+              type="number" min="1" max="28"
+              value={salesTax.due_day}
+              onChange={(e) => setSalesTax(s => ({ ...s, due_day: e.target.value }))}
+              className="border rounded-md px-2 py-1 text-sm w-20 font-mono-num"
+              data-testid="projections-salestax-due-day"
+            />
+          </div>
         </div>
         <div className="flex items-center justify-end gap-2 pt-1">
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-md border">

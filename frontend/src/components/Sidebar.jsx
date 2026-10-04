@@ -11,7 +11,7 @@ import {
   Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
-  ShieldCheck, MessageSquareWarning, CheckCircle2, XCircle,
+  ShieldCheck, MessageSquareWarning, CheckCircle2, XCircle, Compass,
 } from "lucide-react";
 
 import { useNavStyle } from "@/lib/navStyle";
@@ -323,6 +323,9 @@ const GROUPS = [
  */
 const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
                           icon: LayoutDashboard, exact: true };
+// Owner-facing "Your business, in view" dashboard. Clients land here;
+// pros see it too so they can preview exactly what their client sees.
+const ACCOUNTING_OWNER = { to: "/owner", label: "My business", icon: Compass };
 // "To Do" sits directly below Dashboard in every nav style. The
 // Product Accordion has this hard-coded in `renderKids`; the other
 // three styles (rail, modules-menu, modules-dropdown) reference this
@@ -592,6 +595,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
       return (
         <>
           <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
+          <Item item={ACCOUNTING_OWNER} />
           <Item item={{ to: "/accounting/todo", label: "Cockpit", icon: CheckSquare, exact: true }} />
           {/* To Do 2 — same task list, rendered as sidebar cards for
               rapid triage. Doesn't route (uses local sidebar state)
@@ -1546,6 +1550,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             {navStyle === "menu"     && <ModulesSwitcher user={user} />}
             {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
             <Item item={ACCOUNTING_TOP} />
+            <Item item={ACCOUNTING_OWNER} />
             <Item item={ACCOUNTING_TODO} />
           </>
         ) : product === "home" ? (

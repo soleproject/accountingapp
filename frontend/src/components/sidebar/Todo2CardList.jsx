@@ -20,7 +20,7 @@ import { useUserPref } from "@/hooks/useUserPref";
 import { reviewEta, reviewMinutes } from "@/components/DashboardTodos";
 import {
   ArrowLeft, Loader2, ChevronRight, ChevronDown, CircleAlert, User, Bot, Wrench,
-  LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3,
+  LayoutDashboard, FileText, Receipt, ArrowLeftRight, ScrollText, BarChart3, Compass,
   ListTree, Building2, Wallet, Boxes, Tags, CheckCheck, Printer, BookOpen,
   Notebook, Percent, Sparkles, Wand2, ClipboardCheck, CalendarCheck, Lock, History,
   // Icons for the nested Sales & Payments / Purchases subgroups on
@@ -162,6 +162,7 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
 // here so the CPA doesn't have to bounce back to the full menu
 // just to jump into Invoices/Bills/etc. while triaging tasks.
 const QUICK_LINKS = [
+  { to: "/owner",                 label: "My business",  icon: Compass },
   { to: "/dashboard",             label: "Dashboard",    icon: LayoutDashboard },
   { to: "/invoices",              label: "Invoices",     icon: FileText },
   { to: "/bills",                 label: "Bills",        icon: Receipt },
