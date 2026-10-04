@@ -373,7 +373,8 @@ async def _open_checkin_items_by_bucket(cid: str) -> dict[str, list[dict]]:
         "irs_compliance":     [],
     }
     batch = await db.client_review_batches.find_one(
-        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]},
+         "kind": {"$nin": ["cleanup", "catchup"]}},
         sort=[("created_at", -1)],
     )
     if not batch:
@@ -1210,7 +1211,8 @@ async def submit_checkin_item(
     await require_company(user, cid)
 
     batch = await db.client_review_batches.find_one(
-        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]},
+         "kind": {"$nin": ["cleanup", "catchup"]}},
         sort=[("created_at", -1)],
     )
     if not batch:
@@ -1533,7 +1535,8 @@ async def post_checkin_check_assign(
     await require_company(user, cid)
     from routes.client_review import apply_check_assign, CheckAssignBody
     batch = await db.client_review_batches.find_one(
-        {"company_id": cid, "status": {"$in": ["open", "scheduled"]}},
+        {"company_id": cid, "status": {"$in": ["open", "scheduled"]},
+         "kind": {"$nin": ["cleanup", "catchup"]}},
         sort=[("created_at", -1)],
     )
     if not batch:

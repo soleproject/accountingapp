@@ -6,7 +6,7 @@ import { Card, Pill, Why, Big, Kpi, Button, fmtDay, fmtWhole, TONE } from "./ui"
 
 const BOOK_STATUS = { complete: ["ok", "Complete"], nearly: ["ok", "Nearly complete"], behind: ["warn", "Catching up"] };
 
-export function BooksCard({ books, fmt }) {
+export function BooksCard({ books, fmt, onCatchup }) {
   const [tone, label] = BOOK_STATUS[books.status] || BOOK_STATUS.behind;
   return (
     <Card eyebrow="Bookkeeping" title="Are my books up to date?" tag={<Pill tone={tone} data-testid="owner-books-status">{label}</Pill>} data-testid="owner-books-card">
@@ -37,6 +37,18 @@ export function BooksCard({ books, fmt }) {
         {books.period_label} close: <b className="text-slate-900">{books.checkpoints_green} of {books.checkpoints_total} checkpoints</b> green
         {books.preliminary && " — figures are preliminary until open items are resolved."}
       </div>
+      {books.cleanup && books.cleanup.total > 0 && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" data-testid="owner-books-cleanup">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold">Older items · {books.cleanup.pending + books.cleanup.in_catchup} to clear</div>
+            <div className="text-xs text-slate-500">{books.cleanup.done} of {books.cleanup.total} done · older than 30 days, worked at your pace</div>
+            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-2 w-48"><div className="h-full bg-slate-700 rounded-full" style={{ width: `${Math.round(100 * books.cleanup.done / Math.max(1, books.cleanup.total))}%` }} /></div>
+          </div>
+          {onCatchup && (books.cleanup.pending + books.cleanup.in_catchup) > 0 && (
+            <Button onClick={onCatchup} data-testid="owner-books-catchup-btn">{books.cleanup.open_catchup_token ? "Continue catch-up" : "Start a catch-up"}</Button>
+          )}
+        </div>
+      )}
     </Card>
   );
 }

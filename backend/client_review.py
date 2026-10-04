@@ -34,7 +34,7 @@ import uuid
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Any
+from typing import Any, Optional
 
 from deps import db
 
@@ -79,17 +79,20 @@ _KIND_MAP: dict[int, list[str]] = {
 BATCH_MIN_ITEMS         = 3
 BATCH_MIN_DAYS_BETWEEN  = 5
 BATCH_EXPIRY_DAYS       = 14
-AGED_UNCATEGORIZED_DAYS = 7      # window by TRANSACTION DATE for categorization items
+AGED_UNCATEGORIZED_DAYS = 7      # "current": last 7 days by TRANSACTION DATE — never capped
 INGEST_GRACE_HOURS      = 48     # AI/pro get first crack before the owner is asked
-COMPLIANCE_LOOKBACK_DAYS = 60    # receipts / meals / travel / W-9 / liability may be older
-COMPLIANCE_PER_TYPE_CAP = 2      # ...but only a couple per batch so fresh items lead
-BATCH_MAX_ITEMS         = 7      # overall ceiling; the rest carry to the next batch
+OLDER_LOOKBACK_DAYS     = 30     # "older" compliance items (8–30d) ride along, capped per type
+OLDER_PER_TYPE_CAP      = 2
+GREY_AFTER_SKIPS        = 2      # skipped twice → grey Clean Up card, never weekly again
+CATCHUP_BATCH_SIZE      = 7      # owner-paced catch-up sessions pull this many grey items
 INITIAL_DOWNLOAD_HOURS  = 24   # skip anything ingested < 24h post company create
 
 # Categorization-flavored finding types live in the 7-day transaction-date
 # window; compliance types use the longer lookback with a per-type cap.
 _CATEGORIZATION_TYPES = {1, 2, 11, 12, 13}   # uncategorized, no-vendor, owner's draw, deposits, checks
 _COMPLIANCE_TYPES     = {3, 4, 9, 10, 14}    # missing receipt, W-9, liability split, meals, travel
+_NO_DECAY_TYPES       = {4}                  # W-9s don't fade with memory — stay "older" until resolved
+NON_FORWARD_KINDS     = ("cleanup", "catchup")
 
 
 def now_iso() -> str:
@@ -156,42 +159,47 @@ async def _collect_aged_uncategorized(company_id: str) -> list[dict]:
     # inside the type block via `_sort_key`.
     items: list[dict] = []
     async for t in db.transactions.find(query).sort("date", -1).limit(30):
-        amount = float(t.get("amount") or 0)
-        direction = "in" if amount >= 0 else "out"
-        contact_id = t.get("contact_id") or ""
-        contact_name = t.get("merchant") or t.get("contact_name") or ""
-        who = contact_name or ("Unknown vendor" if direction == "out" else "Unknown depositor")
-        verb = "money in" if direction == "in" else "money out"
-        prompt = (
-            f"Tell me about this {verb} — {who} · ${abs(amount):,.2f}"
-        )
-        items.append({
-            "item_id":           str(uuid.uuid4()),
-            "item_type":         ITEM_UNCATEGORIZED,
-            "source_id":         t["id"],
-            "source_collection": "transactions",
-            "prompt":            prompt,
-            "context": {
-                "grouped":      False,
-                "contact_id":   contact_id or None,
-                "contact_name": contact_name,
-                "merchant":     contact_name,
-                "direction":    direction,
-                "amount":       amount,
-                "date":         t.get("date"),
-                "description":  t.get("description"),
-                "account":      t.get("bank_account_name"),
-                "txn_id":       t["id"],
-            },
-            "answered_at":  None,
-            "answer":       None,
-            "deferred":     False,
-            "action_taken": None,
-            "state":        "gathering",
-            "draft":        {},
-            "bookable":     False,
-        })
+        items.append(_txn_to_uncat_item(t))
     return items
+
+
+def _txn_to_uncat_item(t: dict) -> dict:
+    amount = float(t.get("amount") or 0)
+    direction = "in" if amount >= 0 else "out"
+    contact_id = t.get("contact_id") or ""
+    contact_name = t.get("merchant") or t.get("contact_name") or ""
+    who = contact_name or ("Unknown vendor" if direction == "out" else "Unknown depositor")
+    verb = "money in" if direction == "in" else "money out"
+    prompt = (
+        f"Tell me about this {verb} — {who} · ${abs(amount):,.2f}"
+    )
+    return {
+        "item_id":           str(uuid.uuid4()),
+        "item_type":         ITEM_UNCATEGORIZED,
+        "source_id":         t["id"],
+        "source_collection": "transactions",
+        "prompt":            prompt,
+        "context": {
+            "grouped":      False,
+            "contact_id":   contact_id or None,
+            "contact_name": contact_name,
+            "merchant":     contact_name,
+            "direction":    direction,
+            "amount":       amount,
+            "date":         t.get("date"),
+            "description":  t.get("description"),
+            "account":      t.get("bank_account_name"),
+            "txn_id":       t["id"],
+        },
+        "answered_at":  None,
+        "answer":       None,
+        "deferred":     False,
+        "action_taken": None,
+        "state":        "gathering",
+        "draft":        {},
+        "bookable":     False,
+        "tier":         "current",
+    }
 
 
 # ---- Auto-batch heuristics for the Quick Check-in ------------------------
@@ -373,9 +381,17 @@ async def _collect_agent_findings(company_id: str, item_type: int) -> list[dict]
     if not kinds:
         return []
     # Categorization-type findings: this week's transactions only.
-    # Compliance-type findings: longer lookback (they carry deadlines).
-    days = COMPLIANCE_LOOKBACK_DAYS if item_type in _COMPLIANCE_TYPES else AGED_UNCATEGORIZED_DAYS
-    floor = _days_ago(days)[:10]
+    # Compliance-type findings: up to 30 days (W-9s: no limit) — the
+    # 8–30d ones are tagged "older" and capped downstream.
+    if item_type in _NO_DECAY_TYPES:
+        date_filter = {"checkin_skips": {"$not": {"$gte": GREY_AFTER_SKIPS}}}
+    else:
+        days = OLDER_LOOKBACK_DAYS if item_type in _COMPLIANCE_TYPES else AGED_UNCATEGORIZED_DAYS
+        floor = _days_ago(days)[:10]
+        date_filter = {"$or": [
+            {"meta.txn_date": {"$gte": floor}},
+            {"meta.txn_date": {"$in": [None, ""]}, "created_at": {"$gte": floor}},
+        ], "checkin_skips": {"$not": {"$gte": GREY_AFTER_SKIPS}}}
     items: list[dict] = []
     async for f in db.agent_findings.find({
         "company_id": company_id,
@@ -383,29 +399,41 @@ async def _collect_agent_findings(company_id: str, item_type: int) -> list[dict]
         "status":     "open",
         # Not already picked up by a live batch
         "batch_id":   {"$in": [None, ""]},
-        "$or": [
-            {"meta.txn_date": {"$gte": floor}},
-            {"meta.txn_date": {"$in": [None, ""]}, "created_at": {"$gte": floor}},
-        ],
-    }).sort("created_at", -1).limit(20):
-        items.append({
-            "item_id":           str(uuid.uuid4()),
-            "item_type":         item_type,
-            "source_id":         f["id"],
-            "source_collection": "agent_findings",
-            "prompt":            f.get("detail") or f.get("title") or "",
-            "context": {
-                "kind":     f.get("kind"),
-                "title":    f.get("title"),
-                "severity": f.get("severity"),
-                "meta":     f.get("meta") or {},
-            },
-            "answered_at": None,
-            "answer":      None,
-            "deferred":    False,
-            "action_taken": None,
-        })
+        **date_filter,
+    }).sort("created_at", -1).limit(40):
+        items.append(_finding_to_item(f, item_type))
     return items
+
+
+def _finding_age_days(f: dict) -> int:
+    d = ((f.get("meta") or {}).get("txn_date") or f.get("created_at") or "")[:10]
+    try:
+        return (datetime.now(timezone.utc).date() - datetime.fromisoformat(d).date()).days
+    except ValueError:
+        return 0
+
+
+def _finding_to_item(f: dict, item_type: int) -> dict:
+    age = _finding_age_days(f)
+    return ({
+        "item_id":           str(uuid.uuid4()),
+        "item_type":         item_type,
+        "source_id":         f["id"],
+        "source_collection": "agent_findings",
+        "prompt":            f.get("detail") or f.get("title") or "",
+        "context": {
+            "kind":     f.get("kind"),
+            "title":    f.get("title"),
+            "severity": f.get("severity"),
+            "meta":     f.get("meta") or {},
+        },
+        "answered_at": None,
+        "answer":      None,
+        "deferred":    False,
+        "action_taken": None,
+        "tier":        "current" if age <= AGED_UNCATEGORIZED_DAYS else "older",
+        "age_days":    age,
+    })
 
 
 def _prompt_for_uncategorized(t: dict) -> str:
@@ -631,24 +659,19 @@ async def collect_batch_items(company_id: str) -> list[dict]:
 
     deduped.sort(key=_sort_key)
 
-    # Ceiling: fresh categorization items lead; compliance items are
-    # capped per type so a receipt backlog can't crowd out this week's
-    # questions. Anything beyond BATCH_MAX_ITEMS stays in the pool for
-    # the next batch (nothing is lost — items are only stamped with a
-    # batch_id once they are actually minted).
+    # This week's items are NEVER capped — the 7-day window is the cap.
+    # Older (8–30d) compliance items ride along, max 2 per type, so a
+    # backlog can't crowd out current questions. The rest wait in the
+    # pool (or graduate to the grey Clean Up card at day 31 / 2 skips).
     per_type: dict[int, int] = {}
     capped: list[dict] = []
     for it in deduped:
-        t = it.get("item_type") or 0
-        if t in _COMPLIANCE_TYPES and per_type.get(t, 0) >= COMPLIANCE_PER_TYPE_CAP:
-            continue
-        per_type[t] = per_type.get(t, 0) + 1
+        if it.get("tier") == "older":
+            t = it.get("item_type") or 0
+            if per_type.get(t, 0) >= OLDER_PER_TYPE_CAP:
+                continue
+            per_type[t] = per_type.get(t, 0) + 1
         capped.append(it)
-    if len(capped) > BATCH_MAX_ITEMS:
-        # Keep type blocks contiguous but trim the tail; categorization
-        # items (lower _TYPE_ORDER) are already first except receipts (0.5)
-        # which the per-type cap has limited to 2.
-        capped = capped[:BATCH_MAX_ITEMS]
     return capped
 
 
@@ -678,6 +701,9 @@ async def has_open_batch(company_id: str, client_email: str) -> bool:
         "company_id":   company_id,
         "client_email": client_email,
         "status":       {"$in": ["open", "scheduled"]},
+        # Grey Clean Up / owner-paced catch-up batches never block the
+        # weekly check-in.
+        "kind":         {"$nin": list(NON_FORWARD_KINDS)},
     })
     return doc is not None
 
@@ -1335,6 +1361,11 @@ async def client_review_tick() -> dict:
     n = await send_passive_miss_nudges()
     f = await send_follow_up_reminders()
     e = await expire_stale_batches()
+    try:
+        g = await graduate_to_cleanup()
+    except Exception:  # noqa: BLE001
+        g = {"error": "graduate_failed"}
+        logger.exception("graduate_to_cleanup failed")
     t = await trigger_and_dispatch_batches()
     # Vendor outreach follow-up sweep (Milestone G).
     try:
@@ -1343,7 +1374,7 @@ async def client_review_tick() -> dict:
     except Exception:  # noqa: BLE001
         v = {"error": "vendor_outreach_tick_failed"}
         logger.exception("vendor_outreach_tick failed")
-    return {"reminders": r, "nudges": n, "follow_ups": f, "expired": e,
+    return {"reminders": r, "nudges": n, "follow_ups": f, "expired": e, "graduated": g,
             "triggered": t, "vendor_outreach": v}
 
 
@@ -1385,7 +1416,8 @@ async def expire_stale_batches() -> dict:
             try:
                 r = await db[coll].update_many(
                     {"id": {"$in": ids}, "company_id": batch["company_id"]},
-                    {"$unset": {"batch_id": ""}, "$set": {"updated_at": now}},
+                    {"$unset": {"batch_id": ""}, "$set": {"updated_at": now},
+                     "$inc": {"checkin_skips": 1}},
                 )
                 items_released += r.modified_count
             except Exception:  # noqa: BLE001
@@ -1409,3 +1441,150 @@ __all__ = [
     "schedule_batch", "send_scheduled_reminders",
     "send_passive_miss_nudges", "client_review_tick",
 ]
+
+
+# --------------------------------------------------------------------------
+# Grey Clean Up handoff + owner-paced catch-up sessions (2026-10)
+# --------------------------------------------------------------------------
+
+async def _cleanup_batch_for(company_id: str) -> dict:
+    """Find-or-create the single `kind:"cleanup"` batch for a company."""
+    doc = await db.client_review_batches.find_one({"company_id": company_id, "kind": "cleanup"})
+    if doc:
+        return doc
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "owner_email": 1})
+    doc = {
+        "id": str(uuid.uuid4()), "kind": "cleanup", "company_id": company_id,
+        "client_email": (company or {}).get("owner_email") or "", "client_token": "",
+        "items": [], "status": "empty", "created_at": now_iso(), "last_scan_at": now_iso(),
+        "email_sent_at": None, "scheduled_for": None, "reminder_sent_at": None,
+        "nudge_sent_at": None, "completed_at": None, "answer_count": 0, "defer_count": 0,
+        "expires_at": None, "graduated_total": 0,
+    }
+    await db.client_review_batches.insert_one(doc)
+    return doc
+
+
+async def graduate_company_to_cleanup(company_id: str) -> int:
+    """Move items that are too old for the weekly check-in (>30d by
+    transaction date, or skipped twice) onto the grey Clean Up card.
+    W-9 requests never age out. Returns the number of items moved."""
+    company = await db.companies.find_one({"id": company_id}, {"created_at": 1})
+    if not company:
+        return 0
+    floor = _days_ago(OLDER_LOOKBACK_DAYS)[:10]
+    new_items: list[dict] = []
+    stale_or_skipped = {"$or": [
+        {"meta.txn_date": {"$lt": floor, "$nin": [None, ""]}},
+        {"checkin_skips": {"$gte": GREY_AFTER_SKIPS}},
+    ]}
+    for item_type, kinds in _KIND_MAP.items():
+        if item_type in _NO_DECAY_TYPES:
+            cond = {"checkin_skips": {"$gte": GREY_AFTER_SKIPS}}
+        else:
+            cond = stale_or_skipped
+        async for f in db.agent_findings.find({
+            "company_id": company_id, "kind": {"$in": kinds}, "status": "open",
+            "batch_id": {"$in": [None, ""]}, **cond,
+        }).limit(200):
+            new_items.append(_finding_to_item(f, item_type))
+    initial_download_end = _hours_after(company["created_at"], INITIAL_DOWNLOAD_HOURS)
+    async for t in db.transactions.find({
+        "company_id": company_id, "needs_review": True, "human_reviewed": {"$ne": True},
+        "batch_id": {"$in": [None, ""]}, "client_question_id": {"$in": [None, ""]},
+        "created_at": {"$gt": initial_download_end},
+        "$or": [{"date": {"$lt": floor}}, {"checkin_skips": {"$gte": GREY_AFTER_SKIPS}}],
+    }).sort("date", -1).limit(200):
+        new_items.append(_txn_to_uncat_item(t))
+    if not new_items:
+        return 0
+    batch = await _cleanup_batch_for(company_id)
+    seen = {(i.get("source_collection"), i.get("source_id")) for i in batch.get("items") or []}
+    fresh = []
+    for it in new_items:
+        key = (it["source_collection"], it["source_id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        it["tier"] = "grey"
+        fresh.append(it)
+    if not fresh:
+        return 0
+    await db.client_review_batches.update_one(
+        {"id": batch["id"]},
+        {"$push": {"items": {"$each": fresh}}, "$inc": {"graduated_total": len(fresh)},
+         "$set": {"status": "open", "last_scan_at": now_iso()}},
+    )
+    by_coll: dict[str, list[str]] = {}
+    for it in fresh:
+        by_coll.setdefault(it["source_collection"], []).append(it["source_id"])
+    for coll, ids in by_coll.items():
+        await db[coll].update_many({"id": {"$in": ids}, "company_id": company_id},
+                                   {"$set": {"batch_id": batch["id"], "updated_at": now_iso()}})
+    return len(fresh)
+
+
+async def graduate_to_cleanup() -> dict:
+    moved = 0
+    companies = 0
+    async for c in db.companies.find({}, {"id": 1}):
+        try:
+            n = await graduate_company_to_cleanup(c["id"])
+        except Exception:  # noqa: BLE001
+            logger.exception("graduate failed for %s", c["id"])
+            continue
+        moved += n
+        companies += 1
+    return {"companies": companies, "items_moved": moved}
+
+
+async def cleanup_progress(company_id: str) -> dict:
+    """Owner-facing progress for the grey pile: pending / done / total."""
+    batch = await db.client_review_batches.find_one({"company_id": company_id, "kind": "cleanup"})
+    if not batch:
+        return {"pending": 0, "done": 0, "total": 0, "in_catchup": 0, "open_catchup_token": None}
+    pending = sum(1 for i in batch.get("items") or [] if not i.get("answered_at"))
+    in_catchup = 0
+    open_token = None
+    async for cb in db.client_review_batches.find({"company_id": company_id, "kind": "catchup", "status": "open"}):
+        in_catchup += sum(1 for i in cb.get("items") or [] if not i.get("answered_at"))
+        open_token = open_token or cb.get("client_token")
+    total = int(batch.get("graduated_total") or len(batch.get("items") or []))
+    done = max(0, total - pending - in_catchup)
+    return {"pending": pending, "done": done, "total": total, "in_catchup": in_catchup,
+            "open_catchup_token": open_token}
+
+
+async def mint_catchup_batch(company_id: str, limit: int = CATCHUP_BATCH_SIZE) -> Optional[dict]:
+    """Pull up to `limit` grey items into an owner-paced catch-up session.
+    Reuses an open catch-up batch if one exists. Never emailed."""
+    existing = await db.client_review_batches.find_one(
+        {"company_id": company_id, "kind": "catchup", "status": "open"})
+    if existing and any(not i.get("answered_at") for i in existing.get("items") or []):
+        return existing
+    cleanup = await db.client_review_batches.find_one({"company_id": company_id, "kind": "cleanup"})
+    if not cleanup:
+        return None
+    todo = [i for i in cleanup.get("items") or [] if not i.get("answered_at")][:limit]
+    if not todo:
+        return None
+    ids = [i["item_id"] for i in todo]
+    batch = {
+        "id": str(uuid.uuid4()), "kind": "catchup", "company_id": company_id,
+        "client_email": cleanup.get("client_email") or "", "client_token": secrets.token_urlsafe(32),
+        "items": todo, "status": "open", "created_at": now_iso(),
+        "expires_at": _days_ago(-BATCH_EXPIRY_DAYS), "email_sent_at": None,
+        "scheduled_for": None, "reminder_sent_at": None, "nudge_sent_at": None,
+        "completed_at": None, "answer_count": 0, "defer_count": 0,
+        "label": "Catch-up",
+    }
+    await db.client_review_batches.insert_one(batch)
+    await db.client_review_batches.update_one(
+        {"id": cleanup["id"]}, {"$pull": {"items": {"item_id": {"$in": ids}}}})
+    by_coll: dict[str, list[str]] = {}
+    for it in todo:
+        by_coll.setdefault(it["source_collection"], []).append(it["source_id"])
+    for coll, sids in by_coll.items():
+        await db[coll].update_many({"id": {"$in": sids}, "company_id": company_id},
+                                   {"$set": {"batch_id": batch["id"]}})
+    return batch

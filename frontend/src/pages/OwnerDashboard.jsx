@@ -64,6 +64,15 @@ export default function OwnerDashboard() {
   const onAttention = (it) => {
     if (it.href) navigate(it.href);
   };
+  const startCatchup = async () => {
+    try {
+      const r = await api.post(`/companies/${currentId}/owner-dashboard/catchup`, {});
+      if (r.data?.review_url) navigate(r.data.review_url);
+      else toast.success("Nothing older is waiting — you're all caught up.");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not start a catch-up.");
+    }
+  };
 
   if (!currentId) {
     return <div className="p-10 text-slate-500 text-sm" data-testid="owner-dashboard-no-company">No company is linked to your account yet. Your bookkeeper will connect one shortly.</div>;
@@ -112,7 +121,7 @@ export default function OwnerDashboard() {
             {b.needs_you > 0 && b.needs_you_href && <Button primary onClick={() => navigate(b.needs_you_href)} data-testid="owner-banner-cta">Answer now →</Button>}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <BooksCard books={data.books} fmt={fmt} />
+            <BooksCard books={data.books} fmt={fmt} onCatchup={startCatchup} />
             <ProfitCard profit={data.profit} periodLabel={data.period.label.split(" ")[0]} fmt={fmt} />
             <CashCard cash={data.cash} fmt={fmt} />
             <AttentionCard items={data.attention} onAction={onAttention} />
