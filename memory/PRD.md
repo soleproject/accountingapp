@@ -879,3 +879,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Michael Co 2 Cockpit now shows 3 grey boxes: Receipt Follow-up 216, IRS Compliance 162, Uncategorized 85. Test answer reverted afterwards.
 - Still open: `owner_email` missing on new companies (P0) — Michael Co 2 check-in emails skip.
 - 2026-10-04: Grey Clean Up cards (`variant: "cleanup"` / `cleanup_*` keys) are filtered out of the left-side To Do card strip (`Todo2CardList.openItems`). They live on the Cockpit `ResponsibilitiesPanel` only.
+- 2026-10-04: `/welcome/pricing` now renders the shared `ProfileMenu` (from Layout.jsx) pinned top-right (`pricing-profile-menu`) so locked-out / returning customers can sign out or switch accounts. Verified desktop + mobile (no overflow); Sign out → /login.

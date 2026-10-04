@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
-import { CompanySwitcher } from "@/components/Layout";
+import { CompanySwitcher, ProfileMenu } from "@/components/Layout";
 import { api } from "@/lib/api";
 
 // ─── Plan catalog ──────────────────────────────────────────────────
@@ -386,6 +386,12 @@ export default function PricingPlans() {
           )}
         </div>
       )}
+
+      {/* Top-right profile chip — gives a locked-out / returning
+          customer a way to switch accounts or sign out. */}
+      <div className="fixed top-4 right-6 z-10" data-testid="pricing-profile-menu">
+        <ProfileMenu />
+      </div>
 
       <div className="max-w-[1500px] mx-auto">
 
