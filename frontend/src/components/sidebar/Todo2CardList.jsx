@@ -385,6 +385,8 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
   const openItems = useMemo(() => {
     const list = items.filter(it => {
       if (it.status === "done" || it.status === "n/a") return false;
+      // Grey Clean Up cards live on the Cockpit only — keep the To Do strip forward-looking.
+      if (it.variant === "cleanup" || String(it.key || "").startsWith("cleanup_")) return false;
       // For tracked items with a numeric count, require count > 0.
       if (it.tracked && typeof it.count === "number" && it.count === 0
           && !it.manual_complete && it.status !== "in_progress") {

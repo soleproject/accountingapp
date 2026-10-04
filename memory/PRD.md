@@ -878,3 +878,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - FE: `CheckinAnswerForm` type 1 (Cockpit mode) loads `/accounts` and shows `AccountPicker` (`uncat-category-field` / `uncat-category-picker`); payload `account_id` + `account_name` → `_handle_uncategorized` fallback books it (human_reviewed). Note-only still annotates. `ResponsibilitiesPanel` label added.
 - Michael Co 2 Cockpit now shows 3 grey boxes: Receipt Follow-up 216, IRS Compliance 162, Uncategorized 85. Test answer reverted afterwards.
 - Still open: `owner_email` missing on new companies (P0) — Michael Co 2 check-in emails skip.
+- 2026-10-04: Grey Clean Up cards (`variant: "cleanup"` / `cleanup_*` keys) are filtered out of the left-side To Do card strip (`Todo2CardList.openItems`). They live on the Cockpit `ResponsibilitiesPanel` only.
