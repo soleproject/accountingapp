@@ -64,6 +64,14 @@ export default function SuperadminDash() {
             <Inbox size={16} /> Leads
           </Link>
           <Link
+            to="/admin/affiliates"
+            data-testid="nav-admin-affiliates"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Every affiliate and referrer — firm, funnel counts, earnings"
+          >
+            <Inbox size={16} /> Affiliates
+          </Link>
+          <Link
             to="/admin/feedback"
             data-testid="nav-admin-feedback"
             className="relative inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
