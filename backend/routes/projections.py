@@ -324,7 +324,7 @@ async def _open_bill_events(cid: str, today: date, horizon_end: date) -> list[di
         events.append({
             "date": _iso(landing),
             "amount": -round(bal, 2),
-            "label": f"Bill {b.get('vendor_name') or b.get('vendor_id', '')[:8]}",
+            "label": f"Bill {b.get('number') or ''} · {b.get('vendor_name') or b.get('contact_name') or ''}".replace("  ", " ").strip(" ·"),
             "kind": "bill",
             "bill_id": b.get("id"),
             "contact_id": b.get("vendor_id"),

@@ -40,6 +40,7 @@ import ArAgingReport from "@/pages/ArAgingReport";
 import ApAgingReport from "@/pages/ApAgingReport";
 import SalesTaxReport from "@/pages/SalesTaxReport";
 import Projections from "@/pages/Projections";
+import OwnerDashboard from "@/pages/OwnerDashboard";
 import CrmOverview from "@/pages/CrmOverview";
 import CrmEmail from "@/pages/CrmEmail";
 import CrmCalendar from "@/pages/CrmCalendar";
@@ -176,6 +177,14 @@ function Protected({ children }) {
   return children;
 }
 
+// Business owners (client role) land on the owner dashboard instead of
+// the pro-oriented accounting dashboard.
+function ClientHome({ children }) {
+  const { user } = useAuth();
+  if (user?.role === "client") return <Navigate to="/owner" replace />;
+  return children;
+}
+
 // Sits inside BrandingProvider so the hook can read the signed-in user's
 // firm branding. Renders nothing — its only job is to keep document.title
 // in sync with the current host + logged-in firm.
@@ -220,7 +229,9 @@ function App() {
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
+              <Route path="/dashboard" element={<ProductGuard product="accounting"><ClientHome><Dashboard /></ClientHome></ProductGuard>} />
+              <Route path="/owner" element={<OwnerDashboard />} />
+              <Route path="/owner/:tab" element={<OwnerDashboard />} />
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
               <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Projections /></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
