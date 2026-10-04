@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>Owner Overview — preview</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#0f172a;--mute:#64748b;--line:#e6e9ef;--bg:#f6f7f9;--card:#fff;--brand:#4F46E5;--brand-soft:#eef2ff;--ok:#059669;--ok-soft:#ecfdf5;--warn:#b45309;--warn-soft:#fffbeb;--bad:#be123c;--bad-soft:#fff1f2;--teal:#0891b2}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:14px}
+  .top{display:flex;align-items:center;justify-content:space-between;padding:14px 32px;background:#fff;border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600}
+  .brand .mark{width:28px;height:28px;border-radius:8px;background:var(--brand)}
+  .tabs{display:flex;gap:4px;background:var(--bg);padding:4px;border-radius:10px}
+  .tabs a{padding:6px 14px;border-radius:7px;color:var(--mute);text-decoration:none;font-weight:500}
+  .tabs a.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(15,23,42,.08)}
+  .co{display:flex;align-items:center;gap:10px;color:var(--mute)}
+  .co b{color:var(--ink)}
+  .wrap{max-width:1180px;margin:0 auto;padding:36px 32px 64px}
+  h1{font-family:Fraunces,serif;font-weight:500;font-size:34px;letter-spacing:-.01em;margin:0 0 6px}
+  .sub{color:var(--mute);margin:0}
+  .hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin-bottom:22px}
+  .period{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fff;padding:8px 12px;border-radius:8px}
+  .period small{color:var(--mute);text-transform:uppercase;letter-spacing:.08em;font-size:10px}
+  .banner{display:flex;align-items:center;gap:14px;background:var(--brand-soft);border:1px solid #e0e7ff;border-radius:12px;padding:14px 18px;margin-bottom:22px}
+  .banner .dot{width:10px;height:10px;border-radius:50%;background:var(--brand)}
+  .banner b{font-weight:600}
+  .grid{display:grid;grid-template-columns:1.1fr 1fr;gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;position:relative}
+  .eyebrow{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:600;margin-bottom:6px}
+  .q{font-family:Fraunces,serif;font-size:21px;font-weight:500;margin:0 0 14px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.mute{background:#f1f5f9;color:var(--mute)}
+  .big{font-family:"IBM Plex Mono",monospace;font-size:34px;font-weight:500;letter-spacing:-.02em}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:12px}
+  .mono{font-family:"IBM Plex Mono",monospace}
+  .bar{height:8px;background:#eef2f7;border-radius:999px;overflow:hidden;margin:10px 0 6px}
+  .bar i{display:block;height:100%;background:var(--ok);border-radius:999px}
+  .fine{color:var(--mute);font-size:12px}
+  .acct{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px dashed var(--line)}
+  .acct:first-of-type{border-top:0}
+  .acct .n{display:flex;align-items:center;gap:10px}
+  .acct .ic{width:30px;height:30px;border-radius:8px;background:#f1f5f9;display:grid;place-items:center;color:var(--mute);font-size:12px;font-weight:600}
+  .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:8px 0 14px}
+  .kpis div small{display:block;color:var(--mute);font-size:11px;margin-bottom:2px}
+  .kpis .v{font-family:"IBM Plex Mono",monospace;font-size:17px;font-weight:500}
+  .up{color:var(--ok)} .dn{color:var(--bad)}
+  svg text{font-family:"IBM Plex Sans";font-size:10px;fill:#94a3b8}
+  .legend{display:flex;gap:16px;font-size:11px;color:var(--mute);margin-top:6px}
+  .legend i{display:inline-block;width:18px;height:2px;vertical-align:middle;margin-right:6px;background:var(--teal)}
+  .legend i.d{border-top:2px dashed #94a3b8;background:none;height:0}
+  .why{margin-top:14px;padding:12px 14px;border-radius:10px;background:#f8fafc;border:1px solid var(--line);font-size:13px;display:flex;gap:10px}
+  .why span.ai{flex:none;width:22px;height:22px;border-radius:6px;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-size:11px;font-weight:700}
+  .item{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--line)}
+  .item:first-of-type{border-top:0}
+  .item .ic{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+  .item .t{flex:1}
+  .item .t b{display:block;font-weight:600}
+  .item .t span{color:var(--mute);font-size:12px}
+  .btn{border:1px solid var(--line);background:#fff;padding:7px 12px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer}
+  .btn.p{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .team{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:10px}
+  .team .s{text-align:left;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fafbfc}
+  .team .s .v{font-family:"IBM Plex Mono",monospace;font-size:24px;font-weight:500}
+  .team .s small{color:var(--mute);font-size:12px}
+  .foot{display:flex;justify-content:space-between;color:var(--mute);font-size:12px;margin-top:28px}
+  .tag{position:absolute;top:14px;right:16px}
+</style>
+</head>
+<body>
+<div class="top">
+  <div class="brand"><span class="mark"></span> ProactiveBooks <span style="color:var(--mute);font-weight:400">· Your business, in view</span></div>
+  <nav class="tabs"><a class="on" href="#">Overview</a><a href="#">Money</a><a href="#">Documents</a><a href="#">Your team</a></nav>
+  <div class="co"><span>Entity</span> <b>Michael Co LLC ▾</b></div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <div>
+      <h1>Good afternoon, Michael.</h1>
+      <p class="sub">Here's where Michael Co LLC stands — numbers pulled live from your books and bank.</p>
+    </div>
+    <div class="period"><small>Financial period</small> <b>September 2026 ▾</b></div>
+  </div>
+
+  <div class="banner"><span class="dot"></span>
+    <div><b>Your bookkeeping is moving along.</b> Your team handled <b>119 items</b> this week. <b>Two answers</b> from you will finish September.</div>
+    <span style="margin-left:auto"><button class="btn p">Answer now →</button></span>
+  </div>
+
+  <div class="grid">
+    <!-- BOOKS -->
+    <div class="card">
+      <span class="tag pill ok">Nearly complete</span>
+      <div class="eyebrow">Bookkeeping</div>
+      <h2 class="q">Are my books up to date?</h2>
+      <div class="row"><span>Updated through <b>Oct 2</b></span><span class="fine">Last bank sync · Oct 2, 10:24 AM</span></div>
+      <div class="bar"><i style="width:91%"></i></div>
+      <div class="fine"><b style="color:var(--ink)">91%</b> of September's 79 transactions categorized · <b style="color:var(--warn)">7 awaiting your answers</b></div>
+      <div style="margin-top:16px">
+        <div class="acct"><div class="n"><span class="ic">BK</span><div><b>Business Checking</b><div class="fine">66 of 79 reconciled · 4 to review</div></div></div><span class="pill ok">Synced Oct 2</span></div>
+        <div class="acct"><div class="n"><span class="ic">BA</span><div><b>Bank of America ···6084</b><div class="fine">Reconciled through Sep 30</div></div></div><span class="pill ok">Synced Oct 2</span></div>
+        <div class="acct"><div class="n"><span class="ic">CC</span><div><b>Capital One Card ···5012</b><div class="fine">Statement not yet matched</div></div></div><span class="pill warn">Needs statement</span></div>
+      </div>
+      <div class="fine" style="margin-top:12px">September close: <b style="color:var(--ink)">4 of 5 checkpoints</b> green — figures below are preliminary until the 7 items are resolved.</div>
+    </div>
+
+    <!-- PROFIT -->
+    <div class="card">
+      <span class="tag pill mute">Accrual basis</span>
+      <div class="eyebrow">Profitability</div>
+      <h2 class="q">Am I making money?</h2>
+      <div class="row" style="align-items:flex-end">
+        <div><small class="fine">Net profit · September</small><div class="big up">$24,149</div></div>
+        <div class="pill ok">▲ 112% vs August</div>
+      </div>
+      <div class="kpis">
+        <div><small>Revenue</small><span class="v">$28,184</span></div>
+        <div><small>Expenses</small><span class="v">$4,035</span></div>
+        <div><small>Margin</small><span class="v">85.7%</span></div>
+      </div>
+      <svg viewBox="0 0 420 110" width="100%" height="110">
+        <g fill="#0891b2"><rect x="18" y="62" width="22" height="38"/><rect x="84" y="48" width="22" height="52"/><rect x="150" y="70" width="22" height="30"/><rect x="216" y="40" width="22" height="60"/><rect x="282" y="56" width="22" height="44"/><rect x="348" y="22" width="22" height="78"/></g>
+        <g fill="#334155"><rect x="42" y="86" width="22" height="14"/><rect x="108" y="80" width="22" height="20"/><rect x="174" y="88" width="22" height="12"/><rect x="240" y="78" width="22" height="22"/><rect x="306" y="84" width="22" height="16"/><rect x="372" y="90" width="22" height="10"/></g>
+        <text x="24" y="108">Apr</text><text x="90" y="108">May</text><text x="156" y="108">Jun</text><text x="222" y="108">Jul</text><text x="288" y="108">Aug</text><text x="354" y="108">Sep</text>
+      </svg>
+      <div class="legend"><span><i style="background:#0891b2"></i>Revenue</span><span><i style="background:#334155"></i>Expenses</span></div>
+      <div class="why"><span class="ai">AI</span><div>September profit is up because <b>Luna Marketing</b> and <b>Northstar</b> both paid large invoices and expenses stayed flat. One $26k equipment purchase on Oct 3 will show in October.</div></div>
+    </div>
+
+    <!-- CASH -->
+    <div class="card">
+      <span class="tag pill ok">Forecast confidence · High</span>
+      <div class="eyebrow">Cash outlook · next 30 days</div>
+      <h2 class="q">Can I cover what's coming due?</h2>
+      <div class="row" style="align-items:flex-end">
+        <div><small class="fine">Cash available now · 3 accounts · as of Oct 4</small><div class="big">$27,218</div></div>
+      </div>
+      <div class="kpis">
+        <div><small>Expected collections</small><span class="v up">+ $22,786</span></div>
+        <div><small>Upcoming obligations</small><span class="v dn">− $25,684</span></div>
+        <div><small>Ending cash · Nov 3</small><span class="v">$23,733</span></div>
+      </div>
+      <svg viewBox="0 0 420 120" width="100%" height="120">
+        <defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity=".45"/><stop offset="1" stop-color="#22d3ee" stop-opacity=".03"/></linearGradient></defs>
+        <line x1="0" y1="100" x2="420" y2="100" stroke="#ef4444" stroke-dasharray="3 3"/>
+        <path d="M0 42 L70 18 L140 44 L210 66 L280 67 L350 56 L420 50 L420 100 L0 100Z" fill="url(#g)"/>
+        <path d="M0 42 L70 18 L140 44 L210 66 L280 67 L350 56 L420 50" fill="none" stroke="#0891b2" stroke-width="2"/>
+        <path d="M0 42 L70 44 L140 70 L210 92 L280 93 L350 92 L420 91" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4"/>
+        <text x="0" y="114">Today</text><text x="130" y="114">Oct 14</text><text x="270" y="114">Oct 24</text><text x="390" y="114">Nov 3</text>
+      </svg>
+      <div class="legend"><span><i></i>Base case</span><span><i class="d"></i>If no invoices get paid — lowest point $3,728</span></div>
+      <div class="why"><span class="ai">AI</span><div><b>No shortfall projected.</b> Biggest outflows: a $4,510 bill and your $3,465 Rocket Mortgage on Oct 18. Three invoices ($18,652) are 60+ days late and <u>not</u> counted — <a href="#" style="color:var(--brand)">tell us when to expect them</a>.</div></div>
+    </div>
+
+    <!-- ATTENTION -->
+    <div class="card">
+      <span class="tag pill warn">4 items</span>
+      <div class="eyebrow">Your attention</div>
+      <h2 class="q">What needs me?</h2>
+      <div class="item"><span class="ic" style="background:var(--brand-soft);color:var(--brand)">?</span><div class="t"><b>What were these purchases for?</b><span>7 transactions · Home Depot, Priya Patel, 2 checks without a payee</span></div><button class="btn p">Answer</button></div>
+      <div class="item"><span class="ic" style="background:var(--warn-soft);color:var(--warn)">▤</span><div class="t"><b>A receipt is missing</b><span>Office Depot · $186.42 · Sep 29 · Capital One ···5012</span></div><button class="btn">Snap it</button></div>
+      <div class="item"><span class="ic" style="background:var(--bad-soft);color:var(--bad)">!</span><div class="t"><b>4 invoices are overdue — $27,704</b><span>Luna Marketing Co. INV-1006 · $8,278 · 85 days late</span></div><button class="btn">Send reminder</button></div>
+      <div class="item"><span class="ic" style="background:#f1f5f9;color:var(--mute)">⇅</span><div class="t"><b>Capital One statement needed</b><span>September · to finish reconciling the card</span></div><button class="btn">Upload</button></div>
+      <div class="fine" style="margin-top:14px">Routine bookkeeping is handled. These need your input or a decision.</div>
+    </div>
+  </div>
+
+  <!-- TEAM STRIP -->
+  <div class="card" style="margin-top:18px">
+    <div class="row">
+      <div><div class="eyebrow">Your bookkeeping team</div><h2 class="q" style="margin:0">Here's what we handled this week <span class="fine" style="font-family:'IBM Plex Sans';font-size:13px">· Sep 28 – Oct 4</span></h2></div>
+      <div class="co"><span class="pill mute">AI bookkeeper</span><span class="pill mute">Priya Patel, CPA</span><button class="btn">Schedule a check-in</button></div>
+    </div>
+    <div class="team">
+      <div class="s"><div class="v">86</div><small>Transactions categorized</small></div>
+      <div class="s"><div class="v">18</div><small>Receipts matched to bank activity</small></div>
+      <div class="s"><div class="v">66</div><small>Bank transactions reconciled</small></div>
+    </div>
+  </div>
+
+  <div class="foot"><span>Figures are live — preliminary until September's 7 open items are resolved.</span><span>Last synced Oct 2 · 10:24 AM</span></div>
+</div>
+</body>
+</html>
