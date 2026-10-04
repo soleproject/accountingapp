@@ -299,11 +299,52 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
 # ----------------------------------------------------------------------
 # Affiliate — every user has a shareable referral slug + link.
 # ----------------------------------------------------------------------
-def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
+def _firm_lookup_query(slug: str) -> dict:
+    return {"$or": [
+        {"branding.signin_subdomain": slug},
+        {"branding.subdomain": slug},
+        {"branding.subdomain_slug": slug},
+    ]}
+
+
+async def _resolve_firm_for_user(user: dict) -> dict | None:
+    """The white-label firm (pro user doc) a user belongs to: themselves if
+    they own a private-label slug, else the firm they signed up under."""
+    b = (user or {}).get("branding") or {}
+    if b.get("signin_subdomain") or b.get("subdomain") or b.get("subdomain_slug") or b.get("buy_page_url"):
+        return user
+    slug = (user.get("signup_firm_slug") or "").strip().lower()
+    if slug:
+        firm = await db.users.find_one(_firm_lookup_query(slug))
+        if firm:
+            return firm
+    ent_id = user.get("enterprise_id")
+    if ent_id:
+        ent = await db.enterprises.find_one({"id": ent_id}, {"owner_user_id": 1})
+        if ent and ent.get("owner_user_id"):
+            return await db.users.find_one({"id": ent["owner_user_id"]})
+    return None
+
+
+def _firm_public_info(firm: dict | None) -> dict | None:
+    if not firm:
+        return None
+    b = firm.get("branding") or {}
+    slug = (b.get("signin_subdomain") or b.get("subdomain") or b.get("subdomain_slug") or "").strip() or None
+    logos = b.get("logos") or {}
+    return {
+        "slug": slug,
+        "name": b.get("firm_name") or firm.get("firm_name") or firm.get("name") or (slug.title() if slug else None),
+        "logo_url": logos.get("logo_light") or b.get("logo_light") or b.get("logo_url") or None,
+    }
+
+
+def _share_link_for(user: dict, slug: str, firm: dict | None = None) -> tuple[str, str]:
     """Return ``(link, source)`` — the URL to share and a label
     indicating which config drove it.
 
-    Precedence:
+    Precedence (branding comes from ``firm`` — the white-label firm the
+    user belongs to — falling back to the user's own branding):
       1. Firm's custom "buy page URL" (``branding.buy_page_url``) —
          referrer's site or a dedicated pricing page. Ref param appended
          as ``?ref=`` (or ``&ref=`` if the URL already has a query).
@@ -317,15 +358,19 @@ def _share_link_for(user: dict, slug: str) -> tuple[str, str]:
     which itself forwards to ``/signup?ref=<slug>`` after submission.
     Full funnel is trackable end-to-end: click → lead → signup → pay.
     """
-    b = (user or {}).get("branding") or {}
+    b = ((firm or user) or {}).get("branding") or {}
     buy_url = (b.get("buy_page_url") or "").strip()
     if buy_url:
         sep = "&" if "?" in buy_url else "?"
         return f"{buy_url}{sep}ref={slug}", "firm_buy_page"
-    firm_slug = (b.get("signin_subdomain") or "").strip() or None
-    template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
-    if firm_slug and template:
-        host_url = template.replace("{slug}", firm_slug).rstrip("/")
+    firm_slug = (b.get("signin_subdomain") or b.get("subdomain") or b.get("subdomain_slug") or "").strip() or None
+    if firm_slug:
+        template = os.environ.get("PRIVATE_LABEL_HOST_TEMPLATE")
+        if template:
+            host_url = template.replace("{slug}", firm_slug).rstrip("/")
+        else:
+            from subdomain_util import subdomain_to_host
+            host_url = f"https://{subdomain_to_host(firm_slug)}"
         return f"{host_url}/r/{slug}", "firm_subdomain"
     host = os.environ.get("PRIMARY_HOST", "app.smartbookssoftware.ai")
     return f"https://{host}/r/{slug}", "platform"
@@ -340,7 +385,8 @@ async def share_info(user: dict = Depends(get_current_user)):
     from referral_util import mint_slug_for_user
     slug = await mint_slug_for_user(user["id"])
     doc = await db.users.find_one({"id": user["id"]}) or {}
-    link, link_source = _share_link_for(doc, slug)
+    firm = await _resolve_firm_for_user(doc)
+    link, link_source = _share_link_for(doc, slug, firm)
     referred_count = await db.users.count_documents({"referred_by_user_id": user["id"]})
     earnings_docs = await db.referral_earnings.find(
         {"referrer_user_id": user["id"]}
@@ -352,7 +398,9 @@ async def share_info(user: dict = Depends(get_current_user)):
         "slug": slug,
         "link": link,
         "link_source": link_source,
-        "buy_page_url": (doc.get("branding") or {}).get("buy_page_url") or "",
+        "firm": _firm_public_info(firm),
+        "can_set_buy_page": doc.get("role") in ("pro", "superadmin", "partner"),
+        "buy_page_url": ((firm or doc).get("branding") or {}).get("buy_page_url") or "",
         "referred_count": referred_count,
         "paying_count": paying,
         "earnings_cents": accrued + paid_out,

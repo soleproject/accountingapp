@@ -880,3 +880,10 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Still open: `owner_email` missing on new companies (P0) — Michael Co 2 check-in emails skip.
 - 2026-10-04: Grey Clean Up cards (`variant: "cleanup"` / `cleanup_*` keys) are filtered out of the left-side To Do card strip (`Todo2CardList.openItems`). They live on the Cockpit `ResponsibilitiesPanel` only.
 - 2026-10-04: `/welcome/pricing` now renders the shared `ProfileMenu` (from Layout.jsx) pinned top-right (`pricing-profile-menu`) so locked-out / returning customers can sign out or switch accounts. Verified desktop + mobile (no overflow); Sign out → /login.
+
+## 2026-10-04 — Affiliate referral link follows the white-label firm ✅ (API + UI verified)
+- Bug: affiliates who signed up on a firm's private-label host got `https://app.smartbookssoftware.ai/r/{slug}` (platform) because `_share_link_for` only read the *user's own* branding.
+- `routes/auth.py`: NEW `_resolve_firm_for_user(user)` (self if they own a slug/buy page → `signup_firm_slug` firm pro → enterprise owner), `_firm_public_info()`; `_share_link_for(user, slug, firm)` uses the firm's `buy_page_url` / subdomain; when `PRIVATE_LABEL_HOST_TEMPLATE` is unset it falls back to `https://{slug}.{PRIVATE_LABEL_ROOT}` (`subdomain_to_host`). `GET /share` returns `firm {slug,name,logo_url}` + `can_set_buy_page`.
+- `routes/leads.py` `GET /public/refer/{slug}` returns `firm_slug / firm_name / firm_logo_url`; `EnterReferral.jsx` shows the firm brand strip and forwards `/signup?ref=…&firm=…` so signups attribute to the firm even from the platform host.
+- `Share.jsx`: "for {Firm}" chip, firm-aware copy, Buy-page hint only for pros/partners.
+- Prod note: existing affiliates are picked up via their `signup_firm_slug`; if an older affiliate lacks it, set `users.signup_firm_slug` to the firm's slug.

@@ -54,17 +54,21 @@ export default function EnterReferral() {
 
   const [slug] = useState(urlSlug || params.get("ref") || "");
   const [referrer, setReferrer] = useState(null);
+  const [firm, setFirm] = useState(null);
   const [role, setRole] = useState("accounting_pro");
   const [form, setForm] = useState({
     name: "", email: "", phone: "", company_name: "", notes: "",
   });
   const [submitting, setSubmitting] = useState(false);
 
-  // Resolve referrer display name if a slug is present
+  // Resolve referrer display name (+ their white-label firm) if a slug is present
   useEffect(() => {
     if (!slug) return;
     axios.get(`${API}/public/refer/${encodeURIComponent(slug)}`)
-      .then(r => setReferrer(r.data?.referrer || null))
+      .then(r => {
+        setReferrer(r.data?.referrer || null);
+        setFirm(r.data?.firm_slug ? { slug: r.data.firm_slug, name: r.data.firm_name, logo_url: r.data.firm_logo_url } : null);
+      })
       .catch(() => setReferrer(null));
   }, [slug]);
 
@@ -88,8 +92,11 @@ export default function EnterReferral() {
         notes: form.notes.trim() || null,
       });
       toast.success("Thanks! We'll be in touch.");
-      // Forward to signup, preserving referral attribution
-      const q = slug ? `?ref=${encodeURIComponent(slug)}` : "";
+      // Forward to signup, preserving referral + white-label firm attribution
+      const qs = new URLSearchParams();
+      if (slug) qs.set("ref", slug);
+      if (firm?.slug) qs.set("firm", firm.slug);
+      const q = qs.toString() ? `?${qs.toString()}` : "";
       nav(`/signup${q}`, { replace: true });
     } catch (err) {
       const msg = err?.response?.data?.detail || "Something went wrong. Please try again.";
@@ -106,13 +113,17 @@ export default function EnterReferral() {
     >
       {/* Top brand strip */}
       <div className="border-b border-slate-200 bg-white/70 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center gap-3">
-          <div className="h-8 w-8 rounded-md bg-gradient-to-br from-cyan-500 to-cyan-700 grid place-items-center text-white">
-            <Sparkles size={16} />
-          </div>
+        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center gap-3" data-testid="enter-referral-brand">
+          {firm?.logo_url ? (
+            <img src={firm.logo_url} alt={firm.name || "Firm logo"} className="h-9 w-auto max-w-[180px] object-contain" />
+          ) : (
+            <div className="h-8 w-8 rounded-md bg-gradient-to-br from-cyan-500 to-cyan-700 grid place-items-center text-white">
+              <Sparkles size={16} />
+            </div>
+          )}
           <div>
             <div className="font-heading text-lg font-bold text-slate-900 leading-tight">
-              Business Software
+              {firm?.name || "Business Software"}
             </div>
             <div className="text-xs text-slate-500 -mt-0.5">
               AI-native accounting for firms and their clients
