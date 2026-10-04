@@ -213,9 +213,13 @@ async def resolve_slug(slug: str):
     user_id = await resolve_referrer_id(slug)
     if not user_id:
         return {"slug": slug, "referrer": None}
-    u = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1})
+    u = await db.users.find_one({"id": user_id}, {"_id": 0, "name": 1, "email": 1, "branding": 1,
+                                                  "signup_firm_slug": 1, "enterprise_id": 1})
     display = (u or {}).get("name") or ((u or {}).get("email", "").split("@")[0])
-    return {"slug": slug, "referrer": display}
+    from routes.auth import _resolve_firm_for_user, _firm_public_info
+    firm = _firm_public_info(await _resolve_firm_for_user(u or {}))
+    return {"slug": slug, "referrer": display, "firm_slug": (firm or {}).get("slug"),
+            "firm_name": (firm or {}).get("name"), "firm_logo_url": (firm or {}).get("logo_url")}
 
 
 # ---- Public: log referral link click -----------------------------------

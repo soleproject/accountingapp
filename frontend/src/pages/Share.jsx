@@ -38,10 +38,16 @@ export default function Share() {
       <UpgradePill />
       <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
         <Share2 size={14} /> Affiliate
+        {data.firm?.name && (
+          <span className="inline-flex items-center gap-1.5 ml-2 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs" data-testid="share-firm-chip">
+            {data.firm.logo_url && <img src={data.firm.logo_url} alt="" className="h-4 w-auto max-w-[80px] object-contain" />}
+            for {data.firm.name}
+          </span>
+        )}
       </div>
       <h1 className="text-2xl font-heading font-bold text-slate-900">Refer &amp; earn</h1>
       <p className="text-sm text-slate-500 mt-1 mb-6">
-        Share your link. When someone signs up and pays, you get credited
+        Share your link. When someone signs up{data.firm?.name ? ` with ${data.firm.name}` : ""} and pays, you get credited
         automatically — first month and every month after, for as long
         as they pay.
       </p>
@@ -151,9 +157,9 @@ function OverviewTab({ data, onChanged }) {
           </button>
         </div>
         <div className="mt-1.5 text-[11px] text-slate-500 flex items-center gap-2">
-          {data.link_source === "firm_buy_page" && <>Uses your firm's Buy page URL.</>}
-          {data.link_source === "firm_subdomain" && <>Uses your private-label subdomain.</>}
-          {data.link_source === "platform" && (
+          {data.link_source === "firm_buy_page" && <>Uses {data.firm?.name ? `${data.firm.name}'s` : "your firm's"} Buy page URL.</>}
+          {data.link_source === "firm_subdomain" && <>Lands on {data.firm?.name ? `${data.firm.name}'s` : "your"} private-label site.</>}
+          {data.link_source === "platform" && data.can_set_buy_page && (
             <>
               Set a Buy page URL in
               <a href="/settings" className="text-cyan-700 hover:underline inline-flex items-center gap-0.5">
