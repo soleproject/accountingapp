@@ -1728,6 +1728,16 @@ export default function Transactions() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadedOnce, isReviewMode, isLetsReview, isNoContactReview, tourParam]);
   useActionListener("chat-cta:restart-transactions-tour", () => startTxnTour());
+  // `?txnTour=1` (Step 1 card in AI Transaction Review mode) → filter is
+  // already applied by the param hydration; start the tour once data is in.
+  const txnTourParam = params.get("txnTour") === "1";
+  useEffect(() => {
+    if (!txnTourParam || !loadedOnce || txnTourOpen) return;
+    const next = new URLSearchParams(params); next.delete("txnTour");
+    navigate({ search: next.toString() ? `?${next}` : "" }, { replace: true });
+    startTxnTour();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txnTourParam, loadedOnce]);
   useEffect(() => {
     if (!similarView) return;
     emitAction("similar-selection-changed", { ids: [...selected] });

@@ -269,7 +269,7 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "id": company_id, "name": inp.company_name,
         "business_type": _bt, "business_description": inp.business_description,
         "reporting_basis": inp.reporting_basis,
-        "owner_user_id": client_id, "pro_user_id": user["id"],
+        "owner_user_id": client_id, "owner_email": email, "pro_user_id": user["id"],
         # Partner stamp — when the caller is a Partner, we tag the
         # company so the Partner's dashboard rollups + scoping filters
         # find it. Superadmins can pass `partner_id` in the payload to

@@ -248,7 +248,7 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
         # dict so a future Phase-1 UI can pass region="UK" and get GBP
         # + DD/MM/YYYY in one shot.
         **_region_defaults_for(inp.region),
-        "owner_user_id": owner_user["id"], "onboarding_complete": False,
+        "owner_user_id": owner_user["id"], "owner_email": owner_user.get("email"), "onboarding_complete": False,
         "created_at": now, "updated_at": now,
     })
     await db.memberships.insert_one({

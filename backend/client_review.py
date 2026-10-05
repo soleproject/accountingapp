@@ -997,16 +997,8 @@ async def _pick_client_email(company: dict) -> str | None:
       2. `owner_email` — set at company create time.
       3. The user record for `company.owner_id`.
     """
-    email = (company.get("client_email")
-             or company.get("owner_email"))
-    if email:
-        return email
-    owner_id = company.get("owner_id")
-    if owner_id:
-        u = await db.users.find_one({"id": owner_id}, {"email": 1})
-        if u:
-            return u.get("email")
-    return None
+    from company_owner import resolve_owner_email
+    return await resolve_owner_email(company)
 
 
 async def trigger_and_dispatch_batches(*, only_company_id: str | None = None) -> dict:
@@ -1028,6 +1020,7 @@ async def trigger_and_dispatch_batches(*, only_company_id: str | None = None) ->
                                                "client_email": 1,
                                                "owner_email": 1,
                                                "owner_id": 1,
+                                               "owner_user_id": 1,
                                                "primary_pro_id": 1,
                                                "created_by": 1,
                                                "created_at": 1,
@@ -1480,10 +1473,10 @@ async def _cleanup_batch_for(company_id: str) -> dict:
     doc = await db.client_review_batches.find_one({"company_id": company_id, "kind": "cleanup"})
     if doc:
         return doc
-    company = await db.companies.find_one({"id": company_id}, {"_id": 0, "owner_email": 1})
+    from company_owner import owner_email_for
     doc = {
         "id": str(uuid.uuid4()), "kind": "cleanup", "company_id": company_id,
-        "client_email": (company or {}).get("owner_email") or "", "client_token": "",
+        "client_email": (await owner_email_for(company_id)) or "", "client_token": "",
         "items": [], "status": "empty", "created_at": now_iso(), "last_scan_at": now_iso(),
         "email_sent_at": None, "scheduled_for": None, "reminder_sent_at": None,
         "nudge_sent_at": None, "completed_at": None, "answer_count": 0, "defer_count": 0,

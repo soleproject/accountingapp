@@ -259,8 +259,8 @@ async def run_scan_for_company(job: dict) -> dict:
         }
 
     # No existing cleanup batch — create one.
-    company = await db.companies.find_one({"id": cid}, {"_id": 0, "owner_email": 1})
-    client_email = (company or {}).get("owner_email") or ""
+    from company_owner import owner_email_for
+    client_email = (await owner_email_for(cid)) or ""
     batch = {
         "id": str(uuid.uuid4()),
         "kind": "cleanup",   # discriminator vs forward-looking

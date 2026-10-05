@@ -995,3 +995,16 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-05 — Mobile bottom nav: swipeable strip ✅ self-tested (390px)
 - `MobileBottomNav`: scroll-snap strip (`mobile-nav-strip`, 3 tabs visible + faded sliver of the 4th) with My Business (/owner) · Receipts · Invoices · Transactions · Bills · Reports · Accounting · CRM · Home (product-gated); Chat pinned right (22%). Active = longest matching route prefix. testids `mobile-nav-<label-kebab>`.
+
+## 2026-10-05 — Owner email fix (P0) ✅ verified
+- Root cause: no creation path persisted `owner_email`; `_pick_client_email` fell back to `company.owner_id`, a field never written (real field is `owner_user_id`) → dispatcher skipped Check-in emails.
+- NEW `company_owner.py`: `resolve_owner_email(company)` (client_email → owner_email → users[owner_user_id|owner_id] → memberships owner), `owner_email_for(cid)`, `backfill_owner_email()`. Used by `client_review._pick_client_email`, cleanup batch creation (client_review + cleanup_scan). Dispatcher projection now includes `owner_user_id`.
+- `owner_email` stamped at creation in routes/companies.py (self-onboarding), routes/pro.py (`POST /pro/clients`), enterprises.py (firm books), partners.py (partner books).
+- Backfill run: 16 real companies stamped; the 30 still missing are `test-*` fixtures with no owner. Live test: new client via /pro/clients → `owner_email` stored + resolved (then purged).
+
+## 2026-10-05 — Step 1 card respects "AI Transaction Review" mode ✅ self-tested
+- `CleanupCopilot` reads `dashboard-todos-mode`: `chat` → review-chat CTAs (existing), NEW `ai` → Step 1 = `/accounting/transactions?filter=unapproved` (work it on the Transactions page), other steps → `/accounting/review-chat?tab=checks`; `checklist` → backend `cta_link` (ai-cleanup-review stepper + tour) unchanged.
+- Step 1 in `ai` mode → `/accounting/transactions?filter=unapproved&txnTour=1`; Transactions.jsx consumes `txnTour=1` (after first load) → strips the param and calls `startTxnTour()`.
+
+## 2026-10-05 — Step 1 card title rename ✅ self-tested (curl)
+- `backend/routes/firm_glance.py` step1.title: "Review AI categorized" → "AI Transaction Review". Frontend renders `Step 1: {title}` → "Step 1: AI Transaction Review".

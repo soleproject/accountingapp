@@ -109,7 +109,7 @@ async def ensure_firm_books_company_for_pro(user_id: str) -> Optional[dict]:
     #      the-dropdown bug we hit on production, where a company was
     #      created but not flagged, so every boot spawned a new one.
     existing = await db.companies.find_one({
-        "owner_user_id": user_id,
+        "owner_user_id": user_id, "owner_email": user.get("email"),
         "is_firm_books": True,
     })
     if existing:
