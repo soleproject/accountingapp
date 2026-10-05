@@ -897,10 +897,17 @@ export default function CleanupCopilot({ currentId, sampleProgress = null, onApp
     try { return localStorage.getItem("dashboard-todos-mode") === "chat"; }
     catch { return false; }
   });
+  // "AI Transaction Review" dashboard mode: Step 1 is worked right here on
+  // the Transactions page (To do filter) — never the cleanup-review tour.
+  const [aiModeOn, setAiModeOn] = useState(() => {
+    try { return localStorage.getItem("dashboard-todos-mode") === "ai"; }
+    catch { return false; }
+  });
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key === "dashboard-todos-mode") {
         setChatModeOn(e.newValue === "chat");
+        setAiModeOn(e.newValue === "ai");
       }
     };
     window.addEventListener("storage", onStorage);
@@ -1980,7 +1987,10 @@ export default function CleanupCopilot({ currentId, sampleProgress = null, onApp
                   if (key === "3C") return "/accounting/review-chat?tab=checks";
                   return "/accounting/review-chat?tab=no_category";
                 })();
-                const targetHref = chatModeOn ? chatCta : activeStep.cta_link;
+                const aiCta = String(activeStep.display || activeStep.n) === "1"
+                  ? "/accounting/transactions?filter=unapproved"
+                  : "/accounting/review-chat?tab=checks";
+                const targetHref = chatModeOn ? chatCta : aiModeOn ? aiCta : activeStep.cta_link;
                 // Chat-mode overrides — when the CPA has flipped todos
                 // into chat-review, show the live chat-queue totals
                 // ("X questions · Y checks") and a dollar-value progress

@@ -1001,3 +1001,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - NEW `company_owner.py`: `resolve_owner_email(company)` (client_email → owner_email → users[owner_user_id|owner_id] → memberships owner), `owner_email_for(cid)`, `backfill_owner_email()`. Used by `client_review._pick_client_email`, cleanup batch creation (client_review + cleanup_scan). Dispatcher projection now includes `owner_user_id`.
 - `owner_email` stamped at creation in routes/companies.py (self-onboarding), routes/pro.py (`POST /pro/clients`), enterprises.py (firm books), partners.py (partner books).
 - Backfill run: 16 real companies stamped; the 30 still missing are `test-*` fixtures with no owner. Live test: new client via /pro/clients → `owner_email` stored + resolved (then purged).
+
+## 2026-10-05 — Step 1 card respects "AI Transaction Review" mode ✅ self-tested
+- `CleanupCopilot` reads `dashboard-todos-mode`: `chat` → review-chat CTAs (existing), NEW `ai` → Step 1 = `/accounting/transactions?filter=unapproved` (work it on the Transactions page), other steps → `/accounting/review-chat?tab=checks`; `checklist` → backend `cta_link` (ai-cleanup-review stepper + tour) unchanged.
