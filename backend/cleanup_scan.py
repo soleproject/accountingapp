@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from db import db
+import receipt_policy
 from client_review import (
     ITEM_MISSING_RECEIPT, ITEM_LIABILITY_SPLIT,
     ITEM_IRS_MEALS, ITEM_IRS_TRAVEL,
@@ -67,54 +68,48 @@ def _today_iso() -> str:
 async def _scan_missing_receipts(
     cid: str, months: int | None, cap: int,
 ) -> list[dict[str, Any]]:
-    """Find historical expense transactions ≥ $75 with no receipt attached.
-
-    Liability-account payments are excluded — they're a distinct
-    workflow ("split principal vs. interest") handled by
-    :func:`_scan_liability_splits`, so surfacing them in both cards
-    would just double-count the same txn.
-    """
+    """Historical outflows ≥ $75 with no documentation that receipt_policy
+    says a receipt would normally have been issued for."""
     floor = _floor(months)
-    liab_ids: list[str] = await db.accounts.distinct(
-        "id", {"company_id": cid, "type": "liability"},
-    )
     query: dict[str, Any] = {
         "company_id": cid,
-        "type": "expense",
-        "amount": {"$lte": -75.0},
+        "amount": {"$lte": -receipt_policy.RECEIPT_FLOOR},
+        "posted": {"$ne": False},
+        "deleted_at": {"$in": [None, ""]},
         "$and": [
             {"$or": [{"attachments": {"$exists": False}}, {"attachments": []}]},
             {"date": {"$lt": _today_iso()}},   # strictly historical
         ],
     }
-    if liab_ids:
-        query["$and"].append({
-            "$or": [
-                {"category_account_id": {"$exists": False}},
-                {"category_account_id": {"$nin": liab_ids}},
-            ],
-        })
     if floor:
         query["$and"].append({"date": {"$gte": floor}})
-    txns = await db.transactions.find(query).sort([("date", -1)]).limit(cap).to_list(cap)
+    txns = await db.transactions.find(query).sort([("date", -1)]).limit(cap * 4).to_list(cap * 4)
+    decisions = await receipt_policy.decide(cid, txns)
     items: list[dict[str, Any]] = []
     for t in txns:
+        d = decisions.get(t.get("id"))
+        if not d or not d.flag:
+            continue
         amount = abs(float(t.get("amount") or 0))
         items.append({
             "item_id": str(uuid.uuid4()),
             "item_type": ITEM_MISSING_RECEIPT,
             "source_id": t.get("id"),
             "source_collection": "transactions",
-            "prompt": f"Missing receipt: ${amount:,.2f} on {t.get('date','')}",
+            "prompt": f"Missing receipt: ${amount:,.2f} · {receipt_policy.who_of(t)} on {t.get('date','')} — {d.label}",
             "context": {
                 "date": t.get("date"),
                 "amount": amount,
-                "vendor": t.get("contact_name") or t.get("description") or "",
+                "vendor": t.get("merchant") or t.get("contact_name") or t.get("description") or "",
                 "description": t.get("description") or "",
+                "reason_code": d.reason,
+                "reason_label": d.label,
             },
             "answered_at": None, "answer": None,
             "deferred": False, "action_taken": None,
         })
+        if len(items) >= cap:
+            break
     return items
 
 

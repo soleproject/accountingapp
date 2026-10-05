@@ -45,29 +45,39 @@ async def _mk_env():
     await db.memberships.insert_one({
         "company_id": cid, "user_id": uid, "role": "owner",
     })
-    await db.accounts.insert_one({
-        "id": liab_id, "company_id": cid, "name": "Amex Card", "type": "liability",
-    })
+    sup_id = str(uuid.uuid4())
+    await db.accounts.insert_many([
+        {"id": liab_id, "company_id": cid, "name": "Amex Card", "type": "liability"},
+        {"id": sup_id, "company_id": cid, "name": "Job Materials", "type": "expense",
+         "receipt_profile": "point_of_sale", "receipt_profile_name": "Job Materials"},
+    ])
 
     today_iso = datetime.now(timezone.utc).date().isoformat()
     yesterday = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
     two_months_ago = (datetime.now(timezone.utc).date() - timedelta(days=60)).isoformat()
 
-    # Two historical expense txns > $75 with no receipts (should match)
+    # Two historical point-of-sale purchases > $75, categorized, no receipt (should match)
+    pos = {"category_account_id": sup_id, "pfc_primary": "GENERAL_MERCHANDISE",
+           "pfc_detailed": "GENERAL_MERCHANDISE_SUPERSTORES"}
     await db.transactions.insert_many([
-        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense",
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", **pos,
          "amount": -120.00, "date": yesterday, "description": "Office supplies"},
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", **pos,
+         "amount": -300.00, "date": two_months_ago, "description": "Lumber run"},
+        # Subscription — bills never need a receipt
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", "category_account_id": sup_id,
+         "amount": -300.00, "date": two_months_ago, "description": "Software subscription"},
+        # Uncategorized — categorization question comes first, not a receipt ask
         {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense",
-         "amount": -300.00, "date": two_months_ago,
-         "description": "Software subscription"},
+         "amount": -220.00, "date": yesterday, "description": "Mystery purchase"},
         # Historical but under threshold — should NOT match
-        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense",
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", **pos,
          "amount": -50.00, "date": yesterday, "description": "Snacks"},
         # Today — strictly historical filter excludes it
-        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense",
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", **pos,
          "amount": -500.00, "date": today_iso, "description": "New laptop"},
         # Has attachment — excluded
-        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense",
+        {"id": str(uuid.uuid4()), "company_id": cid, "type": "expense", **pos,
          "amount": -200.00, "date": yesterday, "description": "Legit",
          "attachments": [{"id": "a1", "url": "..."}]},
     ])

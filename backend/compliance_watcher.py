@@ -21,10 +21,11 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from db import db, now_iso
+import receipt_policy
 
 logger = logging.getLogger(__name__)
 
-RECEIPT_THRESHOLD = 75.0
+RECEIPT_THRESHOLD = receipt_policy.RECEIPT_FLOOR
 LOOKBACK_DAYS = 30
 MEALS_RE = r"meal|dining|restaurant"
 TRAVEL_RE = r"travel|lodging|hotel|airfare|airline|mileage"
@@ -74,16 +75,19 @@ async def scan_company(cid: str, since: str | None = None, limit: int = 300) -> 
     expense_ids = [a["id"] async for a in db.accounts.find({"company_id": cid, "type": {"$in": ["expense", "cogs", "other_expense"]}}, {"id": 1})]
     income_ids = [a["id"] async for a in db.accounts.find({"company_id": cid, "type": {"$in": ["income", "revenue", "other_income"]}}, {"id": 1})]
 
-    # 1. Missing receipts ≥ threshold on expense categories.
+    # 1. Missing receipts — receipt_policy decides (point-of-sale only, never bills/transfers/P2P).
     have = await _existing_txn_ids(cid, "missing_receipt")
-    async for t in db.transactions.find({**base, "amount": {"$lte": -RECEIPT_THRESHOLD}, **_no_receipt(),
-                                         "category_account_id": {"$in": expense_ids},
-                                         "category_account_name": {"$not": {"$regex": TRANSFER_RE, "$options": "i"}}}).limit(limit):
-        if t["id"] in have:
+    cands = [t async for t in db.transactions.find({**base, "amount": {"$lte": -RECEIPT_THRESHOLD}, **_no_receipt(),
+                                                    "category_account_id": {"$in": expense_ids}}).limit(limit) if t["id"] not in have]
+    decisions = await receipt_policy.decide(cid, cands)
+    for t in cands:
+        d = decisions.get(t["id"])
+        if not d or not d.flag:
             continue
-        who = t.get("merchant") or t.get("contact_name") or t.get("description") or "this purchase"
-        new.append(_finding(cid, "missing_receipt", t, f"Receipt needed · {who} · ${abs(float(t.get('amount') or 0)):,.2f}",
-                            f"Do you have the receipt for {who} on {(t.get('date') or '')[:10]}? Snap a photo or upload it."))
+        title, detail = receipt_policy.finding_text(t, d)
+        f = _finding(cid, "missing_receipt", t, title, detail)
+        f["meta"]["reason_code"], f["meta"]["reason_label"] = d.reason, d.label
+        new.append(f)
         created["missing_receipt"] += 1
 
     # 2/3. Meals + travel substantiation — any amount.
@@ -113,17 +117,38 @@ async def scan_company(cid: str, since: str | None = None, limit: int = 300) -> 
         )
         created["sanity_flagged"] += r.modified_count
 
-    # 5. Auto-close findings whose transaction is now satisfied.
-    async for f in db.agent_findings.find({"company_id": cid, "status": "open", "source": "compliance_watcher",
-                                           "kind": {"$in": ["missing_receipt", "meals_compliance", "travel_compliance"]}}):
+    # 5. Auto-close findings whose transaction is now satisfied — or, for
+    # receipts, no longer qualifies under receipt_policy.
+    open_f = await db.agent_findings.find({"company_id": cid, "status": "open",
+                                           "$or": [{"source": "compliance_watcher"}, {"kind": "missing_receipt"}],
+                                           "kind": {"$in": ["missing_receipt", "meals_compliance", "travel_compliance"]}}).to_list(5000)
+    # Seeded/legacy receipt findings carry no txn_id — resolve by amount + date so the policy can judge them.
+    for f in open_f:
+        meta = f.setdefault("meta", {})
+        if f["kind"] == "missing_receipt" and not meta.get("txn_id") and meta.get("txn_amount") is not None and meta.get("txn_date"):
+            hit = await db.transactions.find_one({"company_id": cid, "amount": float(meta["txn_amount"]), "date": meta["txn_date"],
+                                                  "deleted_at": {"$in": [None, ""]}}, {"id": 1})
+            if hit:
+                meta["txn_id"] = hit["id"]
+                await db.agent_findings.update_one({"id": f["id"]}, {"$set": {"meta.txn_id": hit["id"]}})
+    tids = [(f.get("meta") or {}).get("txn_id") for f in open_f if (f.get("meta") or {}).get("txn_id")]
+    txn_by_id = {t["id"]: t async for t in db.transactions.find({"id": {"$in": tids}})}
+    rec_tids = {(f.get("meta") or {}).get("txn_id") for f in open_f if f["kind"] == "missing_receipt"}
+    rec_decisions = await receipt_policy.decide(cid, [t for tid, t in txn_by_id.items() if tid in rec_tids])
+    for f in open_f:
         tid = (f.get("meta") or {}).get("txn_id")
-        t = await db.transactions.find_one({"id": tid}, {"receipt_id": 1, "matched_receipt_id": 1, "veryfi_receipt_id": 1, "irs_substantiation": 1, "deleted_at": 1}) if tid else None
+        t = txn_by_id.get(tid) if tid else None
         satisfied = (t is None or t.get("deleted_at")
-                     or (f["kind"] == "missing_receipt" and (t.get("receipt_id") or t.get("matched_receipt_id") or t.get("veryfi_receipt_id")))
+                     or (f["kind"] == "missing_receipt" and not rec_decisions.get(tid, receipt_policy.Decision(True, "")).flag)
                      or (f["kind"] != "missing_receipt" and t.get("irs_substantiation")))
         if satisfied:
-            await db.agent_findings.update_one({"id": f["id"]}, {"$set": {"status": "resolved", "resolved_at": now_iso(), "resolved_by": "compliance_watcher"}})
+            await db.agent_findings.update_one({"id": f["id"]}, {"$set": {"status": "resolved", "resolved_at": now_iso(), "resolved_by": "compliance_watcher",
+                                                                          "resolved_reason": (rec_decisions.get(tid).reason if tid in rec_decisions else "txn_gone")}})
             created["closed"] += 1
+        elif f["kind"] == "missing_receipt" and tid in rec_decisions and (f.get("meta") or {}).get("reason_code") != rec_decisions[tid].reason:
+            d = rec_decisions[tid]
+            title, detail = receipt_policy.finding_text(t, d)
+            await db.agent_findings.update_one({"id": f["id"]}, {"$set": {"title": title, "detail": detail, "meta.reason_code": d.reason, "meta.reason_label": d.label}})
     return created
 
 
