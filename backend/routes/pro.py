@@ -133,6 +133,7 @@ async def pro_clients(user: dict = Depends(require_role("pro", "superadmin", "pa
             # settings blob) so the response stays lightweight.
             "owner_name": owner.get("name"),
             "owner_email": owner.get("email"),
+            "owner_user_id": owner.get("id"),
             "enterprise_id": (ent_by_cid.get(c["id"]) or {}).get("id"),
             "enterprise_name": (ent_by_cid.get(c["id"]) or {}).get("name"),
             "billing_payer": c.get("billing_payer"),

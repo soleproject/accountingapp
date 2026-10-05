@@ -3507,22 +3507,12 @@ async def delete_enterprise(
                 },
             )
 
-    # Cascade deletes — leaf tables first.
+    # Cascade deletes — generic sweep of every company-scoped collection.
     txn_del = 0
     if company_ids:
-        res = await db.transactions.delete_many({"company_id": {"$in": company_ids}})
-        txn_del = res.deleted_count
-        for _coll in (
-            "invoices", "bills", "estimates", "receipts", "contacts",
-            "products", "categories", "memberships",
-            "ai_usage_events", "qbo_oauth_states", "qbo_connections",
-            "plaid_items", "veryfi_receipts", "chat_messages",
-        ):
-            try:
-                await getattr(db, _coll).delete_many({"company_id": {"$in": company_ids}})
-            except Exception:  # noqa: BLE001
-                pass
-        await db.companies.delete_many({"id": {"$in": company_ids}})
+        from company_purge import purge_company_data
+        for _cid in company_ids:
+            txn_del += (await purge_company_data(_cid)).get("transactions", 0)
 
     if user_ids:
         await db.users.delete_many({"id": {"$in": user_ids}})
@@ -3642,25 +3632,12 @@ async def admin_bulk_delete_by_owner(
             plan["would_delete_records_from"].append(f"users ({len(owner_users)})")
         return plan
 
-    # Real delete — mirror the per-company collections list from
-    # companies.py delete_company + add pro_alerts.
-    per_company_collections = [
-        "accounts", "transactions", "journal_entries", "invoices", "bills",
-        "customers", "vendors", "payments", "onboarding_state",
-        "plaid_items", "veryfi_uploads", "ai_activity_log", "rules",
-        "audit_logs", "period_locks", "memberships", "pro_alerts",
-    ]
+    # Real delete — generic sweep of every company-scoped collection.
+    from company_purge import purge_company_data
     per_collection_totals: dict[str, int] = {}
     for cid in company_ids:
-        for coll in per_company_collections:
-            try:
-                r = await db[coll].delete_many({"company_id": cid})
-                if r.deleted_count:
-                    per_collection_totals[coll] = per_collection_totals.get(coll, 0) + r.deleted_count
-            except Exception:
-                pass
-    r = await db.companies.delete_many({"id": {"$in": company_ids}})
-    per_collection_totals["companies"] = r.deleted_count
+        for coll, n in (await purge_company_data(cid)).items():
+            per_collection_totals[coll] = per_collection_totals.get(coll, 0) + n
 
     if inp.delete_users:
         # Only delete users who no longer own any other company (should

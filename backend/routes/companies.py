@@ -657,24 +657,10 @@ async def delete_company(cid: str, confirm: str = "",
             "company to a regular company first via PATCH "
             "/companies/{cid} with {\"is_partner_books\": false}.",
         )
-    # Every collection that carries a `company_id` field
-    per_company_collections = [
-        "accounts", "transactions", "journal_entries", "invoices", "bills",
-        "customers", "vendors", "payments", "onboarding_state",
-        "plaid_items", "veryfi_uploads", "ai_activity_log", "rules",
-        "audit_logs", "period_locks", "memberships",
-    ]
-    deleted: dict[str, int] = {}
-    for coll in per_company_collections:
-        try:
-            r = await db[coll].delete_many({"company_id": cid})
-            if r.deleted_count:
-                deleted[coll] = r.deleted_count
-        except Exception:
-            pass
-    # Finally the company itself
-    r = await db.companies.delete_one({"id": cid})
-    deleted["companies"] = r.deleted_count
+    # Every collection that carries a `company_id` field — swept generically
+    # (see company_purge.KEEP for the billing/audit ledgers left behind).
+    from company_purge import purge_company_data
+    deleted = await purge_company_data(cid)
     return {"deleted": True, "company_id": cid, "records_removed": deleted}
 
 
