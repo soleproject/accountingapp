@@ -9,10 +9,11 @@ import {
   AlertTriangle, CheckCircle2, ArrowRight, Plus, X, Loader2, UserPlus,
   BellRing, Wand2, FileText as FileWarning, FileText as ReceiptText, ScrollText, Sparkles, MailPlus,
   Building2, Shield, Users2, Palette, Link as LinkIcon, Gift, Ticket, CreditCard,
-  Search, LayoutGrid, List as ListIcon, Users as Handshake, ExternalLink, BookOpen,
+  Search, LayoutGrid, List as ListIcon, Users as Handshake, ExternalLink, BookOpen, Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { CreatePartnerModal } from "@/components/PartnersCard";
+import DeleteClientModal from "@/components/DeleteClientModal";
 import { useFeatureFlag } from "@/lib/featureFlags";
 import { REGIONS } from "@/lib/regions";
 
@@ -80,6 +81,7 @@ export default function ProClients() {
   const firmBooks = (companies || []).find((c) => c.is_firm_books === true);
   const { user } = useAuth();
   const isSuperadmin = user?.role === "superadmin";
+  const [deleteUserId, setDeleteUserId] = useState(null);
 
   // Superadmin-only view toggle. Persisted in localStorage so that
   // clicking "back to Partners" (or Enterprises) from a detail page
@@ -488,7 +490,11 @@ export default function ProClients() {
           onOpen={(cid) => { switchCompany(cid); window.location.href = "/dashboard"; }}
           onResend={resendWelcome}
           resending={resending}
+          onDeleteClient={isSuperadmin ? (uid) => setDeleteUserId(uid) : null}
         />
+      )}
+      {deleteUserId && (
+        <DeleteClientModal userId={deleteUserId} onClose={() => setDeleteUserId(null)} onChanged={load} />
       )}
 
       {layout === "grid" && (
@@ -680,7 +686,7 @@ function EnterpriseCell({ client, enterprises, onChange }) {
   );
 }
 
-function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = false, enterprises = [], onEnterpriseChange }) {
+function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = false, enterprises = [], onEnterpriseChange, onDeleteClient = null }) {
   if (!visible.length) return null;
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-testid="pro-clients-list">
@@ -760,6 +766,16 @@ function ClientsList({ visible, onOpen, onResend, resending, showEnterprise = fa
                     >
                       {resending[c.id] ? <Loader2 size={11} className="animate-spin" /> : <MailPlus size={11} />}
                     </button>
+                    {onDeleteClient && c.owner_user_id && (
+                      <button
+                        onClick={() => onDeleteClient(c.owner_user_id)}
+                        title="Delete client (companies, then user)"
+                        data-testid={`delete-client-list-${c.id}`}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded border border-slate-200 text-slate-400 hover:text-rose-700 hover:border-rose-300 hover:bg-rose-50"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
