@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useNavigate } from "react-router-dom";
+import AddCompanyModal from "@/components/AddCompanyModal";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import {
@@ -790,29 +790,16 @@ function PayoutsTab() {
 // referral slug + earnings history come along for the ride).
 // --------------------------------------------------------------------------
 function UpgradePill() {
-  const { user, setUser } = useAuth();
-  const nav = useNavigate();
-  const [busy, setBusy] = useState(false);
+  const { user } = useAuth();
+  const [modalOpen, setModalOpen] = useState(false);
+  const busy = false;
   if (user?.role !== "affiliate") return null;
-  const upgrade = async () => {
-    if (!window.confirm(
-      "Upgrade to a full account? You'll keep your referral link and " +
-      "all earnings. We'll take you to the onboarding flow to set up " +
-      "your first company."
-    )) return;
-    setBusy(true);
-    try {
-      const r = await api.post("/affiliate/upgrade");
-      localStorage.setItem("axiom_token", r.data.token);
-      localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
-      setUser(r.data.user);
-      toast.success("Welcome to the full experience.");
-      nav("/onboarding");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Couldn't upgrade");
-    } finally { setBusy(false); }
-  };
+  // Same popup as "Add new company" — role flips to client when they
+  // submit, then they go straight into onboarding for the new company.
+  const upgrade = () => setModalOpen(true);
   return (
+    <>
+    <AddCompanyModal open={modalOpen} onClose={() => setModalOpen(false)} mode="upgrade" />
     <div
       className="mb-5 flex items-center gap-3 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3"
       data-testid="upgrade-pill"
@@ -837,6 +824,7 @@ function UpgradePill() {
         Upgrade
       </button>
     </div>
+    </>
   );
 }
 

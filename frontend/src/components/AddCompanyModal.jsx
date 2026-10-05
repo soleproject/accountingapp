@@ -10,8 +10,11 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 
-export default function AddCompanyModal({ open, onClose }) {
-  const { user } = useAuth();
+// `mode="upgrade"`: affiliate → full account. Flips the role first
+// (keeps referral slug + earnings), then creates the company as usual.
+export default function AddCompanyModal({ open, onClose, mode = "add" }) {
+  const { user, setUser } = useAuth();
+  const upgrade = mode === "upgrade";
   const { refresh, switchCompany } = useCompany();
   const navigate = useNavigate();
   const [name, setName] = useState("");
@@ -36,6 +39,12 @@ export default function AddCompanyModal({ open, onClose }) {
     if (!canSubmit) return;
     setBusy(true);
     try {
+      if (upgrade) {
+        const up = await api.post("/affiliate/upgrade");
+        localStorage.setItem("axiom_token", up.data.token);
+        localStorage.setItem("axiom_user", JSON.stringify(up.data.user));
+        setUser(up.data.user);
+      }
       const r = await api.post("/companies", { name: name.trim(), owner_email: ownerEmail.trim().toLowerCase() });
       const cid = r.data.company_id;
       await refresh();
@@ -59,7 +68,7 @@ export default function AddCompanyModal({ open, onClose }) {
           <X size={16} />
         </button>
         <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-indigo-600 font-semibold"><Building2 size={13} /> New business</div>
-        <h3 className="text-lg font-semibold text-slate-900 mt-1">Add another company</h3>
+        <h3 className="text-lg font-semibold text-slate-900 mt-1">{upgrade ? "Upgrade to full platform" : "Add another company"}</h3>
         <p className="text-sm text-slate-500 mt-1">We'll set up the books and walk you through onboarding next.</p>
 
         <label className="block mt-5 text-xs font-medium text-slate-600">Company name</label>
