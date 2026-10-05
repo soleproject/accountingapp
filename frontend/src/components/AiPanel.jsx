@@ -531,6 +531,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     setSheet(p?.source === "nav" ? "full" : p?.source === "row" || p?.txn ? "half" : "peek");
   });
   useActionListener("ai-tell-me-about", () => { if (isMobile) setSheet((v) => (v === "peek" ? "half" : v)); });
+  // A modal (same-vendor approve) needs the screen — drop to peek so its buttons stay reachable.
+  useActionListener("ai-bulk-approve-prompt", () => { if (isMobile) setSheet("peek"); });
   const dragY = useRef(null);
   const onHandleTouchStart = (e) => { dragY.current = e.touches[0].clientY; };
   const onHandleTouchEnd = (e) => {
@@ -3703,7 +3705,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   // the page keeps scrolling behind it. Grows when the user is typing
   // so the keyboard doesn't swallow the conversation.
   const peek = isMobile && sheet === "peek";
-  const navH = kbInset > 0 ? 0 : 64;   // nav is under the keyboard while typing
+  const navH = 0;   // the sheet replaces the bottom nav while open
   const mobileSheetHeight = sheet === "full"
     ? `calc(100dvh - ${navH}px - ${kbInset}px - env(safe-area-inset-bottom))`
     : sheet === "half" ? (kbInset > 0 ? `calc(100dvh - ${kbInset}px - 120px)` : "48vh") : "auto";

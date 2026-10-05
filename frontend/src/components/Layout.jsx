@@ -557,9 +557,9 @@ export default function Layout() {
             <ReturnBreadcrumb />
             <Outlet />
           </main>
-          <MobileBottomNav />
-          {/* AiPanel already renders as a fixed overlay when open —
-              same instance, no code duplication. */}
+          {/* While the assistant sheet is open it takes over the bottom
+              edge (nav hidden) so the conversation gets the room. */}
+          {aiCollapsed && <MobileBottomNav />}
           <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
           <BillingLockedModal />
           <Toaster position="top-center" />
