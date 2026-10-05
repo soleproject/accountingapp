@@ -990,3 +990,5 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Backlog from this discussion: inline AI answer card on the transaction row (sparkle → answer in-card, "Ask more" → sheet).
 - Chat sheet replaces the bottom nav while open (`Layout`: `{aiCollapsed && <MobileBottomNav/>}`; sheet `bottom:0`, full = 100dvh). Closing (X on peek / header X) brings the nav back.
 - `SimilarApproveModal` is `z-[70] md:z-50` (above the sheet on phones, unchanged on desktop); AiPanel drops to peek on `ai-bulk-approve-prompt` so the modal's footer stays reachable.
+- Mobile sheet header: single 44px row = shrink chevron · drag handle · expand chevron · mute · clear · voice ▾ · X (separate handle row only in peek). Focus on mobile renders a pinned transaction-style card (`ai-focus-txn-card`: FOCUSED / merchant / date / amount / X) instead of the chip + bottom "Cancel focus" pill.
+- Sheet is `z-[45]` on mobile so every modal (z-50+) sits above it; a MutationObserver drops the sheet to peek whenever a `[role=dialog]` / `*-modal` / `modal-panel` node appears. SimilarApproveModal back to z-50.

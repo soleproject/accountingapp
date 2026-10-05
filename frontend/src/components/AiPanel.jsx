@@ -531,8 +531,18 @@ export default function AiPanel({ collapsed, onToggle }) {
     setSheet(p?.source === "nav" ? "full" : p?.source === "row" || p?.txn ? "half" : "peek");
   });
   useActionListener("ai-tell-me-about", () => { if (isMobile) setSheet((v) => (v === "peek" ? "half" : v)); });
-  // A modal (same-vendor approve) needs the screen — drop to peek so its buttons stay reachable.
+  // Any modal/dialog needs the screen — the sheet sits below them (z-45 vs z-50+)
+  // and drops to peek so their buttons stay reachable.
   useActionListener("ai-bulk-approve-prompt", () => { if (isMobile) setSheet("peek"); });
+  useEffect(() => {
+    if (!isMobile || collapsed) return;
+    const isModal = (el) => el?.nodeType === 1 && (el.matches?.('[role="dialog"], [data-testid$="-modal"], [data-testid="modal-panel"]') || el.querySelector?.('[role="dialog"], [data-testid$="-modal"], [data-testid="modal-panel"]'));
+    const mo = new MutationObserver((muts) => {
+      for (const m of muts) for (const n of m.addedNodes) if (isModal(n) && !n.closest?.('[data-testid="ai-panel"]')) { setSheet("peek"); return; }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => mo.disconnect();
+  }, [isMobile, collapsed]);
   const dragY = useRef(null);
   const onHandleTouchStart = (e) => { dragY.current = e.touches[0].clientY; };
   const onHandleTouchEnd = (e) => {
@@ -3713,7 +3723,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   return (
     <aside
       className={isMobile
-        ? "fixed left-0 right-0 z-[60] bg-white flex flex-col rounded-t-2xl shadow-[0_-8px_30px_rgba(15,23,42,0.18)] border-t border-slate-200"
+        ? "fixed left-0 right-0 z-[45] bg-white flex flex-col rounded-t-2xl shadow-[0_-8px_30px_rgba(15,23,42,0.18)] border-t border-slate-200"
         : "shrink-0 border-l bg-white flex flex-col relative z-[60]"}
       style={isMobile
         ? { bottom: `calc(${navH}px + ${kbInset}px + env(safe-area-inset-bottom))`, height: mobileSheetHeight, maxHeight: "100dvh", transition: "height 180ms ease, bottom 120ms ease" }
@@ -3721,19 +3731,19 @@ export default function AiPanel({ collapsed, onToggle }) {
       data-testid="ai-panel"
       data-mobile-sheet={isMobile ? sheet : "0"}
     >
-      {isMobile && (
+      {peek && (
         <div
           className="shrink-0 flex items-center gap-2 px-3 pt-1.5 pb-1 select-none"
           onTouchStart={onHandleTouchStart}
           onTouchEnd={onHandleTouchEnd}
-          onClick={() => (sheet === "peek" ? setSheet("half") : null)}
+          onClick={() => setSheet("half")}
           data-testid="ai-sheet-handle"
         >
-          <button type="button" onClick={(e) => { e.stopPropagation(); sheetDown(); }} className="p-1 text-slate-400" aria-label={sheet === "peek" ? "Close assistant" : "Shrink assistant"} data-testid="ai-sheet-down">
-            {sheet === "peek" ? <X size={15} /> : <ChevronDown size={16} />}
+          <button type="button" onClick={(e) => { e.stopPropagation(); sheetDown(); }} className="p-1 text-slate-400" aria-label="Close assistant" data-testid="ai-sheet-down">
+            <X size={15} />
           </button>
           <div className="flex-1 flex justify-center"><span className="block h-1 w-10 rounded-full bg-slate-300" /></div>
-          <button type="button" onClick={(e) => { e.stopPropagation(); sheetUp(); }} disabled={sheet === "full"} className="p-1 text-slate-400 disabled:opacity-30" aria-label="Expand assistant" data-testid="ai-sheet-up">
+          <button type="button" onClick={(e) => { e.stopPropagation(); sheetUp(); }} className="p-1 text-slate-400" aria-label="Expand assistant" data-testid="ai-sheet-up">
             <ChevronDown size={16} className="rotate-180" />
           </button>
         </div>
@@ -3752,7 +3762,19 @@ export default function AiPanel({ collapsed, onToggle }) {
         data-testid="ai-panel-resize"
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
       />}
-      <div className={`h-16 shrink-0 border-b px-4 flex items-center gap-2 ${peek ? "hidden" : ""}`}>
+      <div
+        className={`shrink-0 border-b flex items-center gap-2 ${peek ? "hidden" : isMobile ? "h-11 px-2 select-none" : "h-16 px-4"}`}
+        onTouchStart={isMobile ? onHandleTouchStart : undefined}
+        onTouchEnd={isMobile ? onHandleTouchEnd : undefined}
+        data-testid={isMobile ? "ai-sheet-handle" : undefined}
+      >
+        {isMobile && (
+          <>
+            <button type="button" onClick={sheetDown} className="p-1 text-slate-400" aria-label="Shrink assistant" data-testid="ai-sheet-down"><ChevronDown size={16} /></button>
+            <div className="flex-1 flex justify-center"><span className="block h-1 w-10 rounded-full bg-slate-300" /></div>
+            <button type="button" onClick={sheetUp} disabled={sheet === "full"} className="p-1 text-slate-400 disabled:opacity-30" aria-label="Expand assistant" data-testid="ai-sheet-up"><ChevronDown size={16} className="rotate-180" /></button>
+          </>
+        )}
         {/* Review | Chat toggle — only visible on the review-chat
             route. Left-aligned so it doesn't fight with the mute /
             clear / collapse cluster on the right. Segmented control
@@ -3798,7 +3820,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         <button
           onClick={() => setVoiceOn(v => !v)}
           data-testid="ai-tts-toggle"
-          className={`ml-auto p-1.5 rounded hover:bg-slate-100 ${
+          className={`${isMobile ? "" : "ml-auto"} p-1.5 rounded hover:bg-slate-100 ${
             voiceOn ? "text-emerald-600" : "text-slate-400"
           }`}
           title={voiceOn ? "Voice on — click to mute" : "Voice off — click to enable"}
@@ -3849,7 +3871,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       </div>
 
       {focus && !peek && (
-        <div className="mx-3 mt-3 border rounded-md p-2.5 bg-indigo-50/50 border-indigo-200 text-xs" data-testid="ai-focus-card">
+        <div className={`border rounded-md bg-indigo-50/50 border-indigo-200 text-xs ${isMobile ? "mx-2 mt-2 p-3 border-l-4 border-l-indigo-500 shadow-sm" : "mx-3 mt-3 p-2.5"}`} data-testid="ai-focus-card">
           {focus.kind === "new-fixed-asset" ? (
             <>
               <div className="font-medium text-slate-700 mb-0.5 flex items-center gap-1">
@@ -3879,6 +3901,22 @@ export default function AiPanel({ collapsed, onToggle }) {
                 )}
               </div>
             </>
+          ) : isMobile ? (
+            <div className="flex items-center gap-3" data-testid="ai-focus-txn-card">
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] uppercase tracking-wider text-indigo-600 font-semibold">Focused</div>
+                <div className="text-sm font-semibold text-slate-900 truncate">{focus.merchant || "Transaction"}</div>
+                <div className="text-[11px] font-mono text-slate-500">{focus.date}</div>
+              </div>
+              <div className={`text-base font-semibold font-mono-num ${focus.amount > 0 ? "text-emerald-700" : "text-slate-900"}`}>
+                {focus.amount > 0 ? "" : "-"}${Math.abs(focus.amount).toFixed(2)}
+              </div>
+              {focusPinned && (
+                <button type="button" onClick={() => setFocus(null, { force: true })} className="p-1.5 rounded-md text-slate-400 hover:bg-indigo-100 hover:text-slate-700" aria-label="Cancel focus" data-testid="ai-cancel-focus">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           ) : (
             <>
               <div className="font-medium text-slate-700 mb-0.5">Focused transaction</div>
@@ -4548,7 +4586,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             <span className="text-[10px] font-normal opacity-80">(or say "stop")</span>
           </button>
         )}
-        {focus && focusPinned && !peek && (
+        {focus && focusPinned && !peek && !isMobile && (
           <button
             data-testid="ai-cancel-focus"
             onClick={() => setFocus(null, { force: true })}

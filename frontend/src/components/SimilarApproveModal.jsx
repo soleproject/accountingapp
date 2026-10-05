@@ -84,7 +84,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
   })() : null;
 
   return (
-    <div className="fixed inset-0 z-[70] md:z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="similar-approve-modal">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="similar-approve-modal">
       {strip && (
         <div className="fixed z-[60] flex flex-col gap-1.5 rounded-xl bg-white border border-fuchsia-200 shadow-2xl p-1.5"
              style={{ left: strip.left, top: strip.top, width: strip.w }} data-testid="similar-approve-quick-strip">
