@@ -107,8 +107,8 @@ def test_signup_without_firm_slug_direct():
     row = next((c for c in clients if c.get("id") == cid or c.get("company_id") == cid), None)
     assert row, f"company {cid} not found in /pro/clients"
     ent_name = row.get("enterprise_name")
-    assert ent_name in (None, "", "SmartBooks direct"), (
-        f"expected no enterprise_name for direct signup, got {ent_name!r}"
+    assert ent_name == "SmartBooks", (
+        f"direct signups belong to the SmartBooks default enterprise, got {ent_name!r}"
     )
     print(f"[WL-] created direct company {cid} ({name}) email={email}")
 
@@ -129,8 +129,8 @@ def test_signup_unknown_firm_slug_no_error():
     clients = _get_pro_clients(admin_tok)
     row = next((c for c in clients if c.get("id") == cid or c.get("company_id") == cid), None)
     assert row, f"company {cid} missing from /pro/clients"
-    assert row.get("enterprise_name") in (None, "", "SmartBooks direct"), (
-        f"unknown slug produced attribution: {row.get('enterprise_name')!r}"
+    assert row.get("enterprise_name") == "SmartBooks", (
+        f"unknown slug should fall back to the SmartBooks default, got {row.get('enterprise_name')!r}"
     )
     print(f"[WL?] created unknown-slug company {cid} ({name}) email={email}")
 

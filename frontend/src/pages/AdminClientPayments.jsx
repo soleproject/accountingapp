@@ -198,7 +198,7 @@ export default function AdminClientPayments() {
         {isPlatform && (
         <select value={ent} onChange={(e) => setEnt(e.target.value)} className="text-sm rounded-md border border-slate-200 bg-white px-2.5 py-2" data-testid="cp-filter-enterprise">
           <option value="all">All enterprises</option>
-          <option value="direct">SmartBooks direct</option>
+          <option value="direct">No enterprise</option>
           {enterprises.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
         </select>
         )}
@@ -227,7 +227,7 @@ export default function AdminClientPayments() {
                   <div className="text-[11px] text-slate-400 truncate max-w-[220px]">{r.owner_name || "—"}{r.owner_email ? ` · ${r.owner_email}` : ""}</div>
                 </td>
                 {isPlatform && (
-                <td className="px-4 py-2.5 text-slate-600">{r.enterprise_name || <span className="text-slate-400">SmartBooks direct</span>}</td>
+                <td className="px-4 py-2.5 text-slate-600">{r.enterprise_name || <span className="text-slate-400">No enterprise</span>}</td>
                 )}
                 <td className="px-4 py-2.5">
                   <div className="text-slate-800">{r.product_label || <span className="text-slate-400">—</span>}</div>
@@ -352,7 +352,7 @@ function ClientDrawer({ cid, onClose, showStripe = true, onChanged }) {
           <div className="min-w-0">
             <div className="font-heading text-xl font-bold text-slate-900 truncate" data-testid="cp-drawer-name">{c?.company_name || "…"}</div>
             {c && <div className="text-xs text-slate-500 mt-0.5">{c.owner_name || "—"} · {c.owner_email || "—"}</div>}
-            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {showStripe ? `${c.enterprise_name || "SmartBooks direct"} · ` : ""}Payer: {c.payer?.replace("_", " ") || "—"}</div>}
+            {c && <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5"><Building2 size={11} /> {showStripe ? `${c.enterprise_name || "No enterprise"} · ` : ""}Payer: {c.payer?.replace("_", " ") || "—"}</div>}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
             {showStripe && stripeCustomerUrl && <a href={stripeCustomerUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-md border border-slate-200 hover:bg-slate-50" data-testid="cp-drawer-stripe">Stripe <ExternalLink size={11} /></a>}
