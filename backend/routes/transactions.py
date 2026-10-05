@@ -1105,6 +1105,8 @@ async def contact_category_rollup(
         mongo_q["human_reviewed"] = {"$ne": True}
     elif status == "reviewed":
         mongo_q["human_reviewed"] = True
+    elif status == "receipt_verify":
+        mongo_q["receipt_match_status"] = "suggested"
 
     txns = await db.transactions.find(mongo_q).limit(20000).to_list(20000)
 
@@ -1223,6 +1225,8 @@ async def list_transactions(
         query["human_reviewed"] = {"$ne": True}
     elif status == "reviewed":
         query["human_reviewed"] = True
+    elif status == "receipt_verify":
+        query["receipt_match_status"] = "suggested"
     if contact_id:
         query["contact_id"] = contact_id
     if no_contact:

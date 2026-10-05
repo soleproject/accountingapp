@@ -17,7 +17,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2, Camera,
 } from "lucide-react";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
@@ -451,9 +451,27 @@ function NarrowFieldRow({ label, children, align = "left" }) {
   );
 }
 
-function ReceiptPopup({ cid, rid, txn, onClose }) {
+function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
   const [r, setR] = useState(null);
   const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [cands, setCands] = useState(null);
+  const suggested = txn?.receipt_match_status === "suggested";
+  const act = async (fn, okMsg) => {
+    setBusy(true);
+    try { await fn(); toast.success(okMsg); onChanged?.(); onClose(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "That didn't work"); }
+    finally { setBusy(false); }
+  };
+  const verify = () => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/verify`), "Match verified");
+  const unlink = () => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/unlink`), "Receipt unlinked — transaction is back to uncategorized");
+  const rematch = (receiptId) => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/rematch`, { transaction_id: receiptId }), "Receipt swapped");
+  const openPicker = async () => {
+    setPicking(true);
+    try { const res = await api.get(`/companies/${cid}/transactions/${txn.id}/receipt-candidates`); setCands(res.data?.candidates || res.data || []); }
+    catch { setCands([]); }
+  };
   useEffect(() => {
     if (!rid) { setErr(true); return; }
     api.get(`/companies/${cid}/receipts/${rid}`).then((res) => setR(res.data)).catch(() => setErr(true));
@@ -483,6 +501,11 @@ function ReceiptPopup({ cid, rid, txn, onClose }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {suggested ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] px-2 py-0.5" data-testid="receipt-popup-status">Approximate match — verify</span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] px-2 py-0.5" data-testid="receipt-popup-status"><Check size={11} /> Verified</span>
+            )}
             <Link to="/receipts" className="text-xs text-indigo-700 hover:underline" data-testid="receipt-popup-open-page">Open Receipts</Link>
             <button type="button" onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" aria-label="Close" data-testid="receipt-popup-close"><X size={16} /></button>
           </div>
@@ -522,6 +545,42 @@ function ReceiptPopup({ cid, rid, txn, onClose }) {
             {r?.notes && <div className="mt-3 text-slate-600"><span className="text-slate-400">Note:</span> {r.notes}</div>}
           </div>
         </div>
+        <div className="border-t px-4 py-3 flex flex-wrap items-center gap-2 bg-slate-50" data-testid="receipt-popup-actions">
+          {suggested && (
+            <button type="button" disabled={busy} onClick={verify} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold px-3 py-2 hover:bg-emerald-700 disabled:opacity-50" data-testid="receipt-popup-verify">
+              <Check size={13} /> Looks right
+            </button>
+          )}
+          <button type="button" disabled={busy} onClick={unlink} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-unlink">
+            <X size={13} /> Unlink
+          </button>
+          <button type="button" disabled={busy} onClick={openPicker} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-rematch">
+            <Paperclip size={13} /> Match a different receipt
+          </button>
+          <button type="button" disabled={busy} onClick={onSnapNew} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-snap">
+            <Camera size={13} /> Snap a new receipt
+          </button>
+        </div>
+        {picking && (
+          <div className="border-t px-4 py-3 max-h-56 overflow-y-auto" data-testid="receipt-popup-picker">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-2">Unmatched receipts on file</div>
+            {cands === null ? (
+              <Loader2 size={14} className="animate-spin text-slate-400" />
+            ) : cands.length === 0 ? (
+              <div className="text-xs text-slate-500">No unmatched receipts on file — snap a new one instead.</div>
+            ) : cands.map((c) => {
+              const rec = { ...(c.receipt || c), id: c.receipt_id || (c.receipt || c).id };
+              return (
+                <button key={rec.id} type="button" disabled={busy} onClick={() => rematch(rec.id)} className="w-full text-left rounded-md border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 px-3 py-2 mb-1.5 flex items-center gap-3 text-xs" data-testid={`receipt-popup-cand-${rec.id}`}>
+                  <span className="font-mono text-slate-500 w-20 shrink-0">{rec.date}</span>
+                  <span className="flex-1 min-w-0 truncate text-slate-800">{rec.merchant || rec.vendor || rec.contact_name || "Receipt"}</span>
+                  <span className="tabular-nums font-medium">{money(rec.amount)}</span>
+                  {c.score != null && <span className="text-[10px] text-slate-400">{c.score}%</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -649,7 +708,7 @@ function NarrowTxnCardList({
                 {t.merchant || t.description}
               </div>
               {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                <button type="button" onClick={(e) => { e.stopPropagation(); onViewReceipt?.(t); }} className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100" title="View receipt" data-testid={`txn-receipt-badge-card-${t.id}`}>
+                <button type="button" onClick={(e) => { e.stopPropagation(); onViewReceipt?.(t); }} className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full border ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300 ring-2 ring-amber-200" : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"}`} title="View receipt" data-testid={`txn-receipt-badge-card-${t.id}`}>
                   <Paperclip size={11} />
                 </button>
               )}
@@ -1358,6 +1417,12 @@ export default function Transactions() {
   const [linkedDocPreview, setLinkedDocPreview] = useState(null);
   // Paperclip click → receipt popup (image + line items) right on this page.
   const [receiptPopup, setReceiptPopup] = useState(null);
+  const [verifyCount, setVerifyCount] = useState(0);
+  const loadVerifyCount = () => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/receipts/verify-count`).then((r) => setVerifyCount(r.data?.count || 0)).catch(() => {});
+  };
+  useEffect(() => { loadVerifyCount(); /* eslint-disable-next-line */ }, [currentId, txns]);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
@@ -1437,7 +1502,7 @@ export default function Transactions() {
     if (!currentId) return;
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
-    else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed") {
+    else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed" || filter === "receipt_verify") {
       params.set("status", filter);
     }
     if (debouncedSearch) params.set("q", debouncedSearch);
@@ -2778,6 +2843,17 @@ export default function Transactions() {
               ))}
             </div>
           )}
+          {verifyCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilter(filter === "receipt_verify" ? "all" : "receipt_verify")}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ${filter === "receipt_verify" ? "bg-amber-600 text-white border-amber-600" : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"}`}
+              title="Receipts matched approximately — confirm or fix each one"
+              data-testid="txn-receipts-verify-chip"
+            >
+              <Paperclip size={12} /> {verifyCount} receipt{verifyCount === 1 ? "" : "s"} to verify
+            </button>
+          )}
           {!isReviewMode && (
             <button
               type="button"
@@ -3189,6 +3265,8 @@ export default function Transactions() {
           rid={receiptPopup.rid}
           txn={receiptPopup.txn}
           onClose={() => setReceiptPopup(null)}
+          onChanged={() => { load(); loadVerifyCount(); }}
+          onSnapNew={() => { setReceiptPopup(null); setEditing(receiptPopup.txn); }}
         />
       )}
       {linkedDocPreview && (
@@ -3418,8 +3496,8 @@ export default function Transactions() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t }); }}
-                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100"
-                        title="View receipt"
+                        className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300 ring-2 ring-amber-200" : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"}`}
+                        title={t.receipt_match_status === "suggested" ? "Receipt matched approximately — verify" : "View receipt"}
                         data-testid={`txn-receipt-badge-${t.id}`}
                       >
                         <Paperclip size={12} />

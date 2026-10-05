@@ -281,8 +281,21 @@ async def find_pending_receipt_match(
     return None
 
 
+def _is_exact_match(receipt: dict, txn: dict) -> bool:
+    """Exact = same amount (to the cent) and same/next day. Anything fuzzier
+    (within 1%, tip, 2+ days apart) stays linked but flagged for a human."""
+    try:
+        if abs(abs(float(receipt.get("amount") or 0)) - abs(float(txn.get("amount") or 0))) > _AMT_TOL:
+            return False
+        days = _days_between(receipt.get("date"), txn.get("date"))
+        return days is not None and days <= 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def link_receipt_to_transaction(
     company_id: str, receipt: dict, txn: dict, *, notify_user: bool = False,
+    verified: Optional[bool] = None,
 ) -> None:
     """Cross-link a receipt and a transaction, copy the receipt's line-
     item split onto the transaction (transactions live directly on the
@@ -369,9 +382,14 @@ async def link_receipt_to_transaction(
             "data_url": data_url, "kind": "receipt", "uploaded_at": now, "uploaded_by": "receipt:match",
         })
 
+    if verified is None:
+        verified = _is_exact_match(receipt, txn)
+    match_status = "verified" if verified else "suggested"
+
     await db.transactions.update_one(
         {"id": tid, "company_id": company_id},
         {"$set": {
+            "receipt_match_status":  match_status,
             "line_items":            norm_lines,
             "splits":                splits,
             "attachments":           attachments,
@@ -406,6 +424,7 @@ async def link_receipt_to_transaction(
         {"$set": {
             "matched_transaction_id": tid,
             "matched_at":             now,
+            "match_status":           match_status,
             "updated_at":             now,
         }},
     )
@@ -434,7 +453,7 @@ async def unlink_receipt_from_transaction(company_id: str, rid: str, tid: str) -
             "receipt_ai_narrative": None,
             "human_reviewed": False, "needs_review": True, "updated_at": now,
         },
-         "$unset": {"matched_receipt_id": "", "receipt_id": ""}},
+         "$unset": {"matched_receipt_id": "", "receipt_id": "", "receipt_match_status": ""}},
     )
 
 
@@ -443,7 +462,7 @@ async def unmatch_receipt_for_deleted_transaction(company_id: str, tid: str) -> 
     r = await db.receipts.update_many(
         {"company_id": company_id, "matched_transaction_id": tid},
         {"$set": {"matched_transaction_id": None, "matched_at": None, "match_transaction_id": None,
-                  "updated_at": _now_iso()}})
+                  "match_status": None, "updated_at": _now_iso()}})
     return r.modified_count
 
 
