@@ -1709,11 +1709,12 @@ export default function Transactions() {
   // The tour runs on sample rows rendered through the real table so every
   // beat has a live target even for a brand-new company. Nothing is saved.
   const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; sampleRef.current = []; setSampleMode(true); setTxnTourOpen(true); };
-  const closeTxnTour = () => {
+  const closeTxnTour = (res) => {
     setTxnTourOpen(false);
     setSampleMode(false); sampleRef.current = [];
     try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
     const snap = txnTourSnapRef.current; txnTourSnapRef.current = null;
+    if (res?.completed) { setFilter("unapproved"); setPage(1); return; }   // finale: "I'll put you on the To do screen"
     if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
   };
   useEffect(() => {
@@ -2579,7 +2580,7 @@ export default function Transactions() {
   return (
     <div className="space-y-4">
       {txnTourOpen && (
-        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} layout="top-bar" barAnchor="txn-table-wrap" />
+        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Let's go 🎉" onClose={closeTxnTour} layout="top-bar" barAnchor="txn-table-wrap" />
       )}
       {sampleMode && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="txn-sample-banner">

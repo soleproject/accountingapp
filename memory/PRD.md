@@ -963,3 +963,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `ChatReviewTour`: new beat field `afterClickAnchor` — once the beat's click fires, the spotlight re-targets (menu item → `modal-panel`; paperclip → `receipt-popup-panel`) so the opened UI is bright immediately.
 - `transactionsBeats.js`: "more" beat now opens with "Next, every row…"; "link" beat uses `afterClickAnchor: "modal-panel"`; NEW chapter 5 "Receipts" — `paperclip` (highlights `txn-receipt-badge-*`, explains orange = exact / amber = confirm) and `receipt-popup` (clicks it, spotlights the popup, `exitClick: receipt-popup-close`); finale copy mentions the paperclip. 12 beats total.
 - Sample receipt now shows a real image: `/app/frontend/public/sample-receipt.png` (Home Depot demo) via `attachment_data_url: "/sample-receipt.png"`; `receipt-popup-panel` testid added to the popup's inner panel.
+
+## 2026-10-05 — Tour copy pass + 14-beat finale ✅ self-tested
+- Beats 1/4/8/10 reworded per user (checked/uncheck wording, "Link to invoice or bill", "Now, see the orange paperclip…"). Beat 12 "That's it!…", beat 13 recap of the five moves, beat 14 finale "I will put you on the To do screen…" (button "Let's go 🎉").
+- `closeTxnTour({completed:true})` now sets filter=unapproved (To do) on live data instead of restoring the pre-tour filter; skip/close still restores.
