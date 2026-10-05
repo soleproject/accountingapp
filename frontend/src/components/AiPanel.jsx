@@ -10,6 +10,7 @@ import { useAiFocus } from "@/lib/aiFocus";
 import { toast } from "sonner";
 import { resolveVoiceCommand } from "@/lib/voiceCommands";
 import { emitCreate, emitAction, useActionListener } from "@/lib/createBus";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -518,6 +519,8 @@ export default function AiPanel({ collapsed, onToggle }) {
     document.body.setAttribute("data-ai-panel-open", collapsed ? "0" : "1");
     return () => document.body.removeAttribute("data-ai-panel-open");
   }, [collapsed]);
+  const isMobile = useIsMobile();
+  const [typing, setTyping] = useState(false);
   // Drag-to-resize. Listeners are attached synchronously inside
   // startResize so we never race with React's render cycle — previous
   // implementation gated attachment on a ref inside a useEffect,
@@ -3653,6 +3656,7 @@ export default function AiPanel({ collapsed, onToggle }) {
   };
 
   if (collapsed) {
+    if (isMobile) return null;   // the bottom-nav "Chat" tab re-opens it
     return (
       <div className="w-12 shrink-0 border-l bg-white flex flex-col items-center py-4">
         <button
@@ -3667,21 +3671,30 @@ export default function AiPanel({ collapsed, onToggle }) {
     );
   }
 
+  // Mobile: a fixed bottom sheet above the bottom nav, full width, so
+  // the page keeps scrolling behind it. Grows when the user is typing
+  // so the keyboard doesn't swallow the conversation.
+  const mobileSheetHeight = typing ? "min(78vh, calc(100dvh - 72px))" : "46vh";
   return (
     <aside
-      className="shrink-0 border-l bg-white flex flex-col relative z-[60]"
-      style={{ width: `${panelWidth}px` }}
+      className={isMobile
+        ? "fixed left-0 right-0 z-[60] bg-white flex flex-col rounded-t-2xl shadow-[0_-8px_30px_rgba(15,23,42,0.18)] border-t border-slate-200"
+        : "shrink-0 border-l bg-white flex flex-col relative z-[60]"}
+      style={isMobile
+        ? { bottom: "calc(64px + env(safe-area-inset-bottom))", height: mobileSheetHeight, transition: "height 180ms ease" }
+        : { width: `${panelWidth}px` }}
       data-testid="ai-panel"
+      data-mobile-sheet={isMobile ? "1" : "0"}
     >
       {/* Drag handle — 6px wide invisible strip along the left edge. */}
-      <div
+      {!isMobile && <div
         onMouseDown={startResize}
         role="separator"
         aria-orientation="vertical"
         title="Drag to resize"
         data-testid="ai-panel-resize"
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
-      />
+      />}
       <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
         {/* Review | Chat toggle — only visible on the review-chat
             route. Left-aligned so it doesn't fight with the mute /
@@ -4519,6 +4532,8 @@ export default function AiPanel({ collapsed, onToggle }) {
             }
             className="flex-1 rounded-md border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:border-slate-400"
             disabled={streaming}
+            onFocus={() => setTyping(true)}
+            onBlur={() => setTyping(false)}
           />
           <button
             data-testid={TID.aiChatSend}

@@ -552,7 +552,7 @@ export default function Layout() {
               content never gets hidden under it. */}
           <main
             className="flex-1 overflow-y-auto p-4"
-            style={{ paddingBottom: "calc(72px + env(safe-area-inset-bottom))" }}
+            style={{ paddingBottom: aiCollapsed ? "calc(72px + env(safe-area-inset-bottom))" : "calc(46vh + 80px + env(safe-area-inset-bottom))" }}
           >
             <ReturnBreadcrumb />
             <Outlet />
