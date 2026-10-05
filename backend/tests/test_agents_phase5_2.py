@@ -151,16 +151,23 @@ def test_missing_receipts_flags_large_txns_without_receipt():
         cid = f"cid-{uuid.uuid4().hex[:8]}"
         try:
             today = datetime.now(timezone.utc).date().isoformat()
+            sup = f"{cid}-sup"
+            await db.accounts.insert_one({"id": sup, "company_id": cid, "name": "Supplies", "type": "expense",
+                                          "receipt_profile": "point_of_sale", "receipt_profile_name": "Supplies"})
+            pos = {"category_account_id": sup, "pfc_primary": "GENERAL_MERCHANDISE"}
             await db.transactions.insert_many([
-                {"id": f"{cid}-t1", "company_id": cid, "amount": 200, "date": today},
-                {"id": f"{cid}-t2", "company_id": cid, "amount": 500, "date": today, "receipt_id": "r1"},
-                {"id": f"{cid}-t3", "company_id": cid, "amount": 10, "date": today},
+                {"id": f"{cid}-t1", "company_id": cid, "amount": -200, "date": today, **pos},
+                {"id": f"{cid}-t2", "company_id": cid, "amount": -500, "date": today, "receipt_id": "r1", **pos},
+                {"id": f"{cid}-t3", "company_id": cid, "amount": -10, "date": today, **pos},
+                {"id": f"{cid}-t4", "company_id": cid, "amount": -300, "date": today, "category_account_id": sup,
+                 "description": "NV ENERGY AUTOPAY", "pfc_primary": "RENT_AND_UTILITIES"},
             ])
-            f = await _run_missing_receipts(cid, {}, {"min_amount": 75.0, "lookback_days": 60})
+            f = await _run_missing_receipts(cid, {}, {"lookback_days": 60})
             assert len(f) == 1
             assert f[0]["count"] == 1
         finally:
             await _wipe(cid)
+            await db.accounts.delete_many({"company_id": cid})
     _run(go())
 
 

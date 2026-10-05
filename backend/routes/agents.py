@@ -446,26 +446,30 @@ async def _run_match_unpaid_invoices(cid: str, agent: dict, cfg: dict) -> list[d
 
 
 async def _run_missing_receipts(cid: str, agent: dict, cfg: dict) -> list[dict]:
-    """Transactions above the threshold with no receipt attached."""
-    threshold = float(cfg.get("min_amount", 75.0) or 75.0)
+    """Point-of-sale purchases (per receipt_policy) with no documentation."""
+    import receipt_policy
     lookback = int(cfg.get("lookback_days", 60) or 60)
     since = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
     q = {
         "company_id": cid, "date": {"$gte": since},
-        "amount": {"$gte": threshold},
+        "amount": {"$lte": -receipt_policy.RECEIPT_FLOOR},
+        "posted": {"$ne": False}, "deleted_at": {"$in": [None, ""]},
         "$and": [
             {"$or": [{"receipt_id": {"$in": [None, ""]}}, {"receipt_id": {"$exists": False}}]},
+            {"$or": [{"matched_receipt_id": {"$in": [None, ""]}}, {"matched_receipt_id": {"$exists": False}}]},
             {"$or": [{"veryfi_receipt_id": {"$in": [None, ""]}}, {"veryfi_receipt_id": {"$exists": False}}]},
         ],
     }
-    n = await db.transactions.count_documents(q)
+    txns = await db.transactions.find(q).limit(2000).to_list(2000)
+    decisions = await receipt_policy.decide(cid, txns)
+    n = sum(1 for d in decisions.values() if d.flag)
     if n <= 0:
         return []
     return [{
         "kind": "missing_receipts",
         "severity": "amber",
-        "title": f"{n} transaction{'s' if n != 1 else ''} over ${threshold:,.0f} missing receipts",
-        "detail": f"Attach receipts for the last {lookback} days of large charges.",
+        "title": f"{n} purchase{'s' if n != 1 else ''} missing a receipt",
+        "detail": f"In-store, meals, fuel, supplies and similar purchases in the last {lookback} days with nothing attached.",
         "action_label": "Ask client for receipts",
         "action_route": "/cockpit/requests?flow=receipts",
         "count": n,
