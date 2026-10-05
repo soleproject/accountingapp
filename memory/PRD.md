@@ -978,3 +978,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — Mobile transaction cards: action row ✅ self-tested (390px)
 - `MobileTxnCards` takes `renderActions(t)`; each card ends with a row (`mobile-txn-actions-{id}`): Receipt chip (orange / amber "Verify receipt", left) · green check (`txn-approve-btn`, same toggleApprove) · sparkles (`txn-ai-{id}`, AI focus) · `RowMoreMenu` (edit/split/link/ask client/delete). Actions stop propagation so taps don't open the Edit modal.
 - Note: the demo Home Depot 2026-09-06 receipt had been unlinked (POST receipt/unlink at 16:27Z, likely manual) — re-matched via `/receipts/{rid}/match`.
+- `SimilarApproveModal`: pointer-anchored quick strip (`similar-approve-quick-strip`) only renders when `window.innerWidth >= 768`; phones rely on the footer buttons.
