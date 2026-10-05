@@ -552,14 +552,14 @@ export default function Layout() {
               content never gets hidden under it. */}
           <main
             className="flex-1 overflow-y-auto p-4"
-            style={{ paddingBottom: aiCollapsed ? "calc(72px + env(safe-area-inset-bottom))" : "calc(46vh + 80px + env(safe-area-inset-bottom))" }}
+            style={{ paddingBottom: aiCollapsed ? "calc(72px + env(safe-area-inset-bottom))" : "calc(48vh + 80px + env(safe-area-inset-bottom))" }}
           >
             <ReturnBreadcrumb />
             <Outlet />
           </main>
-          <MobileBottomNav />
-          {/* AiPanel already renders as a fixed overlay when open —
-              same instance, no code duplication. */}
+          {/* While the assistant sheet is open it takes over the bottom
+              edge (nav hidden) so the conversation gets the room. */}
+          {aiCollapsed && <MobileBottomNav />}
           <AiPanel collapsed={aiCollapsed} onToggle={() => setAiCollapsed(!aiCollapsed)} />
           <BillingLockedModal />
           <Toaster position="top-center" />

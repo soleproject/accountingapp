@@ -983,3 +983,15 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — Mobile AI chat as bottom sheet ✅ self-tested (390px)
 - `AiPanel`: on mobile (`useIsMobile`) the aside is `fixed left-0 right-0` above the bottom nav (`bottom: 64px + safe-area`), full width, 46vh tall (`data-mobile-sheet="1"`); grows to ~78vh while the text input is focused (`typing` state via onFocus/onBlur). Collapsed on mobile renders nothing (Chat tab / sparkles emit `ai-open`). Resize handle hidden on mobile.
 - `Layout` mobile `main` paddingBottom grows to `46vh + 80px` while the panel is open so the last cards stay reachable above the sheet.
+
+## 2026-10-05 — Mobile chat sheet snap points (peek / half / full) ✅ self-tested (390px)
+- `AiPanel` mobile `sheet` state: **peek** (~150px: handle `ai-sheet-handle`, one-line last AI message `ai-sheet-peek-line`, input; header/messages/focus card/listening pill/hint tape hidden), **half** (48vh), **full** (100dvh − nav). `ai-sheet-up` / `ai-sheet-down` chevrons; swipe on handle (±40px) steps levels; down from peek closes.
+- Routing: `ai-open {source:"nav"}` (bottom-nav Chat tab) → full; `{source:"row"}` (sparkle) or `ai-tell-me-about` → half; other → peek. Input focus from peek → half. Soft keyboard: `visualViewport` inset lifts the sheet (`kbInset`), nav offset dropped while keyboard is up.
+- Backlog from this discussion: inline AI answer card on the transaction row (sparkle → answer in-card, "Ask more" → sheet).
+- Chat sheet replaces the bottom nav while open (`Layout`: `{aiCollapsed && <MobileBottomNav/>}`; sheet `bottom:0`, full = 100dvh). Closing (X on peek / header X) brings the nav back.
+- `SimilarApproveModal` is `z-[70] md:z-50` (above the sheet on phones, unchanged on desktop); AiPanel drops to peek on `ai-bulk-approve-prompt` so the modal's footer stays reachable.
+- Mobile sheet header: single 44px row = shrink chevron · drag handle · expand chevron · mute · clear · voice ▾ · X (separate handle row only in peek). Focus on mobile renders a pinned transaction-style card (`ai-focus-txn-card`: FOCUSED / merchant / date / amount / X) instead of the chip + bottom "Cancel focus" pill.
+- Sheet is `z-[45]` on mobile so every modal (z-50+) sits above it; a MutationObserver drops the sheet to peek whenever a `[role=dialog]` / `*-modal` / `modal-panel` node appears. SimilarApproveModal back to z-50.
+
+## 2026-10-05 — Mobile bottom nav: swipeable strip ✅ self-tested (390px)
+- `MobileBottomNav`: scroll-snap strip (`mobile-nav-strip`, 3 tabs visible + faded sliver of the 4th) with My Business (/owner) · Receipts · Invoices · Transactions · Bills · Reports · Accounting · CRM · Home (product-gated); Chat pinned right (22%). Active = longest matching route prefix. testids `mobile-nav-<label-kebab>`.
