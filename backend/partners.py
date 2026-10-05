@@ -98,7 +98,7 @@ async def ensure_partner_books_company_for_partner(user_id: str) -> Optional[dic
         return None
 
     existing = await db.companies.find_one({
-        "owner_user_id": user_id,
+        "owner_user_id": user_id, "owner_email": user.get("email"),
         "is_partner_books": True,
     })
     if existing:
