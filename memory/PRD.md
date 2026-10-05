@@ -992,3 +992,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `SimilarApproveModal` is `z-[70] md:z-50` (above the sheet on phones, unchanged on desktop); AiPanel drops to peek on `ai-bulk-approve-prompt` so the modal's footer stays reachable.
 - Mobile sheet header: single 44px row = shrink chevron · drag handle · expand chevron · mute · clear · voice ▾ · X (separate handle row only in peek). Focus on mobile renders a pinned transaction-style card (`ai-focus-txn-card`: FOCUSED / merchant / date / amount / X) instead of the chip + bottom "Cancel focus" pill.
 - Sheet is `z-[45]` on mobile so every modal (z-50+) sits above it; a MutationObserver drops the sheet to peek whenever a `[role=dialog]` / `*-modal` / `modal-panel` node appears. SimilarApproveModal back to z-50.
+
+## 2026-10-05 — Mobile bottom nav: swipeable strip ✅ self-tested (390px)
+- `MobileBottomNav`: scroll-snap strip (`mobile-nav-strip`, 3 tabs visible + faded sliver of the 4th) with My Business (/owner) · Receipts · Invoices · Transactions · Bills · Reports · Accounting · CRM · Home (product-gated); Chat pinned right (22%). Active = longest matching route prefix. testids `mobile-nav-<label-kebab>`.

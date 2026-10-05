@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, Home, Users, Calculator, MessageSquare, Bell } from "lucide-react";
+import { Menu, X, Home, Users, Calculator, MessageSquare, Bell, Compass, Receipt, FileText, ArrowLeftRight, FileMinus, BarChart3 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { CompanySwitcher, ProfileMenu } from "@/components/Layout";
@@ -99,10 +99,18 @@ export function MobileDrawer({ open, onClose }) {
 }
 
 
+// First three are visible at rest; swipe the strip left for the rest.
+// Chat is pinned outside the strip so it's always one tap away.
 const NAV_TABS = [
-  { to: "/home",        label: "Home",       icon: Home,          matchStarts: ["/home"] },
-  { to: "/crm",         label: "CRM",        icon: Users,         matchStarts: ["/crm"] },
-  { to: "/dashboard",   label: "Accounting", icon: Calculator,    matchStarts: ["/dashboard", "/accounting"] },
+  { to: "/owner",                   label: "My Business",  icon: Compass,        matchStarts: ["/owner"],                          product: "accounting" },
+  { to: "/receipts",                label: "Receipts",     icon: Receipt,        matchStarts: ["/receipts"],                       product: "accounting" },
+  { to: "/invoices",                label: "Invoices",     icon: FileText,       matchStarts: ["/invoices"],                       product: "accounting" },
+  { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, matchStarts: ["/accounting/transactions"],        product: "accounting" },
+  { to: "/bills",                   label: "Bills",        icon: FileMinus,      matchStarts: ["/bills"],                          product: "accounting" },
+  { to: "/reports",                 label: "Reports",      icon: BarChart3,      matchStarts: ["/reports"],                        product: "accounting" },
+  { to: "/dashboard",               label: "Accounting",   icon: Calculator,     matchStarts: ["/dashboard", "/accounting"],       product: "accounting" },
+  { to: "/crm",                     label: "CRM",          icon: Users,          matchStarts: ["/crm"],                            product: "crm" },
+  { to: "/home",                    label: "Home",         icon: Home,           matchStarts: ["/home"] },
 ];
 
 
@@ -114,13 +122,14 @@ export function MobileBottomNav() {
 
   // Filter tabs the user doesn't have access to. Home is always
   // shown; CRM/Accounting only when the module is enabled for them.
-  const visibleTabs = NAV_TABS.filter(t => {
-    if (t.to === "/crm") return enabled.includes("crm");
-    if (t.to === "/dashboard") return enabled.includes("accounting");
-    return true;
-  });
+  const visibleTabs = NAV_TABS.filter(t => !t.product || enabled.includes(t.product));
 
-  const isActive = (tab) => tab.matchStarts.some(s => loc.pathname.startsWith(s));
+  // Longest matching prefix wins so /accounting/transactions lights
+  // "Transactions", not "Accounting".
+  const activeTo = visibleTabs
+    .flatMap(t => t.matchStarts.filter(s => loc.pathname.startsWith(s)).map(s => [s.length, t.to]))
+    .sort((a, b) => b[0] - a[0])[0]?.[1];
+  const isActive = (tab) => tab.to === activeTo;
 
   const openChat = () => {
     // AiPanel listens for `ai-open`; same event the header
@@ -134,29 +143,37 @@ export function MobileBottomNav() {
       className="fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 flex"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      {visibleTabs.map(t => {
-        const Icon = t.icon;
-        const active = isActive(t);
-        return (
-          <button
-            key={t.to}
-            type="button"
-            onClick={() => nav(t.to)}
-            data-testid={`mobile-nav-${t.label.toLowerCase()}`}
-            className={`flex-1 h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
-              active ? "text-cyan-600" : "text-slate-500 hover:text-slate-800"
-            }`}
-          >
-            <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
-            <span>{t.label}</span>
-          </button>
-        );
-      })}
+      {/* Swipeable strip: 3 tabs visible + a sliver of the 4th as the
+          "there's more" hint; snaps per tab. */}
+      <div
+        className="flex-1 min-w-0 flex overflow-x-auto snap-x snap-mandatory [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        style={{ WebkitOverflowScrolling: "touch", maskImage: "linear-gradient(to right, black 88%, transparent)", WebkitMaskImage: "linear-gradient(to right, black 88%, transparent)" }}
+        data-testid="mobile-nav-strip"
+      >
+        {visibleTabs.map(t => {
+          const Icon = t.icon;
+          const active = isActive(t);
+          return (
+            <button
+              key={t.to}
+              type="button"
+              onClick={() => nav(t.to)}
+              data-testid={`mobile-nav-${t.label.toLowerCase().replace(/\s+/g, "-")}`}
+              className={`shrink-0 snap-start basis-[30%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+                active ? "text-cyan-600" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
+              <span className="truncate max-w-full px-1">{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
       <button
         type="button"
         onClick={openChat}
         data-testid="mobile-nav-chat"
-        className="flex-1 h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-800"
+        className="shrink-0 w-[22%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 border-l border-slate-100"
       >
         <MessageSquare size={22} strokeWidth={1.8} />
         <span>Chat</span>
