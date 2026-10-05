@@ -1008,3 +1008,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-05 — Step 1 card title rename ✅ self-tested (curl)
 - `backend/routes/firm_glance.py` step1.title: "Review AI categorized" → "AI Transaction Review". Frontend renders `Step 1: {title}` → "Step 1: AI Transaction Review".
+
+## 2026-10-05 — Office Equipment → expense (de minimis <$2,500) ✅ self-tested
+- `seed.py`: US `1650 Office Equipment` (asset) removed → `6350 Office Equipment` (expense/operating_expense/operating_expense). UK `7140` → `6330`. `1600 Equipment` stays the fixed-asset account for ≥$2,500.
+- `industry_templates.py`: professional_services/advertising/healthcare/legal now seed `6610 Office Equipment` (expense) instead of asset 1500/1510.
+- Migration `backend/scripts/migrate_office_equipment_to_expense.py` flipped 11 zero-activity accounts in place; skipped **Michael Co 2, LLC** (acct 1650 has 3 bill JEs incl. $2,249.50 BILL-2004) — user to decide/reclass manually.
+- Verified: new company via POST /api/companies seeds 6350 as expense. Note: `tests/test_industry_template_switch.py::test_shared_codes_renamed_on_switch` fails pre-existing (unrelated).
