@@ -3326,6 +3326,15 @@ export default function Transactions() {
               {sortedTxns.map(t => {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
+                    {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                      <span
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-teal-50 text-teal-700 border border-teal-200"
+                        title="Receipt attached"
+                        data-testid={`txn-receipt-badge-${t.id}`}
+                      >
+                        <Paperclip size={12} />
+                      </span>
+                    )}
                     <button
                       title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                       data-testid={TID.txnApprove}
@@ -3421,15 +3430,6 @@ export default function Transactions() {
                       <div className="font-medium break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
                         {t.merchant || t.description}
                       </div>
-                      {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                        <span
-                          className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-50 text-teal-700 border border-teal-200"
-                          title="Receipt attached"
-                          data-testid={`txn-receipt-badge-${t.id}`}
-                        >
-                          <Paperclip size={11} />
-                        </span>
-                      )}
                       {/* Reconciliation indicator — only shown on rows
                           that were authored via a full-page editor
                           (Sales Receipt, Deposit, etc.) since bank-
