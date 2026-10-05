@@ -342,13 +342,43 @@ async def link_receipt_to_transaction(
                                         + abs(l["amount"])
         top_account_id = max(buckets.items(), key=lambda kv: kv[1])[0]
 
+    # UI shape: the Edit modal + table render `splits` (signed, with
+    # category_* fields) and `attachments[]` — mirror line_items into both
+    # so a matched receipt shows exactly like a hand-entered split.
+    sign = -1.0 if float(txn.get("amount") or 0) < 0 else 1.0
+    acct_names = {}
+    async for a in db.accounts.find({"company_id": company_id,
+                                     "id": {"$in": list({l["account_id"] for l in norm_lines})}},
+                                    {"_id": 0, "id": 1, "code": 1, "name": 1}):
+        acct_names[a["id"]] = a
+    splits = [{
+        "amount": round(sign * abs(l["amount"]), 2),
+        "category_account_id": l["account_id"],
+        "category_account_code": l.get("account_code") or acct_names.get(l["account_id"], {}).get("code", ""),
+        "category_account_name": l.get("account_name") or acct_names.get(l["account_id"], {}).get("name", ""),
+        "description": l.get("description") or "",
+    } for l in norm_lines] if len(norm_lines) > 1 else []
+    top_name = acct_names.get(top_account_id, {}).get("name") if top_account_id else None
+    attachments = list(txn.get("attachments") or [])
+    if receipt.get("attachment_data_url") and not any(a.get("receipt_id") == rid for a in attachments):
+        data_url = receipt["attachment_data_url"]
+        attachments.append({
+            "id": str(uuid.uuid4()), "receipt_id": rid,
+            "filename": receipt.get("attachment_filename") or "receipt",
+            "size": int(len(data_url) * 0.75), "mime": (data_url.split(";")[0].split(":")[-1] if data_url.startswith("data:") else "image/*"),
+            "data_url": data_url, "kind": "receipt", "uploaded_at": now, "uploaded_by": "receipt:match",
+        })
+
     await db.transactions.update_one(
         {"id": tid, "company_id": company_id},
         {"$set": {
             "line_items":            norm_lines,
+            "splits":                splits,
+            "attachments":           attachments,
             "matched_receipt_id":    rid,
             "receipt_id":            rid,   # legacy alias some views read
             "category_account_id":   top_account_id,
+            **({"category_account_name": top_name} if top_name else {}),
             "attachment_data_url":   receipt.get("attachment_data_url")
                                      or txn.get("attachment_data_url"),
             "attachment_filename":   receipt.get("attachment_filename")

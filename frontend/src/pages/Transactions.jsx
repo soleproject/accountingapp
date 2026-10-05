@@ -572,7 +572,7 @@ function NarrowTxnCardList({
                 {t.merchant || t.description}
               </div>
               {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-50 text-teal-700 border border-teal-200" title="Receipt attached" data-testid={`txn-receipt-badge-card-${t.id}`}>
+                <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-600 border border-orange-200" title="Receipt attached" data-testid={`txn-receipt-badge-card-${t.id}`}>
                   <Paperclip size={11} />
                 </span>
               )}
@@ -3328,7 +3328,7 @@ export default function Transactions() {
                   <div className="flex items-center gap-1 justify-end">
                     {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
                       <span
-                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-teal-50 text-teal-700 border border-teal-200"
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200"
                         title="Receipt attached"
                         data-testid={`txn-receipt-badge-${t.id}`}
                       >
