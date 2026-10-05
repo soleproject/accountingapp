@@ -170,7 +170,10 @@ def score_pair(*, r_amount: float, r_date: str, r_merchant: Optional[str], r_acc
     days = _days_between(r_date, t_date)
     if days is None or days > _DATE_WINDOW_DAYS:
         return 0, []
-    pts += {0: 30, 1: 25, 2: 15, 3: 15}.get(days, 8)
+    # Same-day gets a clear edge over a 1-day neighbour so an exact-date
+    # twin charge (same merchant, same amount, next day) doesn't force
+    # the "ambiguous" path. Two charges on the SAME day still tie → suggest.
+    pts += {0: 35, 1: 20, 2: 12, 3: 12}.get(days, 6)
     why.append("same day" if days == 0 else f"{days} day{'s' if days != 1 else ''} apart")
     if r_account:
         if r_account in t_accounts:

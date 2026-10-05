@@ -537,6 +537,29 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     return {"id": rid}
 
 
+class ReceiptMatchPreviewIn(BaseModel):
+    date: str
+    amount: float
+    merchant: Optional[str] = None
+    payment_account_id: Optional[str] = None
+
+
+@router.post("/companies/{cid}/receipts/match-preview")
+async def receipt_match_preview(cid: str, inp: ReceiptMatchPreviewIn, user: dict = Depends(get_current_user)):
+    """Pre-save: what will this receipt link to? Same ranking as save."""
+    await require_company(user, cid)
+    from receipt_match import rank_transactions_for_receipt
+    ranked = await rank_transactions_for_receipt(
+        cid, account_id=inp.payment_account_id, date=inp.date, amount=inp.amount, merchant=inp.merchant, limit=3)
+    def _row(x):
+        return {"transaction_id": x["txn"]["id"], "date": x["txn"].get("date"), "amount": x["txn"].get("amount"),
+                "description": x["txn"].get("description") or x["txn"].get("merchant"),
+                "score": x["score"], "confidence": x["confidence"], "reasons": x["reasons"]}
+    auto = bool(ranked) and ranked[0]["confidence"] == "high" and (
+        len(ranked) == 1 or ranked[0]["score"] - ranked[1]["score"] >= 10)
+    return {"will_link": _row(ranked[0]) if auto else None, "candidates": [_row(x) for x in ranked]}
+
+
 @router.get("/companies/{cid}/receipts/{rid}/match-candidates")
 async def receipt_match_candidates(cid: str, rid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

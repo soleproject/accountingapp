@@ -218,6 +218,19 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   // via Whisper (`/api/reviewv2/transcribe`).
   const [pillOpen, setPillOpen]         = useState(false);
   const [noteView, setNoteView]         = useState(false);
+  // Pre-save bank-match preview (same ranking the save uses).
+  const [matchPreview, setMatchPreview] = useState(null);
+  useEffect(() => {
+    if (isEdit || !date || !Number(amount)) { setMatchPreview(null); return; }
+    const vendorName = (contacts.find((c) => c.id === contactId) || {}).name || newVendorName || null;
+    const h = setTimeout(() => {
+      api.post(`/companies/${currentId}/receipts/match-preview`, {
+        date, amount: Number(amount), merchant: vendorName, payment_account_id: payAcct || null,
+      }).then((r) => setMatchPreview(r.data)).catch(() => setMatchPreview(null));
+    }, 350);
+    return () => clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, isEdit, date, amount, contactId, newVendorName, payAcct]);
   const [noteDraft, setNoteDraft]       = useState(initial?.notes || "");
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError]     = useState(null);
@@ -1211,6 +1224,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 </div>
               )}
 
+              <BankMatchPreview preview={matchPreview} />
+
               {/* Notes button — click to open dedicated note screen. */}
               <button
                 type="button"
@@ -1519,6 +1534,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           )}
         </div>
 
+        {!(mode === "ai" && analysis && !isEdit) && <BankMatchPreview preview={matchPreview} />}
+
         {/* Bottom actions. Manual mode + Edit → single Save button.
             AI mode with an analysis → Save + Rescan pair (Rescan
             clears the current scan and returns to the two-CTA
@@ -1571,6 +1588,42 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   );
 }
 
+
+function BankMatchPreview({ preview }) {
+  if (!preview) return null;
+  const fmtD = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+  const fmtA = (a) => `$${Math.abs(Number(a) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const w = preview.will_link;
+  if (w) {
+    return (
+      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 inline-flex items-center gap-2 w-full" data-testid="receipt-bank-match-preview">
+        <Link2 size={13} className="shrink-0" />
+        <span className="flex-1 min-w-0 truncate">
+          <b>Bank match:</b> {fmtD(w.date)} · {w.description} · {fmtA(w.amount)} — links on save
+        </span>
+      </div>
+    );
+  }
+  const n = (preview.candidates || []).length;
+  if (n > 0) {
+    return (
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="receipt-bank-match-preview">
+        <div className="inline-flex items-center gap-2"><Link2 size={13} className="shrink-0" /><b>{n} possible bank matches</b> — you'll pick one after saving</div>
+        <div className="mt-1 space-y-0.5 text-[11px] text-amber-800/90">
+          {preview.candidates.slice(0, 3).map((c) => (
+            <div key={c.transaction_id} className="truncate">{fmtD(c.date)} · {c.description} · {fmtA(c.amount)}</div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 inline-flex items-center gap-2 w-full" data-testid="receipt-bank-match-preview">
+      <Link2 size={13} className="shrink-0 text-slate-400" />
+      <span>No bank transaction found yet — I'll match it automatically when the charge arrives.</span>
+    </div>
+  );
+}
 
 function PaidFromResolver({ accts, busy, onPersonal, onPick, onClose }) {
   // Modal-inside-modal — matches the SmartBooks convention of layering
