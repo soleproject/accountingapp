@@ -969,3 +969,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `closeTxnTour({completed:true})` now sets filter=unapproved (To do) on live data instead of restoring the pre-tour filter; skip/close still restores.
 - Beat 7 reworded ("…I'll open it so you can see."); no longer switches back to All — stays on To do and single-clicks the row's three-dots menu.
 - Beat 3 ("check") adds `spotlights: [FIRST_ROW_CATEGORY]` (`txn-cat-picker-*`) so the category field is highlighted alongside the green check.
+- `ChatReviewTour` new beat field `spotlightsDelay` (ms) — extra `spotlights` appear N ms into the beat; beat 3 uses 2800ms so the category field lights up when the narrator says "If the category looks right".

@@ -370,6 +370,15 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
   // Extra spotlight anchors — cut additional holes in the dim mask
   // for beats that need to highlight more than one element at once.
   const extraSpotlights = useAnchorRects(beat?.spotlights || [], idx);
+  // `spotlightsDelay` — extra spotlights fade in N ms into the beat (when the narrator reaches that part).
+  const [extrasOn, setExtrasOn] = useState(true);
+  useEffect(() => {
+    const d = beat?.spotlightsDelay || 0;
+    if (!d) { setExtrasOn(true); return; }
+    setExtrasOn(false);
+    const t = setTimeout(() => setExtrasOn(true), d);
+    return () => clearTimeout(t);
+  }, [idx, beat]);
 
   // Voice narration completion — auto-advance waits for it (below).
   const [voiceComplete, setVoiceComplete] = useState(true);
@@ -686,7 +695,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     ? []
     : mergeRects([
         ...(primarySpotlight ? [primarySpotlight] : []),
-        ...extraSpotlights.map(({ rect: r }) => ({
+        ...(extrasOn ? extraSpotlights : []).map(({ rect: r }) => ({
           x: Math.max(0, r.left - spotlightPad),
           y: Math.max(0, r.top - spotlightPad),
           w: r.width + spotlightPad * 2,

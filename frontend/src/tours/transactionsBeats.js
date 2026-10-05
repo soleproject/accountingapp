@@ -51,6 +51,7 @@ export const TXN_BEATS = [
       "Each row has a green check on the right. If the category looks right, click it and the transaction is approved and posted — that's it. If a row is still Uncategorized, the check is greyed out until you give it a real category.",
     anchor: FIRST_ROW_CHECK,
     spotlights: [FIRST_ROW_CATEGORY],
+    spotlightsDelay: 2800,   // lights up as the narrator says "If the category looks right"
     wait: HOLD_LONG,
   },
   {
