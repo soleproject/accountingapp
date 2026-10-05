@@ -120,6 +120,7 @@ CATALOG = [
     {"key": "cleanup_receipt_followup",   "label": "Clean Up · Receipt Follow-up",  "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
     {"key": "cleanup_irs_compliance",     "label": "Clean Up · IRS Compliance",     "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
     {"key": "cleanup_uncategorized",      "label": "Clean Up · Uncategorized",      "cadence": "perpetual", "tracked": True, "area_link": "/accounting/todo", "cleanup": True},
+    {"key": "receipt_matches_to_confirm", "label": "Receipt matches to confirm",   "cadence": "perpetual", "tracked": True, "area_link": "/accounting/transactions?filter=receipt_verify", "cleanup": True},
 ]
 
 # Keys of the 4 new check-in item cards. Kept as a set so the status
@@ -633,7 +634,7 @@ async def responsibilities_status(
         # Cleanup cards inherit the same "both" default — they were
         # explicitly opted into on `/welcome` and should show up
         # wherever their forward-looking counterpart shows up.
-        if assign is None and key in CLEANUP_ITEM_KEYS:
+        if assign is None and key in CLEANUP_ITEM_KEYS or (assign is None and key == "receipt_matches_to_confirm"):
             assign = "both"
         # N/A rows are opt-outs — never surface them anywhere, regardless
         # of scope. Callers see the item as if it was never in the catalog.
@@ -1113,6 +1114,23 @@ async def responsibilities_status(
                               f"to clean up")
                 extra["items"] = bucket
                 extra["variant"] = "cleanup"   # frontend tone token
+
+            elif key == "receipt_matches_to_confirm":
+                # Receipts auto-matched approximately (amount/date off)
+                # — a human must confirm or unlink each one. Grey card,
+                # hidden when nothing is waiting; opens Transactions
+                # pre-filtered to the "receipts to verify" chip.
+                count = await db.transactions.count_documents(
+                    {"company_id": cid, "receipt_match_status": "suggested"})
+                if count == 0:
+                    extra["hidden"] = True
+                    status = "done"
+                    detail = ""
+                else:
+                    status = "in_progress"
+                    detail = (f"{count} receipt match{'' if count == 1 else 'es'} "
+                              f"— amount or date slightly off, confirm or unlink")
+                extra["variant"] = "cleanup"
 
         if not c["tracked"]:
             # Manual — user checks it off explicitly.

@@ -488,6 +488,7 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     rid = str(uuid.uuid4()); now = now_iso()
     doc = {
         "id": rid, "company_id": cid, **inp.model_dump(),
+        "uploaded_by": user["id"],
         "created_at": now, "updated_at": now,
     }
     await db.receipts.insert_one(doc)
@@ -512,14 +513,22 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
             from receipt_match import (
                 find_matching_transaction, link_receipt_to_transaction, rank_transactions_for_receipt,
             )
-            match = await find_matching_transaction(
-                cid, inp.payment_account_id, inp.date, inp.amount, inp.merchant,
-            )
+            match = None
+            user_picked = False
+            if inp.match_transaction_id:
+                match = await db.transactions.find_one(
+                    {"id": inp.match_transaction_id, "company_id": cid,
+                     "matched_receipt_id": {"$in": [None, ""]}})
+                user_picked = bool(match)
+            if not match:
+                match = await find_matching_transaction(
+                    cid, inp.payment_account_id, inp.date, inp.amount, inp.merchant,
+                )
             if match:
                 # Re-read the receipt so we pass the freshest doc
                 # (post_receipt_je may have added `posted_je_id`).
                 fresh = await db.receipts.find_one({"id": rid, "company_id": cid})
-                await link_receipt_to_transaction(cid, fresh or doc, match)
+                await link_receipt_to_transaction(cid, fresh or doc, match, verified=True if user_picked else None)
             else:
                 ranked = await rank_transactions_for_receipt(
                     cid, account_id=inp.payment_account_id, date=inp.date, amount=inp.amount, merchant=inp.merchant, limit=3)
@@ -534,6 +543,30 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
                 "receipt→transaction auto-match failed for %s", rid)
 
     return {"id": rid}
+
+
+class ReceiptMatchPreviewIn(BaseModel):
+    date: str
+    amount: float
+    merchant: Optional[str] = None
+    payment_account_id: Optional[str] = None
+
+
+@router.post("/companies/{cid}/receipts/match-preview")
+async def receipt_match_preview(cid: str, inp: ReceiptMatchPreviewIn, user: dict = Depends(get_current_user)):
+    """Pre-save: what will this receipt link to? Same ranking as save."""
+    await require_company(user, cid)
+    from receipt_match import rank_transactions_for_receipt
+    ranked = await rank_transactions_for_receipt(
+        cid, account_id=inp.payment_account_id, date=inp.date, amount=inp.amount, merchant=inp.merchant, limit=3)
+    def _row(x):
+        return {"transaction_id": x["txn"]["id"], "date": x["txn"].get("date"), "amount": x["txn"].get("amount"),
+                "description": x["txn"].get("description") or x["txn"].get("merchant"),
+                "bank_account_id": x["txn"].get("bank_account_id") or x["txn"].get("plaid_account_id"),
+                "score": x["score"], "confidence": x["confidence"], "reasons": x["reasons"]}
+    auto = bool(ranked) and ranked[0]["confidence"] == "high" and (
+        len(ranked) == 1 or ranked[0]["score"] - ranked[1]["score"] >= 10)
+    return {"will_link": _row(ranked[0]) if auto else None, "candidates": [_row(x) for x in ranked]}
 
 
 @router.get("/companies/{cid}/receipts/{rid}/match-candidates")
@@ -569,9 +602,64 @@ async def receipt_match_manual(cid: str, rid: str, inp: ReceiptMatchIn, user: di
     if t.get("matched_receipt_id"):
         raise HTTPException(400, "That transaction already has a receipt attached.")
     from receipt_match import link_receipt_to_transaction
-    await link_receipt_to_transaction(cid, r, t)
+    await link_receipt_to_transaction(cid, r, t, verified=True)
     await db.receipts.update_one({"id": rid}, {"$unset": {"suggested_matches": ""}, "$set": {"matched_by": user["id"], "matched_at": datetime.now(timezone.utc).isoformat()}})
     return {"ok": True, "receipt_id": rid, "transaction_id": inp.transaction_id}
+
+
+@router.get("/companies/{cid}/receipts/verify-count")
+async def receipts_verify_count(cid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    n = await db.transactions.count_documents({"company_id": cid, "receipt_match_status": "suggested"})
+    return {"count": n}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/receipt/verify")
+async def transaction_receipt_verify(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Human says the suggested receipt match looks right."""
+    await require_company(user, cid)
+    t = await db.transactions.find_one({"id": tid, "company_id": cid}, {"_id": 0, "matched_receipt_id": 1})
+    if not t or not t.get("matched_receipt_id"):
+        raise HTTPException(404, "No receipt linked to this transaction")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.transactions.update_one({"id": tid}, {"$set": {"receipt_match_status": "verified", "receipt_verified_by": user["id"], "receipt_verified_at": now}})
+    await db.receipts.update_one({"id": t["matched_receipt_id"]}, {"$set": {"match_status": "verified", "matched_by": user["id"]}})
+    return {"ok": True}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/receipt/unlink")
+async def transaction_receipt_unlink(cid: str, tid: str, user: dict = Depends(get_current_user)):
+    """Detach the receipt — both records survive; txn back to review, receipt back to unmatched."""
+    await require_company(user, cid)
+    t = await db.transactions.find_one({"id": tid, "company_id": cid}, {"_id": 0, "matched_receipt_id": 1, "receipt_id": 1})
+    rid = (t or {}).get("matched_receipt_id") or (t or {}).get("receipt_id")
+    if not rid:
+        raise HTTPException(404, "No receipt linked to this transaction")
+    from receipt_match import unlink_receipt_from_transaction, unmatch_receipt_for_deleted_transaction
+    await unlink_receipt_from_transaction(cid, rid, tid)
+    await unmatch_receipt_for_deleted_transaction(cid, tid)
+    return {"ok": True, "receipt_id": rid}
+
+
+@router.post("/companies/{cid}/transactions/{tid}/receipt/rematch")
+async def transaction_receipt_rematch(cid: str, tid: str, inp: ReceiptMatchIn, user: dict = Depends(get_current_user)):
+    """Swap the linked receipt for a different unmatched one (user-verified)."""
+    await require_company(user, cid)
+    t = await db.transactions.find_one({"id": tid, "company_id": cid})
+    r = await db.receipts.find_one({"id": inp.transaction_id, "company_id": cid})  # field reused: receipt id
+    if not t or not r:
+        raise HTTPException(404, "Receipt or transaction not found")
+    if r.get("matched_transaction_id") and r["matched_transaction_id"] != tid:
+        raise HTTPException(400, "That receipt is already attached to another transaction.")
+    from receipt_match import link_receipt_to_transaction, unlink_receipt_from_transaction, unmatch_receipt_for_deleted_transaction
+    old = t.get("matched_receipt_id") or t.get("receipt_id")
+    if old and old != r["id"]:
+        await unlink_receipt_from_transaction(cid, old, tid)
+        await unmatch_receipt_for_deleted_transaction(cid, tid)
+        t = await db.transactions.find_one({"id": tid, "company_id": cid})
+    await link_receipt_to_transaction(cid, r, t, verified=True)
+    await db.receipts.update_one({"id": r["id"]}, {"$unset": {"suggested_matches": ""}, "$set": {"matched_by": user["id"]}})
+    return {"ok": True, "receipt_id": r["id"]}
 
 
 @router.get("/companies/{cid}/transactions/{tid}/receipt-candidates")
@@ -727,6 +815,15 @@ async def analyze_receipt_vision(
     return {"analysis": analysis or None}
 
 
+@router.get("/companies/{cid}/receipts/{rid}")
+async def get_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    r = await db.receipts.find_one({"id": rid, "company_id": cid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Receipt not found")
+    return r
+
+
 @router.patch("/companies/{cid}/receipts/{rid}")
 async def update_receipt(
     cid: str, rid: str, inp: ReceiptCreate,
@@ -761,6 +858,12 @@ async def update_receipt(
 @router.delete("/companies/{cid}/receipts/{rid}")
 async def delete_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    rec = await db.receipts.find_one({"id": rid, "company_id": cid}, {"_id": 0, "matched_transaction_id": 1})
+    # Matched receipt → the transaction loses the receipt-derived split,
+    # category, and attachment and goes back to the review queue.
+    if rec and rec.get("matched_transaction_id"):
+        from receipt_match import unlink_receipt_from_transaction
+        await unlink_receipt_from_transaction(cid, rid, rec["matched_transaction_id"])
     await db.receipts.delete_one({"id": rid, "company_id": cid})
     try:
         from posting_service import reverse_document_je

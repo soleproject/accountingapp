@@ -39,7 +39,7 @@ router = APIRouter(prefix="/api")
 
 _KINDS = {"task_assigned", "timesheet_approval",
            "stale_deal", "mention", "bill_due", "anomaly", "system",
-           "payment_received"}
+           "payment_received", "receipt_matched"}
 
 
 def _clean(doc: dict | None) -> dict | None:

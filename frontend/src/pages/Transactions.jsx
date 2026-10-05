@@ -17,7 +17,7 @@ import {
   Check, Wand2, Split, Link as LinkIcon, RotateCw, Plus, X, Trash2, AlertTriangle, ShieldCheck,
   ChevronLeft, ChevronRight, Search, Calendar, XCircle, Tag, Sparkles, MoreHorizontal,
   List as ListIcon, LayoutGrid, ArrowLeftRight, HelpCircle, Pencil, User as UserIcon,
-  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2,
+  SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2, Camera,
 } from "lucide-react";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
 import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
@@ -451,12 +451,158 @@ function NarrowFieldRow({ label, children, align = "left" }) {
   );
 }
 
+function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [cands, setCands] = useState(null);
+  const [pane, setPane] = useState("receipt");
+  const suggested = txn?.receipt_match_status === "suggested";
+  const act = async (fn, okMsg) => {
+    setBusy(true);
+    try { await fn(); toast.success(okMsg); onChanged?.(); onClose(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "That didn't work"); }
+    finally { setBusy(false); }
+  };
+  const verify = () => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/verify`), "Match verified");
+  const unlink = () => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/unlink`), "Receipt unlinked — transaction is back to uncategorized");
+  const rematch = (receiptId) => act(() => api.post(`/companies/${cid}/transactions/${txn.id}/receipt/rematch`, { transaction_id: receiptId }), "Receipt swapped");
+  const openPicker = async () => {
+    setPicking(true);
+    try { const res = await api.get(`/companies/${cid}/transactions/${txn.id}/receipt-candidates`); setCands(res.data?.candidates || res.data || []); }
+    catch { setCands([]); }
+  };
+  useEffect(() => {
+    if (!rid) { setErr(true); return; }
+    api.get(`/companies/${cid}/receipts/${rid}`).then((res) => setR(res.data)).catch(() => setErr(true));
+  }, [cid, rid]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const url = r?.attachment_data_url;
+  const isPdf = url?.startsWith("data:application/pdf");
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onMouseDown={onClose} data-testid="receipt-popup">
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200"><Paperclip size={12} /></span>
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900 truncate">{r?.merchant || r?.contact_name || txn?.merchant || txn?.description || "Receipt"}</div>
+              <div className="text-[11px] text-slate-500">
+                {r?.date || txn?.date} · {money(r?.amount ?? txn?.amount)}{r?.attachment_filename ? ` · ${r.attachment_filename}` : ""}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {suggested ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-[11px] px-2 py-0.5" data-testid="receipt-popup-status">Approximate match — verify</span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] px-2 py-0.5" data-testid="receipt-popup-status"><Check size={11} /> Verified</span>
+            )}
+            <Link to="/receipts" className="text-xs text-indigo-700 hover:underline" data-testid="receipt-popup-open-page">Open Receipts</Link>
+            <button type="button" onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" aria-label="Close" data-testid="receipt-popup-close"><X size={16} /></button>
+          </div>
+        </div>
+        <div className="md:hidden flex items-center justify-center px-4 py-2 border-b bg-slate-50" data-testid="receipt-popup-pane-toggle">
+          <div className="inline-flex rounded-full border border-slate-300 bg-white p-0.5 text-xs font-medium">
+            {[["receipt", "Receipt"], ["categories", "Categories"]].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setPane(k)}
+                className={`px-4 py-1.5 rounded-full transition-colors ${pane === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                aria-pressed={pane === k} data-testid={`receipt-popup-pane-${k}`}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="grid md:grid-cols-[1fr_300px] gap-0 overflow-hidden flex-1 min-h-0">
+          <div className={`bg-slate-100 items-center justify-center overflow-auto min-h-[320px] ${pane === "receipt" ? "flex" : "hidden md:flex"}`} data-testid="receipt-popup-image-pane">
+            {err ? (
+              <div className="text-sm text-slate-500 p-6">Couldn't load this receipt.</div>
+            ) : !r ? (
+              <Loader2 className="animate-spin text-slate-400" size={20} />
+            ) : !url ? (
+              <div className="text-sm text-slate-500 p-6">No image on this receipt.</div>
+            ) : isPdf ? (
+              <iframe title="Receipt" src={url} className="w-full h-[70vh]" />
+            ) : (
+              <img src={url} alt="Receipt" className="max-w-full max-h-[70vh] object-contain" data-testid="receipt-popup-image" />
+            )}
+          </div>
+          <div className={`md:border-l overflow-y-auto p-4 text-xs ${pane === "categories" ? "block" : "hidden md:block"}`} data-testid="receipt-popup-categories-pane">
+            {r?.ai_narrative && <p className="text-slate-600 mb-3">{r.ai_narrative}</p>}
+            {(r?.line_items || []).length > 0 && (
+              <>
+                <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">Line items</div>
+                <div className="divide-y divide-slate-100">
+                  {r.line_items.map((l, i) => (
+                    <div key={i} className="py-1.5 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-slate-800 truncate">{l.description}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{l.account_code ? `${l.account_code} · ` : ""}{l.account_name}</div>
+                      </div>
+                      <div className="tabular-nums text-slate-900 shrink-0">{money(l.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {r?.notes && <div className="mt-3 text-slate-600"><span className="text-slate-400">Note:</span> {r.notes}</div>}
+          </div>
+        </div>
+        <div className="border-t px-4 py-3 flex flex-wrap items-center gap-2 bg-slate-50" data-testid="receipt-popup-actions">
+          {suggested && (
+            <button type="button" disabled={busy} onClick={verify} className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold px-3 py-2 hover:bg-emerald-700 disabled:opacity-50" data-testid="receipt-popup-verify">
+              <Check size={13} /> Looks right
+            </button>
+          )}
+          <button type="button" disabled={busy} onClick={unlink} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-unlink">
+            <X size={13} /> Unlink
+          </button>
+          <button type="button" disabled={busy} onClick={openPicker} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-rematch">
+            <Paperclip size={13} /> Match a different receipt
+          </button>
+          <button type="button" disabled={busy} onClick={onSnapNew} className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white text-xs text-slate-700 px-3 py-2 hover:bg-slate-100 disabled:opacity-50" data-testid="receipt-popup-snap">
+            <Camera size={13} /> Snap a new receipt
+          </button>
+        </div>
+        {picking && (
+          <div className="border-t px-4 py-3 max-h-56 overflow-y-auto" data-testid="receipt-popup-picker">
+            <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-2">Unmatched receipts on file</div>
+            {cands === null ? (
+              <Loader2 size={14} className="animate-spin text-slate-400" />
+            ) : cands.length === 0 ? (
+              <div className="text-xs text-slate-500">No unmatched receipts on file — snap a new one instead.</div>
+            ) : cands.map((c) => {
+              const rec = { ...(c.receipt || c), id: c.receipt_id || (c.receipt || c).id };
+              return (
+                <button key={rec.id} type="button" disabled={busy} onClick={() => rematch(rec.id)} className="w-full text-left rounded-md border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 px-3 py-2 mb-1.5 flex items-center gap-3 text-xs" data-testid={`receipt-popup-cand-${rec.id}`}>
+                  <span className="font-mono text-slate-500 w-20 shrink-0">{rec.date}</span>
+                  <span className="flex-1 min-w-0 truncate text-slate-800">{rec.merchant || rec.vendor || rec.contact_name || "Receipt"}</span>
+                  <span className="tabular-nums font-medium">{money(rec.amount)}</span>
+                  {c.score != null && <span className="text-[10px] text-slate-400">{c.score}%</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NarrowTxnCardList({
   txns, accts, currentId,
   selected, allChecked, setSelected, toggleSel,
   setFocus, emitAction, fmtDate, fmtMoney,
   toggleApprove, setEditing, recategorize, setSplitting, setLinking,
   del, askClientRef, updateCategory, showProvenance, setLinkedDocPreview,
+  onViewReceipt,
 }) {
   return (
     <div data-testid="txn-cards-narrow">
@@ -571,6 +717,11 @@ function NarrowTxnCardList({
               <div className="text-sm text-slate-800 break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
                 {t.merchant || t.description}
               </div>
+              {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                <button type="button" onClick={(e) => { e.stopPropagation(); onViewReceipt?.(t); }} className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full border ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300 ring-2 ring-amber-200" : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"}`} title="View receipt" data-testid={`txn-receipt-badge-card-${t.id}`}>
+                  <Paperclip size={11} />
+                </button>
+              )}
               {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
                 <MatchDot row={t} mode="compact" />
               )}
@@ -1274,6 +1425,14 @@ export default function Transactions() {
   // Rich linked-invoice/bill chip preview modal — clicking the chip
   // renders the linked doc in-place instead of navigating away.
   const [linkedDocPreview, setLinkedDocPreview] = useState(null);
+  // Paperclip click → receipt popup (image + line items) right on this page.
+  const [receiptPopup, setReceiptPopup] = useState(null);
+  const [verifyCount, setVerifyCount] = useState(0);
+  const loadVerifyCount = () => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/receipts/verify-count`).then((r) => setVerifyCount(r.data?.count || 0)).catch(() => {});
+  };
+  useEffect(() => { loadVerifyCount(); /* eslint-disable-next-line */ }, [currentId, txns]);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
@@ -1349,11 +1508,13 @@ export default function Transactions() {
     return () => clearTimeout(h);
   }, [search]);
 
+  const loadSeq = useRef(0);
   const load = async () => {
     if (!currentId) return;
+    const seq = ++loadSeq.current;
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
-    else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed") {
+    else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed" || filter === "receipt_verify") {
       params.set("status", filter);
     }
     if (debouncedSearch) params.set("q", debouncedSearch);
@@ -1405,6 +1566,7 @@ export default function Transactions() {
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/bills`),
     ]);
+    if (seq !== loadSeq.current) return;
     setTxns(t.data.transactions || []);
     setPagination(t.data.pagination || { total: (t.data.transactions || []).length, page: 1, pages: 1, limit: pageSize });
     setAccts(a.data.accounts || []);
@@ -2694,6 +2856,17 @@ export default function Transactions() {
               ))}
             </div>
           )}
+          {verifyCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setFilter(filter === "receipt_verify" ? "all" : "receipt_verify")}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium ${filter === "receipt_verify" ? "bg-amber-600 text-white border-amber-600" : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"}`}
+              title="Receipts matched approximately — confirm or fix each one"
+              data-testid="txn-receipts-verify-chip"
+            >
+              <Paperclip size={12} /> {verifyCount} receipt{verifyCount === 1 ? "" : "s"} to verify
+            </button>
+          )}
           {!isReviewMode && (
             <button
               type="button"
@@ -3099,6 +3272,16 @@ export default function Transactions() {
         />
       )}
 
+      {receiptPopup && (
+        <ReceiptPopup
+          cid={currentId}
+          rid={receiptPopup.rid}
+          txn={receiptPopup.txn}
+          onClose={() => setReceiptPopup(null)}
+          onChanged={() => { load(); loadVerifyCount(); }}
+          onSnapNew={() => { setReceiptPopup(null); setEditing(receiptPopup.txn); }}
+        />
+      )}
       {linkedDocPreview && (
         <LinkedDocPreview
           preview={linkedDocPreview}
@@ -3256,11 +3439,13 @@ export default function Transactions() {
             currentId={currentId}
             onReload={() => loadRef.current?.()}
             onEdit={(t) => setEditing(t)}
+            onViewReceipt={(t) => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
           />
         ) : (
         <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>
           {tableNarrow ? (
             <NarrowTxnCardList
+              onViewReceipt={(t) => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
               txns={txns}
               accts={accts}
               currentId={currentId}
@@ -3321,6 +3506,17 @@ export default function Transactions() {
               {sortedTxns.map(t => {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
+                    {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t }); }}
+                        className={`inline-flex items-center justify-center w-6 h-6 rounded-full border ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300 ring-2 ring-amber-200" : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"}`}
+                        title={t.receipt_match_status === "suggested" ? "Receipt matched approximately — verify" : "View receipt"}
+                        data-testid={`txn-receipt-badge-${t.id}`}
+                      >
+                        <Paperclip size={12} />
+                      </button>
+                    )}
                     <button
                       title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
                       data-testid={TID.txnApprove}
@@ -4548,10 +4744,18 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const removeAttachment = async (aid) => {
     if (!isEdit || !initialTxn?.id) return;
     try {
-      await api.delete(
+      const r = await api.delete(
         `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
       );
       setAttachments((prev) => prev.filter((a) => a.id !== aid));
+      if (r.data?.receipt_unlinked) {
+        // Receipt gone → the transaction is uncategorized again.
+        setLinkedReceiptId(null);
+        setSplitsOn(false);
+        setSplitRows([]);
+        setCategoryId("");
+        toast.success("Receipt removed — transaction is back to uncategorized.");
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Remove failed.");
     }

@@ -1105,6 +1105,8 @@ async def contact_category_rollup(
         mongo_q["human_reviewed"] = {"$ne": True}
     elif status == "reviewed":
         mongo_q["human_reviewed"] = True
+    elif status == "receipt_verify":
+        mongo_q["receipt_match_status"] = "suggested"
 
     txns = await db.transactions.find(mongo_q).limit(20000).to_list(20000)
 
@@ -1223,6 +1225,8 @@ async def list_transactions(
         query["human_reviewed"] = {"$ne": True}
     elif status == "reviewed":
         query["human_reviewed"] = True
+    elif status == "receipt_verify":
+        query["receipt_match_status"] = "suggested"
     if contact_id:
         query["contact_id"] = contact_id
     if no_contact:
@@ -2171,15 +2175,26 @@ async def delete_transaction_attachment(
     cid: str, tid: str, aid: str,
     user: dict = Depends(get_current_user),
 ):
-    """Remove one attachment by id."""
+    """Remove one attachment by id. A receipt-derived attachment also
+    unlinks the receipt: the receipt goes back to unmatched and the
+    transaction drops the receipt's splits/category (back to review)."""
     await require_company(user, cid)
-    r = await db.transactions.update_one(
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid}, {"_id": 0, "attachments": 1, "matched_receipt_id": 1, "receipt_id": 1})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    att = next((a for a in (txn.get("attachments") or []) if a.get("id") == aid), None)
+    rid = (att or {}).get("receipt_id") or (txn.get("matched_receipt_id") if (att or {}).get("kind") == "receipt" else None)
+    if rid and rid in (txn.get("matched_receipt_id"), txn.get("receipt_id")):
+        from receipt_match import unlink_receipt_from_transaction, unmatch_receipt_for_deleted_transaction
+        await unlink_receipt_from_transaction(cid, rid, tid)
+        await unmatch_receipt_for_deleted_transaction(cid, tid)
+        await _invalidate_dash(cid)
+        return {"ok": True, "receipt_unlinked": rid}
+    await db.transactions.update_one(
         {"id": tid, "company_id": cid},
         {"$pull": {"attachments": {"id": aid}},
          "$set":  {"updated_at": now_iso()}},
     )
-    if r.matched_count == 0:
-        raise HTTPException(404, "Transaction not found")
     return {"ok": True}
 
 
@@ -4366,6 +4381,9 @@ async def delete_transaction(cid: str, tid: str, user: dict = Depends(get_curren
     from link_cascade import cascade_on_transaction_delete
     cascade = await cascade_on_transaction_delete(cid, existing or {})
     await db.transactions.delete_one({"id": tid, "company_id": cid})
+    if existing and (existing.get("matched_receipt_id") or existing.get("receipt_id")):
+        from receipt_match import unmatch_receipt_for_deleted_transaction
+        await unmatch_receipt_for_deleted_transaction(cid, tid)
     await _invalidate_dash(cid)
     # QBO Mirror: propagate delete for any mirrored txn_type.
     if existing and existing.get("qbo_id") \

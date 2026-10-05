@@ -622,7 +622,7 @@ async def categorize_and_insert_plaid_txns(
                     txn.get("description") or txn.get("merchant_name"),
                 )
                 if match:
-                    await link_receipt_to_transaction(cid, match, txn)
+                    await link_receipt_to_transaction(cid, match, txn, notify_user=True)
         except Exception:  # noqa: BLE001 — never break Plaid ingest
             import logging
             logging.getLogger("axiom.plaid").exception(

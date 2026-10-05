@@ -170,7 +170,10 @@ def score_pair(*, r_amount: float, r_date: str, r_merchant: Optional[str], r_acc
     days = _days_between(r_date, t_date)
     if days is None or days > _DATE_WINDOW_DAYS:
         return 0, []
-    pts += {0: 30, 1: 25, 2: 15, 3: 15}.get(days, 8)
+    # Same-day gets a clear edge over a 1-day neighbour so an exact-date
+    # twin charge (same merchant, same amount, next day) doesn't force
+    # the "ambiguous" path. Two charges on the SAME day still tie → suggest.
+    pts += {0: 35, 1: 20, 2: 12, 3: 12}.get(days, 6)
     why.append("same day" if days == 0 else f"{days} day{'s' if days != 1 else ''} apart")
     if r_account:
         if r_account in t_accounts:
@@ -185,7 +188,7 @@ def score_pair(*, r_amount: float, r_date: str, r_merchant: Optional[str], r_acc
             pts += 10; why.append("merchant similar")
         elif sim == 0.0:
             pts -= 5
-    return max(0, min(100, pts)), why
+    return max(0, pts), why  # uncapped so near-twins keep their gap
 
 
 def _confidence(score: int) -> Optional[str]:
@@ -278,8 +281,21 @@ async def find_pending_receipt_match(
     return None
 
 
+def _is_exact_match(receipt: dict, txn: dict) -> bool:
+    """Exact = same amount (to the cent) and same/next day. Anything fuzzier
+    (within 1%, tip, 2+ days apart) stays linked but flagged for a human."""
+    try:
+        if abs(abs(float(receipt.get("amount") or 0)) - abs(float(txn.get("amount") or 0))) > _AMT_TOL:
+            return False
+        days = _days_between(receipt.get("date"), txn.get("date"))
+        return days is not None and days <= 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def link_receipt_to_transaction(
-    company_id: str, receipt: dict, txn: dict,
+    company_id: str, receipt: dict, txn: dict, *, notify_user: bool = False,
+    verified: Optional[bool] = None,
 ) -> None:
     """Cross-link a receipt and a transaction, copy the receipt's line-
     item split onto the transaction (transactions live directly on the
@@ -339,13 +355,48 @@ async def link_receipt_to_transaction(
                                         + abs(l["amount"])
         top_account_id = max(buckets.items(), key=lambda kv: kv[1])[0]
 
+    # UI shape: the Edit modal + table render `splits` (signed, with
+    # category_* fields) and `attachments[]` — mirror line_items into both
+    # so a matched receipt shows exactly like a hand-entered split.
+    sign = -1.0 if float(txn.get("amount") or 0) < 0 else 1.0
+    acct_names = {}
+    async for a in db.accounts.find({"company_id": company_id,
+                                     "id": {"$in": list({l["account_id"] for l in norm_lines})}},
+                                    {"_id": 0, "id": 1, "code": 1, "name": 1}):
+        acct_names[a["id"]] = a
+    splits = [{
+        "amount": round(sign * abs(l["amount"]), 2),
+        "category_account_id": l["account_id"],
+        "category_account_code": l.get("account_code") or acct_names.get(l["account_id"], {}).get("code", ""),
+        "category_account_name": l.get("account_name") or acct_names.get(l["account_id"], {}).get("name", ""),
+        "description": l.get("description") or "",
+    } for l in norm_lines] if len(norm_lines) > 1 else []
+    top_name = acct_names.get(top_account_id, {}).get("name") if top_account_id else None
+    attachments = list(txn.get("attachments") or [])
+    if receipt.get("attachment_data_url") and not any(a.get("receipt_id") == rid for a in attachments):
+        data_url = receipt["attachment_data_url"]
+        attachments.append({
+            "id": str(uuid.uuid4()), "receipt_id": rid,
+            "filename": receipt.get("attachment_filename") or "receipt",
+            "size": int(len(data_url) * 0.75), "mime": (data_url.split(";")[0].split(":")[-1] if data_url.startswith("data:") else "image/*"),
+            "data_url": data_url, "kind": "receipt", "uploaded_at": now, "uploaded_by": "receipt:match",
+        })
+
+    if verified is None:
+        verified = _is_exact_match(receipt, txn)
+    match_status = "verified" if verified else "suggested"
+
     await db.transactions.update_one(
         {"id": tid, "company_id": company_id},
         {"$set": {
+            "receipt_match_status":  match_status,
             "line_items":            norm_lines,
+            "splits":                splits,
+            "attachments":           attachments,
             "matched_receipt_id":    rid,
             "receipt_id":            rid,   # legacy alias some views read
             "category_account_id":   top_account_id,
+            **({"category_account_name": top_name} if top_name else {}),
             "attachment_data_url":   receipt.get("attachment_data_url")
                                      or txn.get("attachment_data_url"),
             "attachment_filename":   receipt.get("attachment_filename")
@@ -372,6 +423,8 @@ async def link_receipt_to_transaction(
         {"id": rid, "company_id": company_id},
         {"$set": {
             "matched_transaction_id": tid,
+            "matched_at":             now,
+            "match_status":           match_status,
             "updated_at":             now,
         }},
     )
@@ -380,3 +433,59 @@ async def link_receipt_to_transaction(
         "receipt %s linked to transaction %s (%d line item split)",
         rid, tid, len(norm_lines),
     )
+    if notify_user:
+        await notify_receipt_matched(company_id, receipt, txn)
+
+
+async def unlink_receipt_from_transaction(company_id: str, rid: str, tid: str) -> None:
+    """Receipt deleted → transaction goes back to uncategorized / needs review."""
+    now = _now_iso()
+    txn = await db.transactions.find_one({"id": tid, "company_id": company_id})
+    if not txn or rid not in (txn.get("matched_receipt_id"), txn.get("receipt_id")):
+        return
+    attachments = [a for a in (txn.get("attachments") or []) if a.get("receipt_id") != rid]
+    await db.transactions.update_one(
+        {"id": tid, "company_id": company_id},
+        {"$set": {
+            "line_items": [], "splits": [], "attachments": attachments,
+            "category_account_id": None, "category_account_name": None,
+            "attachment_data_url": None, "attachment_filename": None,
+            "receipt_ai_narrative": None,
+            "human_reviewed": False, "needs_review": True, "updated_at": now,
+        },
+         "$unset": {"matched_receipt_id": "", "receipt_id": "", "receipt_match_status": ""}},
+    )
+
+
+async def unmatch_receipt_for_deleted_transaction(company_id: str, tid: str) -> int:
+    """Transaction deleted → its receipt goes back to unmatched."""
+    r = await db.receipts.update_many(
+        {"company_id": company_id, "matched_transaction_id": tid},
+        {"$set": {"matched_transaction_id": None, "matched_at": None, "match_transaction_id": None,
+                  "match_status": None, "updated_at": _now_iso()}})
+    return r.modified_count
+
+
+async def notify_receipt_matched(company_id: str, receipt: dict, txn: dict) -> None:
+    """Bell notification for a match the user didn't watch happen (Plaid
+    landed the charge after the receipt was snapped). Goes to whoever
+    uploaded the receipt, else the company owner(s)."""
+    try:
+        from routes.notifications import notify
+        amt = abs(float(txn.get("amount") or 0))
+        who = (txn.get("merchant") or txn.get("merchant_name") or txn.get("description")
+               or receipt.get("vendor") or "a transaction")
+        targets = [receipt.get("uploaded_by")] if receipt.get("uploaded_by") else [
+            m["user_id"] async for m in db.memberships.find(
+                {"company_id": company_id, "role": "owner"}, {"_id": 0, "user_id": 1})]
+        for uid in targets:
+            await notify(
+                company_id, uid, "receipt_matched",
+                f"Receipt matched: {who} · ${amt:,.2f}",
+                f"The {receipt.get('vendor') or 'receipt'} you uploaded is now attached to the "
+                f"{txn.get('date') or ''} bank transaction.",
+                link=f"/accounting/transactions?focus={txn.get('id')}",
+                source={"type": "receipt_match", "id": f"{receipt.get('id')}:{txn.get('id')}"},
+            )
+    except Exception:  # noqa: BLE001 — never break the match itself
+        logger.exception("receipt_matched notification failed")
