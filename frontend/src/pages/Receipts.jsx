@@ -220,6 +220,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   const [noteView, setNoteView]         = useState(false);
   // Pre-save bank-match preview (same ranking the save uses).
   const [matchPreview, setMatchPreview] = useState(null);
+  // User-chosen bank transaction when the auto-match is ambiguous.
+  const [pickedMatch, setPickedMatch] = useState(null);
+  const [matchPickerOpen, setMatchPickerOpen] = useState(false);
   useEffect(() => {
     if (isEdit || !date || !Number(amount)) { setMatchPreview(null); return; }
     const vendorName = (contacts.find((c) => c.id === contactId) || {}).name || newVendorName || null;
@@ -228,6 +231,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         date, amount: Number(amount), merchant: vendorName, payment_account_id: payAcct || null,
       }).then((r) => {
         setMatchPreview(r.data);
+        setPickedMatch((prev) => prev && (r.data?.candidates || []).some((c) => c.transaction_id === prev.transaction_id) ? prev : null);
         // A confident bank match tells us which account paid — fill
         // "Paid from" from the transaction instead of asking.
         const acct = r.data?.will_link?.bank_account_id;
@@ -615,7 +619,13 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     // resolver hands the user a first-class choice between "Personal
     // Account" (auto-books a Due-to-Owner liability) and a scrollable
     // list of real asset/liability accounts.
-    const matchedAcct = matchPreview?.will_link?.bank_account_id;
+    const effective = pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link);
+    // Several equally-likely bank transactions → let the user tap one.
+    if (!isEdit && !effective && !pickedMatch?.none && (matchPreview?.candidates || []).length > 1) {
+      setMatchPickerOpen(true);
+      return;
+    }
+    const matchedAcct = effective?.bank_account_id;
     if (!payAcct && !isEdit) {
       if (matchedAcct) { await commitSave(matchedAcct, /*paidPersonally=*/false); return; }
       setPaidFromResolverOpen(true);
@@ -624,7 +634,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     await commitSave(payAcct, /*paidPersonally=*/false);
   };
 
-  const commitSave = async (paymentAcctId, paidPersonally) => {
+  const commitSave = async (paymentAcctId, paidPersonally, matchOverride) => {
     const c = contacts.find(x => x.id === contactId);
     if (!c || !amount) { toast.error("Vendor and amount are required."); return; }
     setBusy(true);
@@ -637,6 +647,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         amount: parseFloat(amount),
         category_account_id: cat || null,
         payment_account_id: paymentAcctId || null,
+        match_transaction_id: matchOverride !== undefined ? matchOverride : ((pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link))?.transaction_id || null),
         paid_personally: !!paidPersonally,
         notes,
         attachment_data_url: attachment?.data_url || null,
@@ -1232,7 +1243,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
                 </div>
               )}
 
-              <BankMatchPreview preview={matchPreview} />
+              <BankMatchPreview preview={matchPreview} picked={pickedMatch} onPick={(c) => { setPickedMatch(c); if (!payAcct && c.bank_account_id) setPayAcct(c.bank_account_id); }} />
 
               {/* Notes button — click to open dedicated note screen. */}
               <button
@@ -1542,7 +1553,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           )}
         </div>
 
-        {!(mode === "ai" && analysis && !isEdit) && <BankMatchPreview preview={matchPreview} />}
+        {!(mode === "ai" && analysis && !isEdit) && (
+          <BankMatchPreview preview={matchPreview} picked={pickedMatch} onPick={(c) => { setPickedMatch(c); if (!payAcct && c.bank_account_id) setPayAcct(c.bank_account_id); }} />
+        )}
 
         {/* Bottom actions. Manual mode + Edit → single Save button.
             AI mode with an analysis → Save + Rescan pair (Rescan
@@ -1582,6 +1595,20 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 
         {/* Paid-from resolver — layered over the modal when the user
             tries to Save without picking a payment source. */}
+        {matchPickerOpen && (
+          <BankMatchPicker
+            candidates={matchPreview?.candidates || []}
+            onPick={async (c) => {
+              setPickedMatch(c);
+              setMatchPickerOpen(false);
+              const acct = payAcct || c.bank_account_id;
+              if (acct) { await commitSave(acct, false, c.transaction_id); }
+              else setPaidFromResolverOpen(true);
+            }}
+            onNone={() => { setMatchPickerOpen(false); setPickedMatch({ transaction_id: null, none: true }); if (payAcct) commitSave(payAcct, false, null); else setPaidFromResolverOpen(true); }}
+            onClose={() => setMatchPickerOpen(false)}
+          />
+        )}
         {paidFromResolverOpen && (
           <PaidFromResolver
             accts={accts}
@@ -1597,11 +1624,56 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
 }
 
 
-function BankMatchPreview({ preview }) {
+const fmtMatchDate = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+const fmtMatchAmt = (a) => `$${Math.abs(Number(a) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+function BankMatchPicker({ candidates, onPick, onNone, onClose }) {
+  return (
+    <div
+      className="absolute inset-0 z-10 bg-black/50 flex items-center justify-center p-3"
+      data-testid="receipt-bank-match-picker"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm flex flex-col max-h-[80%] overflow-hidden">
+        <div className="px-4 pt-4 pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <h3 className="text-sm font-semibold text-slate-900">Which bank transaction is this receipt for?</h3>
+            <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="Close"><X size={14} /></button>
+          </div>
+          <p className="text-[11px] text-slate-500 mt-1">We found more than one charge that fits — tap the one this receipt belongs to and we'll link it.</p>
+        </div>
+        <div className="px-4 pb-2 space-y-2 overflow-y-auto">
+          {candidates.map((c) => (
+            <button
+              key={c.transaction_id}
+              type="button"
+              onClick={() => onPick(c)}
+              className="w-full text-left rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 px-3 py-2.5 flex items-center gap-3"
+              data-testid={`receipt-bank-match-option-${c.transaction_id}`}
+            >
+              <span className="text-[11px] font-mono text-slate-500 w-12 shrink-0">{fmtMatchDate(c.date)}</span>
+              <span className="flex-1 min-w-0 text-sm text-slate-800 truncate">{c.description}</span>
+              <span className="text-sm font-medium text-slate-900 tabular-nums">{fmtMatchAmt(c.amount)}</span>
+              <ChevronRight size={14} className="text-slate-400 shrink-0" />
+            </button>
+          ))}
+        </div>
+        <div className="px-4 pb-4 pt-1 flex flex-col gap-1.5">
+          <button type="button" onClick={onNone} className="w-full py-2 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50" data-testid="receipt-bank-match-none">
+            None of these — match it later
+          </button>
+          <button type="button" onClick={onClose} className="w-full py-2 rounded-md text-xs text-slate-500 hover:text-slate-800" data-testid="receipt-bank-match-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BankMatchPreview({ preview, picked, onPick }) {
   if (!preview) return null;
-  const fmtD = (d) => (d ? new Date(d + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
-  const fmtA = (a) => `$${Math.abs(Number(a) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const w = preview.will_link;
+  const fmtD = fmtMatchDate;
+  const fmtA = fmtMatchAmt;
+  const w = picked?.none ? null : (picked || preview.will_link);
   if (w) {
     return (
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 inline-flex items-center gap-2 w-full" data-testid="receipt-bank-match-preview">
@@ -1616,10 +1688,21 @@ function BankMatchPreview({ preview }) {
   if (n > 0) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="receipt-bank-match-preview">
-        <div className="inline-flex items-center gap-2"><Link2 size={13} className="shrink-0" /><b>{n} possible bank matches</b> — you'll pick one after saving</div>
-        <div className="mt-1 space-y-0.5 text-[11px] text-amber-800/90">
+        <div className="inline-flex items-center gap-2"><Link2 size={13} className="shrink-0" /><b>{n} possible bank matches</b> — tap the right one</div>
+        <div className="mt-1.5 space-y-1">
           {preview.candidates.slice(0, 3).map((c) => (
-            <div key={c.transaction_id} className="truncate">{fmtD(c.date)} · {c.description} · {fmtA(c.amount)}</div>
+            <button
+              key={c.transaction_id}
+              type="button"
+              onClick={() => onPick?.(c)}
+              className="w-full text-left rounded-md border border-amber-200 bg-white hover:bg-emerald-50 hover:border-emerald-300 px-2 py-1.5 text-[11px] text-slate-800 flex items-center gap-2"
+              data-testid={`receipt-bank-match-pick-${c.transaction_id}`}
+            >
+              <span className="font-mono text-slate-500 w-11 shrink-0">{fmtD(c.date)}</span>
+              <span className="flex-1 min-w-0 truncate">{c.description}</span>
+              <span className="tabular-nums font-medium">{fmtA(c.amount)}</span>
+              <ChevronRight size={12} className="text-slate-400 shrink-0" />
+            </button>
           ))}
         </div>
       </div>

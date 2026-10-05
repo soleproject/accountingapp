@@ -188,7 +188,7 @@ def score_pair(*, r_amount: float, r_date: str, r_merchant: Optional[str], r_acc
             pts += 10; why.append("merchant similar")
         elif sim == 0.0:
             pts -= 5
-    return max(0, min(100, pts)), why
+    return max(0, pts), why  # uncapped so near-twins keep their gap
 
 
 def _confidence(score: int) -> Optional[str]:

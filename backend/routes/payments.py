@@ -513,9 +513,15 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
             from receipt_match import (
                 find_matching_transaction, link_receipt_to_transaction, rank_transactions_for_receipt,
             )
-            match = await find_matching_transaction(
-                cid, inp.payment_account_id, inp.date, inp.amount, inp.merchant,
-            )
+            match = None
+            if inp.match_transaction_id:
+                match = await db.transactions.find_one(
+                    {"id": inp.match_transaction_id, "company_id": cid,
+                     "matched_receipt_id": {"$in": [None, ""]}})
+            if not match:
+                match = await find_matching_transaction(
+                    cid, inp.payment_account_id, inp.date, inp.amount, inp.merchant,
+                )
             if match:
                 # Re-read the receipt so we pass the freshest doc
                 # (post_receipt_je may have added `posted_je_id`).

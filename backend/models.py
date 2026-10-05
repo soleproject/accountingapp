@@ -413,6 +413,8 @@ class ReceiptCreate(BaseModel):
     # Payment source account — the bank/CC/cash the receipt was paid from.
     # Matches the "Account" dropdown on the Add-Manual-Transaction modal.
     payment_account_id: Optional[str] = None
+    # User picked this bank transaction when the auto-match was ambiguous.
+    match_transaction_id: Optional[str] = None
     # Optional receipt image / PDF as a data-URL. Rendered inline on the
     # Receipts list and available for AI OCR downstream (Veryfi tie-in).
     attachment_data_url: Optional[str] = None
