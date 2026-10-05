@@ -1014,3 +1014,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `industry_templates.py`: professional_services/advertising/healthcare/legal now seed `6610 Office Equipment` (expense) instead of asset 1500/1510.
 - Migration `backend/scripts/migrate_office_equipment_to_expense.py` flipped 11 zero-activity accounts in place; skipped **Michael Co 2, LLC** (acct 1650 has 3 bill JEs incl. $2,249.50 BILL-2004) — user to decide/reclass manually.
 - Verified: new company via POST /api/companies seeds 6350 as expense. Note: `tests/test_industry_template_switch.py::test_shared_codes_renamed_on_switch` fails pre-existing (unrelated).
+
+## 2026-10-05 — Michael Co 2 Office Equipment reclass ✅ self-tested
+- Created expense `6360 Office Equipment` (6350 was already Fuel & Vehicle Expense in this company); repointed 3 bills (BILL-2004/2005/2014) + their 3 JE lines; deleted asset row 1650. P&L now shows Office Equipment $5,446.79 under expenses; Balance Sheet no longer lists it. Script: `backend/scripts/reclass_michael_co2_office_equipment.py`.
