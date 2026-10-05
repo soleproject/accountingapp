@@ -946,3 +946,35 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Findings now carry `meta.reason_code` / `meta.reason_label`; detail copy = reason ("In-store purchase — the receipt shows what was bought (Target, 2026-09-18)…"). Auto-close re-evaluates open receipt findings every tick (`resolved_reason`), resolves seeded findings lacking txn_id by amount+date, and refreshes copy when the reason changes.
 - Re-sweep run via `scripts/resweep_receipts.py` (scan all companies, prune resolved items from check-in/cleanup batches, re-graduate). Michael Co LLC: 21 closed (DIRECTV, Capital One pmts, Zelle, Pennymac, insurance, AT&T…), demo "$2,500" Best Buy/Delta closed (no txn). No recurring-pattern skip by design (user: repeat store trips still need receipts).
 - Tests: `tests/test_receipt_policy.py` (6), updated `tests/test_cleanup_scan.py`, `tests/test_agents_phase5_2.py`.
+
+## 2026-10-05 — Transactions tour runs on sample data ✅ self-tested (empty QA company + Michael Co LLC)
+- NEW `frontend/src/tours/transactionsSample.js`: `buildSampleTxns(accts)` (12 rows: uncategorized Zelle ×2, AI-suggested, approved, receipt-matched Home Depot, flagged Best Buy, transfer, deposit matching INV-1042) mapped onto the company's own CoA by type+keyword; `SAMPLE_INVOICES` / `SAMPLE_BILLS`; `filterSample`, `sampleProgress`.
+- Transactions.jsx: `sampleMode` state + `sampleRef`. `startTxnTour` → sample on; `closeTxnTour` → off + live reload. `load()` short-circuits to sample rows; approve/unapprove/updateCategory/updateContact/del/recategorize mutate locally via `sampleMutate` (toast "Sample data — nothing is saved"). Banner `txn-sample-banner`. CleanupCopilot gets `sampleProgress` prop (overrides donut/pitch). LinkModal gets `sampleDocs` prop (no fetch, no post). ReceiptPopup renders a static sample receipt for `sample-*` ids.
+- Auto-fire/onboarding invite now gated on `loadedOnce` instead of `txns.length` (tour fires for empty companies). `load()` now try/catches (429 toast) instead of unhandled rejection.
+- AiPanel: chat-history effect has a cancelled guard — fixes stale "I'm watching <previous company>" greeting after switching companies.
+
+## 2026-10-05 — Tour narrator as top bar ✅ self-tested (1920 + 390)
+- FINAL: Transactions tour uses `layout="top-bar"` (bar at `top-3`, anchors nudge-scroll below a 170px reserve, floating X hidden in bar layouts since Skip is inline). `bottom-bar` remains available.
+- `ChatReviewTour` new props `layout="bottom-bar"` + `barAnchor` (testid/`css:`); `useBarSpan` measures the anchor's left/width (400ms poll + resize/scroll) so the narrator spans exactly the transactions table; horizontal layout (chapter + copy left, controls right), stays bottom for welcome/finale too; mobile falls back to full-width bottom sheet. Card layout unchanged for other tours.
+- `useAnchorRect(anchor, idx, reserveBottom)`: popup-ghost beats reserve 420px and nudge-scroll (scrollBy on nearest `main`) so the ghost never hides under the bar.
+- Transactions.jsx: `data-testid="txn-table-wrap"` on the table wrapper; tour mounted with `layout="bottom-bar" barAnchor="txn-table-wrap"`.
+
+## 2026-10-05 — Tour beats: copy, re-anchoring, receipts chapter ✅ self-tested
+- `ChatReviewTour`: new beat field `afterClickAnchor` — once the beat's click fires, the spotlight re-targets (menu item → `modal-panel`; paperclip → `receipt-popup-panel`) so the opened UI is bright immediately.
+- `transactionsBeats.js`: "more" beat now opens with "Next, every row…"; "link" beat uses `afterClickAnchor: "modal-panel"`; NEW chapter 5 "Receipts" — `paperclip` (highlights `txn-receipt-badge-*`, explains orange = exact / amber = confirm) and `receipt-popup` (clicks it, spotlights the popup, `exitClick: receipt-popup-close`); finale copy mentions the paperclip. 12 beats total.
+- Sample receipt now shows a real image: `/app/frontend/public/sample-receipt.png` (Home Depot demo) via `attachment_data_url: "/sample-receipt.png"`; `receipt-popup-panel` testid added to the popup's inner panel.
+
+## 2026-10-05 — Tour copy pass + 14-beat finale ✅ self-tested
+- Beats 1/4/8/10 reworded per user (checked/uncheck wording, "Link to invoice or bill", "Now, see the orange paperclip…"). Beat 12 "That's it!…", beat 13 recap of the five moves, beat 14 finale "I will put you on the To do screen…" (button "Let's go 🎉").
+- `closeTxnTour({completed:true})` now sets filter=unapproved (To do) on live data instead of restoring the pre-tour filter; skip/close still restores.
+- Beat 7 reworded ("…I'll open it so you can see."); no longer switches back to All — stays on To do and single-clicks the row's three-dots menu.
+- Beat 3 ("check") adds `spotlights: [FIRST_ROW_CATEGORY]` (`txn-cat-picker-*`) so the category field is highlighted alongside the green check.
+- `ChatReviewTour` new beat field `spotlightsDelay` (ms) — extra `spotlights` appear N ms into the beat; beat 3 uses 2800ms so the category field lights up when the narrator says "If the category looks right".
+
+## 2026-10-05 — Compact tour ticker ✅ self-tested (1100px w/ AI panel, 390px)
+- `ChatReviewTour` bar layouts: `compact` when window < 768 or bar width < 900 (e.g. AI panel squeezes the table). Compact = one thin row (≈42px): mute · word-by-word ticker (`useTypedWords`, 380ms/word, shows trailing 6 words / 4 on phones, flex-end so the tail is always visible, `chat-review-tour-v2-ticker`) · n/N · Back · Next/Finish · Pause(icon) · X(skip). On md+ compact spans from the table's left edge to the window's right edge.
+- Non-compact bar: controls column is `w-auto` (was fixed 300px, which collapsed the copy into one word per line on ~1100px screens).
+
+## 2026-10-05 — Mobile transaction cards: action row ✅ self-tested (390px)
+- `MobileTxnCards` takes `renderActions(t)`; each card ends with a row (`mobile-txn-actions-{id}`): Receipt chip (orange / amber "Verify receipt", left) · green check (`txn-approve-btn`, same toggleApprove) · sparkles (`txn-ai-{id}`, AI focus) · `RowMoreMenu` (edit/split/link/ask client/delete). Actions stop propagation so taps don't open the Edit modal.
+- Note: the demo Home Depot 2026-09-06 receipt had been unlinked (POST receipt/unlink at 16:27Z, likely manual) — re-matched via `/receipts/{rid}/match`.

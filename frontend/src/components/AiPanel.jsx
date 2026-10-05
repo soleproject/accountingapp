@@ -1630,7 +1630,9 @@ export default function AiPanel({ collapsed, onToggle }) {
 
   useEffect(() => {
     if (!currentId) return;
+    let cancelled = false;   // a slower reply for the previous company must not overwrite this one
     api.get(`/ai/chat/history?company_id=${currentId}`).then(r => {
+      if (cancelled) return;
       const msgs = r.data.messages || [];
       if (msgs.length === 0) {
         // Skip the generic "Hi — I'm watching X" welcome whenever a
@@ -1653,6 +1655,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         setMessages(msgs.map(m => ({ role: m.role, content: m.content })));
       }
     }).catch(() => {});
+    return () => { cancelled = true; };
   }, [currentId, current?.name, current?.onboarding_complete, user?.name]);
 
   useEffect(() => {

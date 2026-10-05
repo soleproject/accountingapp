@@ -18,7 +18,7 @@
 // auto-tour doesn't fire again.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, ChevronLeft, ChevronRight, MousePointer2, Volume2, VolumeX, Check } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, MousePointer2, Volume2, VolumeX, Check, Play, Pause } from "lucide-react";
 import { emitAction } from "@/lib/createBus";
 import {
   CHAT_REVIEW_BEATS,
@@ -192,7 +192,7 @@ function resolveTarget(idOrSelector) {
 // Since some anchors mount asynchronously (a modal that just opened
 // after a synthetic click on the previous beat), we retry for up to
 // ~1.5 s with a short interval until the element is found.
-function useAnchorRect(anchorTestId, beatIdx) {
+function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220, reserveTop = 60) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
     if (!anchorTestId) {
@@ -206,9 +206,20 @@ function useAnchorRect(anchorTestId, beatIdx) {
       if (!el) return null;
       const r = el.getBoundingClientRect();
       const outOfView =
-        r.top < 60 || r.bottom > window.innerHeight - 200;
+        r.top < reserveTop || r.bottom > window.innerHeight - reserveBottom;
       if (outOfView) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (r.top < reserveTop && reserveTop > 60) {
+          // Top bar in the way — nudge down just enough to clear it.
+          const scroller = el.closest("main, [data-scroll-root]") || window;
+          (scroller === window ? window : scroller).scrollBy({ top: r.top - reserveTop - 16, behavior: "smooth" });
+        } else if (r.top >= reserveTop && reserveBottom > 220) {
+          // Nudge just enough that the anchor + its ghost clear the bottom bar.
+          const scroller = el.closest("main, [data-scroll-root]") || window;
+          const delta = r.bottom - (window.innerHeight - reserveBottom) + 16;
+          (scroller === window ? window : scroller).scrollBy({ top: delta, behavior: "smooth" });
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
       }
       setTimeout(() => {
         if (cancelled) return;
@@ -235,7 +246,7 @@ function useAnchorRect(anchorTestId, beatIdx) {
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [anchorTestId, beatIdx]);
+  }, [anchorTestId, beatIdx, reserveBottom, reserveTop]);
   return rect;
 }
 
@@ -290,8 +301,58 @@ function useAnchorRects(anchorTestIds, beatIdx) {
   return rects;
 }
 
-export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel }) {
+// Horizontal extent of an element (left/width), re-measured on resize +
+// scroll. Used by the bottom-bar layout to size the narrator to the table.
+function useBarSpan(selector) {
+  const [span, setSpan] = useState(null);
+  useEffect(() => {
+    if (!selector) { setSpan(null); return; }
+    const measure = () => {
+      const el = resolveTarget(selector);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0) setSpan((p) => (p && p.left === r.left && p.width === r.width ? p : { left: r.left, width: r.width }));
+    };
+    measure();
+    const iv = setInterval(measure, 400);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => { clearInterval(iv); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [selector]);
+  return span;
+}
+
+function useWindowWidth() {
+  const [w, setW] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1280));
+  useEffect(() => {
+    const on = () => setW(window.innerWidth);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  return w;
+}
+
+// Word-by-word reveal for the compact ticker. ~2.6 words/s tracks the narrator's pace.
+function useTypedWords(text, active, resetKey, paused) {
+  const words = useMemo(() => (text || "").split(/\s+/).filter(Boolean), [text]);
+  const [n, setN] = useState(0);
+  useEffect(() => { setN(0); }, [resetKey]);
+  useEffect(() => {
+    if (!active || paused || n >= words.length) return;
+    const t = setTimeout(() => setN((k) => Math.min(k + 1, words.length)), 380);
+    return () => clearTimeout(t);
+  }, [active, paused, n, words.length]);
+  return { words, n };
+}
+
+export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel, layout = "card", barAnchor = null }) {
   const BEATS = propBeats || CHAT_REVIEW_BEATS;
+  const bottomBar = layout === "bottom-bar" || layout === "top-bar";   // horizontal bar sized to `barAnchor`
+  const topBar = layout === "top-bar";
+  const barSpan = useBarSpan(bottomBar ? barAnchor : null);
+  const winW = useWindowWidth();
+  // Compact ticker when the bar is narrow (phone, or table squeezed by the AI panel).
+  const compact = bottomBar && (winW < 768 || (barSpan?.width ?? winW) < 900);
   const CHAPTER_LIST = propChapters || CHAPTERS;
   const TOTAL = BEATS.length;
   const [idx, setIdx] = useState(0);
@@ -330,11 +391,20 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     }
     return beat.cursor?.move || beat.anchor || null;
   }, [beat, clickStep]);
-  const rect = useAnchorRect(beat?.anchor, idx);
+  // Ghost popups render ~180px below the anchor — keep room so the bottom bar never covers them.
   const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
   // Extra spotlight anchors — cut additional holes in the dim mask
   // for beats that need to highlight more than one element at once.
   const extraSpotlights = useAnchorRects(beat?.spotlights || [], idx);
+  // `spotlightsDelay` — extra spotlights fade in N ms into the beat (when the narrator reaches that part).
+  const [extrasOn, setExtrasOn] = useState(true);
+  useEffect(() => {
+    const d = beat?.spotlightsDelay || 0;
+    if (!d) { setExtrasOn(true); return; }
+    setExtrasOn(false);
+    const t = setTimeout(() => setExtrasOn(true), d);
+    return () => clearTimeout(t);
+  }, [idx, beat]);
 
   // Voice narration completion — auto-advance waits for it (below).
   const [voiceComplete, setVoiceComplete] = useState(true);
@@ -346,6 +416,12 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     const hasClicks = !!(beat?.cursor?.clicks?.length || beat?.cursor?.click);
     setClicksComplete(!hasClicks);
   }, [idx, beat]);
+  const typed = useTypedWords(beat?.narrator, compact, idx, paused);
+  const TICKER_WORDS = winW < 480 ? 4 : 6;
+  const tickerText = typed.words.slice(Math.max(0, typed.n - TICKER_WORDS), typed.n).join(" ");
+  // `afterClickAnchor` re-targets the spotlight once the beat's click has fired (e.g. menu item → the modal it opened).
+  const activeAnchor = clicksComplete && beat?.afterClickAnchor ? beat.afterClickAnchor : beat?.anchor;
+  const rect = useAnchorRect(activeAnchor, `${idx}-${clicksComplete ? 1 : 0}`, beat?.ghost?.kind === "popup" && !topBar ? 420 : 220, topBar ? 170 : 60);
 
   // Auto-advance timer. When voice is on we wait until the narrator
   // has finished speaking, THEN we wait for any pending clicks, THEN
@@ -648,7 +724,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     ? []
     : mergeRects([
         ...(primarySpotlight ? [primarySpotlight] : []),
-        ...extraSpotlights.map(({ rect: r }) => ({
+        ...(extrasOn ? extraSpotlights : []).map(({ rect: r }) => ({
           x: Math.max(0, r.left - spotlightPad),
           y: Math.max(0, r.top - spotlightPad),
           w: r.width + spotlightPad * 2,
@@ -736,8 +812,13 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           /accounting/review-chat. Falls back to a bottom sheet on
           mobile / narrow viewports. */}
       <div
+        style={bottomBar && barSpan && winW >= 768
+          ? (compact ? { left: barSpan.left, right: 12 } : { left: barSpan.left, width: barSpan.width })
+          : undefined}
         className={`fixed z-[10003] px-4 ${
-          beat.center
+          bottomBar
+            ? `left-0 right-0 md:right-auto ${topBar ? "top-3" : "bottom-3"} pointer-events-none`
+            : beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
             : beat.dock === "left"
               ? "left-4 right-4 bottom-6 md:right-auto md:left-72 md:max-w-md pointer-events-none"
@@ -747,10 +828,34 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         }`}
       >
         <div
-          className="pointer-events-auto bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 md:p-6"
-          style={{ maxWidth: 480 }}
+          className={`pointer-events-auto bg-white rounded-2xl shadow-2xl border border-slate-200 ${
+            compact ? "px-3 py-2 flex items-center gap-3" : bottomBar ? "p-4 md:px-5 md:py-3.5 md:flex md:items-center md:gap-6" : "p-5 md:p-6"}`}
+          style={bottomBar ? undefined : { maxWidth: 480 }}
           data-testid="chat-review-tour-v2-narrator"
+          data-layout={layout}
+          data-compact={compact ? "1" : "0"}
         >
+          {compact ? (
+            <>
+              <button type="button" onClick={() => setVoiceOn((v) => !v)} className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100" data-testid="chat-review-tour-v2-voice" aria-label={voiceOn ? "Mute narrator" : "Unmute narrator"} aria-pressed={voiceOn}>
+                {voiceOn ? <Volume2 size={12} /> : <VolumeX size={12} />}
+              </button>
+              <div className="flex-1 min-w-0 flex justify-end overflow-hidden text-sm text-slate-800" data-testid="chat-review-tour-v2-ticker" aria-live="polite" title={beat.narrator}>
+                <span className="whitespace-nowrap shrink-0">{tickerText}<span className="inline-block w-[2px] h-[14px] align-middle bg-emerald-500 ml-0.5 animate-pulse" /></span>
+              </div>
+              <span className="shrink-0 text-[11px] text-slate-400 font-mono tabular-nums">{idx + 1}/{TOTAL}</span>
+              <button type="button" onClick={() => setIdx((k) => Math.max(0, k - 1))} disabled={idx === 0} className="shrink-0 p-1 rounded text-slate-500 hover:text-slate-800 disabled:opacity-30" data-testid="chat-review-tour-v2-prev" aria-label="Back"><ChevronLeft size={14} /></button>
+              {beat.finale ? (
+                <button type="button" onClick={() => onClose?.({ completed: true })} className="shrink-0 px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-semibold" data-testid="chat-review-tour-v2-finish">{finaleLabel || "Done"}</button>
+              ) : (
+                <button type="button" onClick={() => setIdx((k) => Math.min(k + 1, BEATS.length - 1))} className="shrink-0 px-2.5 py-1 rounded-full bg-slate-900 text-white text-xs font-medium inline-flex items-center gap-0.5" data-testid="chat-review-tour-v2-next">Next <ChevronRight size={12} /></button>
+              )}
+              <button type="button" onClick={() => setPaused((p) => !p)} className="shrink-0 p-1 rounded text-slate-400 hover:text-slate-700" data-testid="chat-review-tour-v2-pause" aria-label={paused ? "Resume" : "Pause"} title={paused ? "Resume" : "Pause"}>{paused ? <Play size={13} /> : <Pause size={13} />}</button>
+              <button type="button" onClick={() => onClose?.({ completed: false })} className="shrink-0 p-1 rounded text-slate-400 hover:text-slate-700" data-testid="chat-review-tour-v2-skip" aria-label="Skip tour"><X size={14} /></button>
+            </>
+          ) : (
+          <>
+          <div className={bottomBar ? "md:flex-1 min-w-0" : ""}>
           {/* Chapter header + voice mute */}
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold">
@@ -786,12 +891,14 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           </div>
 
           {/* Narrator copy */}
-          <div className="text-slate-800 text-[15px] leading-relaxed">
+          <div className={`text-slate-800 leading-relaxed ${bottomBar ? "text-sm md:text-[15px]" : "text-[15px]"}`}>
             {beat.narrator}
           </div>
+          </div>
 
+          <div className={bottomBar ? "md:shrink-0 md:w-auto" : ""}>
           {/* Controls */}
-          <div className="mt-5 flex items-center gap-2">
+          <div className={`flex items-center gap-2 ${bottomBar ? "mt-3 md:mt-0 md:justify-end" : "mt-5"}`}>
             <button
               type="button"
               onClick={() => setIdx((k) => Math.max(0, k - 1))}
@@ -846,7 +953,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           </div>
 
           {/* Progress footnote */}
-          <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
+          <div className={`flex items-center justify-between text-[11px] text-slate-400 ${bottomBar ? "mt-1.5" : "mt-3"}`}>
             <span>
               Beat {idx + 1} of {TOTAL}
               {beatIdxInChapter >= 0 && beatsInChapter.length > 0 && (
@@ -865,11 +972,14 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
               {paused ? "Resume" : "Pause"}
             </button>
           </div>
+          </div>
+          </>
+          )}
         </div>
       </div>
 
-      {/* Close (X) — floats top-right */}
-      <button
+      {/* Close (X) — floats top-right (the bar layouts have Skip inline) */}
+      {!bottomBar && <button
         type="button"
         onClick={() => onClose?.({ completed: false })}
         className="fixed top-4 right-4 z-[10003] w-9 h-9 rounded-full bg-white/95 border border-slate-200 shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-100"
@@ -877,7 +987,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         data-testid="chat-review-tour-v2-close"
       >
         <X size={16} />
-      </button>
+      </button>}
     </div>
   );
 }
