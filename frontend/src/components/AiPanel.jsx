@@ -521,6 +521,34 @@ export default function AiPanel({ collapsed, onToggle }) {
   }, [collapsed]);
   const isMobile = useIsMobile();
   const [typing, setTyping] = useState(false);
+  // Mobile sheet snap points: peek (one line + input) · half · full.
+  // Deliberate opens (Chat tab) → full; row sparkles → half; else peek.
+  const [sheet, setSheet] = useState("peek");
+  const sheetUp = () => setSheet((v) => (v === "peek" ? "half" : "full"));
+  const sheetDown = () => { if (sheet === "peek") onToggle?.(); else setSheet((v) => (v === "full" ? "half" : "peek")); };
+  useActionListener("ai-open", (p) => {
+    if (!isMobile) return;
+    setSheet(p?.source === "nav" ? "full" : p?.source === "row" || p?.txn ? "half" : "peek");
+  });
+  useActionListener("ai-tell-me-about", () => { if (isMobile) setSheet((v) => (v === "peek" ? "half" : v)); });
+  const dragY = useRef(null);
+  const onHandleTouchStart = (e) => { dragY.current = e.touches[0].clientY; };
+  const onHandleTouchEnd = (e) => {
+    if (dragY.current == null) return;
+    const dy = e.changedTouches[0].clientY - dragY.current;
+    dragY.current = null;
+    if (dy < -40) sheetUp(); else if (dy > 40) sheetDown();
+  };
+  // Keyboard inset — keep the input above the soft keyboard (visualViewport).
+  const [kbInset, setKbInset] = useState(0);
+  useEffect(() => {
+    if (!isMobile || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const on = () => setKbInset(Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)));
+    vv.addEventListener("resize", on); vv.addEventListener("scroll", on); on();
+    return () => { vv.removeEventListener("resize", on); vv.removeEventListener("scroll", on); };
+  }, [isMobile]);
+  useEffect(() => { if (typing && isMobile && sheet === "peek") setSheet("half"); }, [typing, isMobile, sheet]);
   // Drag-to-resize. Listeners are attached synchronously inside
   // startResize so we never race with React's render cycle — previous
   // implementation gated attachment on a ref inside a useEffect,
@@ -3674,18 +3702,45 @@ export default function AiPanel({ collapsed, onToggle }) {
   // Mobile: a fixed bottom sheet above the bottom nav, full width, so
   // the page keeps scrolling behind it. Grows when the user is typing
   // so the keyboard doesn't swallow the conversation.
-  const mobileSheetHeight = typing ? "min(78vh, calc(100dvh - 72px))" : "46vh";
+  const peek = isMobile && sheet === "peek";
+  const navH = kbInset > 0 ? 0 : 64;   // nav is under the keyboard while typing
+  const mobileSheetHeight = sheet === "full"
+    ? `calc(100dvh - ${navH}px - ${kbInset}px - env(safe-area-inset-bottom))`
+    : sheet === "half" ? (kbInset > 0 ? `calc(100dvh - ${kbInset}px - 120px)` : "48vh") : "auto";
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
   return (
     <aside
       className={isMobile
         ? "fixed left-0 right-0 z-[60] bg-white flex flex-col rounded-t-2xl shadow-[0_-8px_30px_rgba(15,23,42,0.18)] border-t border-slate-200"
         : "shrink-0 border-l bg-white flex flex-col relative z-[60]"}
       style={isMobile
-        ? { bottom: "calc(64px + env(safe-area-inset-bottom))", height: mobileSheetHeight, transition: "height 180ms ease" }
+        ? { bottom: `calc(${navH}px + ${kbInset}px + env(safe-area-inset-bottom))`, height: mobileSheetHeight, maxHeight: "100dvh", transition: "height 180ms ease, bottom 120ms ease" }
         : { width: `${panelWidth}px` }}
       data-testid="ai-panel"
-      data-mobile-sheet={isMobile ? "1" : "0"}
+      data-mobile-sheet={isMobile ? sheet : "0"}
     >
+      {isMobile && (
+        <div
+          className="shrink-0 flex items-center gap-2 px-3 pt-1.5 pb-1 select-none"
+          onTouchStart={onHandleTouchStart}
+          onTouchEnd={onHandleTouchEnd}
+          onClick={() => (sheet === "peek" ? setSheet("half") : null)}
+          data-testid="ai-sheet-handle"
+        >
+          <button type="button" onClick={(e) => { e.stopPropagation(); sheetDown(); }} className="p-1 text-slate-400" aria-label={sheet === "peek" ? "Close assistant" : "Shrink assistant"} data-testid="ai-sheet-down">
+            {sheet === "peek" ? <X size={15} /> : <ChevronDown size={16} />}
+          </button>
+          <div className="flex-1 flex justify-center"><span className="block h-1 w-10 rounded-full bg-slate-300" /></div>
+          <button type="button" onClick={(e) => { e.stopPropagation(); sheetUp(); }} disabled={sheet === "full"} className="p-1 text-slate-400 disabled:opacity-30" aria-label="Expand assistant" data-testid="ai-sheet-up">
+            <ChevronDown size={16} className="rotate-180" />
+          </button>
+        </div>
+      )}
+      {peek && (
+        <button type="button" onClick={() => setSheet("half")} className="px-4 pb-1 text-left text-xs text-slate-600 truncate" data-testid="ai-sheet-peek-line">
+          {streaming ? "Thinking…" : lastAssistant ? stripMarkdownForSpeech(lastAssistant.content || "").slice(0, 140) : "Ask me anything about your books…"}
+        </button>
+      )}
       {/* Drag handle — 6px wide invisible strip along the left edge. */}
       {!isMobile && <div
         onMouseDown={startResize}
@@ -3695,7 +3750,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         data-testid="ai-panel-resize"
         className="absolute left-0 top-0 h-full w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-indigo-300/40 z-[65]"
       />}
-      <div className="h-16 shrink-0 border-b px-4 flex items-center gap-2">
+      <div className={`h-16 shrink-0 border-b px-4 flex items-center gap-2 ${peek ? "hidden" : ""}`}>
         {/* Review | Chat toggle — only visible on the review-chat
             route. Left-aligned so it doesn't fight with the mute /
             clear / collapse cluster on the right. Segmented control
@@ -3791,7 +3846,7 @@ export default function AiPanel({ collapsed, onToggle }) {
         </button>
       </div>
 
-      {focus && (
+      {focus && !peek && (
         <div className="mx-3 mt-3 border rounded-md p-2.5 bg-indigo-50/50 border-indigo-200 text-xs" data-testid="ai-focus-card">
           {focus.kind === "new-fixed-asset" ? (
             <>
@@ -3839,7 +3894,7 @@ export default function AiPanel({ collapsed, onToggle }) {
       <div
         ref={scrollRef}
         className={`flex-1 overflow-y-auto p-3 space-y-3 ${
-          isReviewChatRoute && reviewMode === "review" ? "hidden" : ""
+          (isReviewChatRoute && reviewMode === "review") || peek ? "hidden" : ""
         }`}
       >
         {(() => {
@@ -4457,7 +4512,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             </button>
           </div>
         )}
-        {listening && (
+        {listening && !peek && (
           <div className="mb-2 flex items-center gap-2 rounded-md bg-red-50 border border-red-200 px-2.5 py-1.5">
             <span className="relative flex h-2 w-2">
               <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
@@ -4491,7 +4546,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             <span className="text-[10px] font-normal opacity-80">(or say "stop")</span>
           </button>
         )}
-        {focus && focusPinned && (
+        {focus && focusPinned && !peek && (
           <button
             data-testid="ai-cancel-focus"
             onClick={() => setFocus(null, { force: true })}
@@ -4544,7 +4599,7 @@ export default function AiPanel({ collapsed, onToggle }) {
             <Send size={15} />
           </button>
         </div>
-        <VoiceHintTape micMode={micMode} />
+        {!peek && <VoiceHintTape micMode={micMode} />}
       </div>
     </aside>
   );

@@ -983,3 +983,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — Mobile AI chat as bottom sheet ✅ self-tested (390px)
 - `AiPanel`: on mobile (`useIsMobile`) the aside is `fixed left-0 right-0` above the bottom nav (`bottom: 64px + safe-area`), full width, 46vh tall (`data-mobile-sheet="1"`); grows to ~78vh while the text input is focused (`typing` state via onFocus/onBlur). Collapsed on mobile renders nothing (Chat tab / sparkles emit `ai-open`). Resize handle hidden on mobile.
 - `Layout` mobile `main` paddingBottom grows to `46vh + 80px` while the panel is open so the last cards stay reachable above the sheet.
+
+## 2026-10-05 — Mobile chat sheet snap points (peek / half / full) ✅ self-tested (390px)
+- `AiPanel` mobile `sheet` state: **peek** (~150px: handle `ai-sheet-handle`, one-line last AI message `ai-sheet-peek-line`, input; header/messages/focus card/listening pill/hint tape hidden), **half** (48vh), **full** (100dvh − nav). `ai-sheet-up` / `ai-sheet-down` chevrons; swipe on handle (±40px) steps levels; down from peek closes.
+- Routing: `ai-open {source:"nav"}` (bottom-nav Chat tab) → full; `{source:"row"}` (sparkle) or `ai-tell-me-about` → half; other → peek. Input focus from peek → half. Soft keyboard: `visualViewport` inset lifts the sheet (`kbInset`), nav offset dropped while keyboard is up.
+- Backlog from this discussion: inline AI answer card on the transaction row (sparkle → answer in-card, "Ask more" → sheet).

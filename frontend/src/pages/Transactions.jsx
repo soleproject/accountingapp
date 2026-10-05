@@ -3519,7 +3519,7 @@ export default function Transactions() {
                   data-testid={`txn-ai-${t.id}`}
                   onClick={() => {
                     setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date }, { pin: true });
-                    emitAction("ai-open");
+                    emitAction("ai-open", { source: "row" });
                     emitAction("ai-tell-me-about", { txn: { id: t.id, merchant: t.merchant, description: t.description, contact_name: t.contact_name, amount: t.amount, date: t.date } });
                   }}
                   className="p-2 rounded-lg text-sky-500 hover:bg-sky-50"

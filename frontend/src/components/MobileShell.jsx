@@ -125,7 +125,7 @@ export function MobileBottomNav() {
   const openChat = () => {
     // AiPanel listens for `ai-open`; same event the header
     // Assistant button emits.
-    emitAction("ai-open");
+    emitAction("ai-open", { source: "nav" });
   };
 
   return (
