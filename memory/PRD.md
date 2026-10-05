@@ -953,7 +953,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Auto-fire/onboarding invite now gated on `loadedOnce` instead of `txns.length` (tour fires for empty companies). `load()` now try/catches (429 toast) instead of unhandled rejection.
 - AiPanel: chat-history effect has a cancelled guard — fixes stale "I'm watching <previous company>" greeting after switching companies.
 
-## 2026-10-05 — Tour narrator as bottom bar ✅ self-tested (1920 + 390)
+## 2026-10-05 — Tour narrator as top bar ✅ self-tested (1920 + 390)
+- FINAL: Transactions tour uses `layout="top-bar"` (bar at `top-3`, anchors nudge-scroll below a 170px reserve, floating X hidden in bar layouts since Skip is inline). `bottom-bar` remains available.
 - `ChatReviewTour` new props `layout="bottom-bar"` + `barAnchor` (testid/`css:`); `useBarSpan` measures the anchor's left/width (400ms poll + resize/scroll) so the narrator spans exactly the transactions table; horizontal layout (chapter + copy left, controls right), stays bottom for welcome/finale too; mobile falls back to full-width bottom sheet. Card layout unchanged for other tours.
 - `useAnchorRect(anchor, idx, reserveBottom)`: popup-ghost beats reserve 420px and nudge-scroll (scrollBy on nearest `main`) so the ghost never hides under the bar.
 - Transactions.jsx: `data-testid="txn-table-wrap"` on the table wrapper; tour mounted with `layout="bottom-bar" barAnchor="txn-table-wrap"`.

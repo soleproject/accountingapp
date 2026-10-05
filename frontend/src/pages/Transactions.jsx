@@ -2578,7 +2578,7 @@ export default function Transactions() {
   return (
     <div className="space-y-4">
       {txnTourOpen && (
-        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} layout="bottom-bar" barAnchor="txn-table-wrap" />
+        <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} layout="top-bar" barAnchor="txn-table-wrap" />
       )}
       {sampleMode && (
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="txn-sample-banner">

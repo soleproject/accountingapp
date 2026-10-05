@@ -192,7 +192,7 @@ function resolveTarget(idOrSelector) {
 // Since some anchors mount asynchronously (a modal that just opened
 // after a synthetic click on the previous beat), we retry for up to
 // ~1.5 s with a short interval until the element is found.
-function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220) {
+function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220, reserveTop = 60) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
     if (!anchorTestId) {
@@ -206,9 +206,13 @@ function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220) {
       if (!el) return null;
       const r = el.getBoundingClientRect();
       const outOfView =
-        r.top < 60 || r.bottom > window.innerHeight - reserveBottom;
+        r.top < reserveTop || r.bottom > window.innerHeight - reserveBottom;
       if (outOfView) {
-        if (r.top >= 60 && reserveBottom > 220) {
+        if (r.top < reserveTop && reserveTop > 60) {
+          // Top bar in the way — nudge down just enough to clear it.
+          const scroller = el.closest("main, [data-scroll-root]") || window;
+          (scroller === window ? window : scroller).scrollBy({ top: r.top - reserveTop - 16, behavior: "smooth" });
+        } else if (r.top >= reserveTop && reserveBottom > 220) {
           // Nudge just enough that the anchor + its ghost clear the bottom bar.
           const scroller = el.closest("main, [data-scroll-root]") || window;
           const delta = r.bottom - (window.innerHeight - reserveBottom) + 16;
@@ -242,7 +246,7 @@ function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220) {
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [anchorTestId, beatIdx, reserveBottom]);
+  }, [anchorTestId, beatIdx, reserveBottom, reserveTop]);
   return rect;
 }
 
@@ -320,7 +324,8 @@ function useBarSpan(selector) {
 
 export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel, layout = "card", barAnchor = null }) {
   const BEATS = propBeats || CHAT_REVIEW_BEATS;
-  const bottomBar = layout === "bottom-bar";
+  const bottomBar = layout === "bottom-bar" || layout === "top-bar";   // horizontal bar sized to `barAnchor`
+  const topBar = layout === "top-bar";
   const barSpan = useBarSpan(bottomBar ? barAnchor : null);
   const CHAPTER_LIST = propChapters || CHAPTERS;
   const TOTAL = BEATS.length;
@@ -361,7 +366,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     return beat.cursor?.move || beat.anchor || null;
   }, [beat, clickStep]);
   // Ghost popups render ~180px below the anchor — keep room so the bottom bar never covers them.
-  const rect = useAnchorRect(beat?.anchor, idx, beat?.ghost?.kind === "popup" ? 420 : 220);
+  const rect = useAnchorRect(beat?.anchor, idx, beat?.ghost?.kind === "popup" && !topBar ? 420 : 220, topBar ? 170 : 60);
   const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
   // Extra spotlight anchors — cut additional holes in the dim mask
   // for beats that need to highlight more than one element at once.
@@ -770,7 +775,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         style={bottomBar && barSpan && window.innerWidth >= 768 ? { left: barSpan.left, width: barSpan.width } : undefined}
         className={`fixed z-[10003] px-4 ${
           bottomBar
-            ? "left-0 right-0 md:right-auto bottom-3 pointer-events-none"
+            ? `left-0 right-0 md:right-auto ${topBar ? "top-3" : "bottom-3"} pointer-events-none`
             : beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
             : beat.dock === "left"
@@ -907,8 +912,8 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         </div>
       </div>
 
-      {/* Close (X) — floats top-right */}
-      <button
+      {/* Close (X) — floats top-right (the bar layouts have Skip inline) */}
+      {!bottomBar && <button
         type="button"
         onClick={() => onClose?.({ completed: false })}
         className="fixed top-4 right-4 z-[10003] w-9 h-9 rounded-full bg-white/95 border border-slate-200 shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-100"
@@ -916,7 +921,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         data-testid="chat-review-tour-v2-close"
       >
         <X size={16} />
-      </button>
+      </button>}
     </div>
   );
 }
