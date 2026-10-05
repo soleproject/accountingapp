@@ -2171,15 +2171,26 @@ async def delete_transaction_attachment(
     cid: str, tid: str, aid: str,
     user: dict = Depends(get_current_user),
 ):
-    """Remove one attachment by id."""
+    """Remove one attachment by id. A receipt-derived attachment also
+    unlinks the receipt: the receipt goes back to unmatched and the
+    transaction drops the receipt's splits/category (back to review)."""
     await require_company(user, cid)
-    r = await db.transactions.update_one(
+    txn = await db.transactions.find_one({"id": tid, "company_id": cid}, {"_id": 0, "attachments": 1, "matched_receipt_id": 1, "receipt_id": 1})
+    if not txn:
+        raise HTTPException(404, "Transaction not found")
+    att = next((a for a in (txn.get("attachments") or []) if a.get("id") == aid), None)
+    rid = (att or {}).get("receipt_id") or (txn.get("matched_receipt_id") if (att or {}).get("kind") == "receipt" else None)
+    if rid and rid in (txn.get("matched_receipt_id"), txn.get("receipt_id")):
+        from receipt_match import unlink_receipt_from_transaction, unmatch_receipt_for_deleted_transaction
+        await unlink_receipt_from_transaction(cid, rid, tid)
+        await unmatch_receipt_for_deleted_transaction(cid, tid)
+        await _invalidate_dash(cid)
+        return {"ok": True, "receipt_unlinked": rid}
+    await db.transactions.update_one(
         {"id": tid, "company_id": cid},
         {"$pull": {"attachments": {"id": aid}},
          "$set":  {"updated_at": now_iso()}},
     )
-    if r.matched_count == 0:
-        raise HTTPException(404, "Transaction not found")
     return {"ok": True}
 
 

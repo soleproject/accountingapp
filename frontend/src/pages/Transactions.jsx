@@ -4652,10 +4652,18 @@ export function ManualTxnModal({ accts, currentId, contactOptions = [], invoices
   const removeAttachment = async (aid) => {
     if (!isEdit || !initialTxn?.id) return;
     try {
-      await api.delete(
+      const r = await api.delete(
         `/companies/${currentId}/transactions/${initialTxn.id}/attachments/${aid}`,
       );
       setAttachments((prev) => prev.filter((a) => a.id !== aid));
+      if (r.data?.receipt_unlinked) {
+        // Receipt gone → the transaction is uncategorized again.
+        setLinkedReceiptId(null);
+        setSplitsOn(false);
+        setSplitRows([]);
+        setCategoryId("");
+        toast.success("Receipt removed — transaction is back to uncategorized.");
+      }
     } catch (e) {
       toast.error(e.response?.data?.detail || "Remove failed.");
     }
