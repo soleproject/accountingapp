@@ -2,7 +2,7 @@
 // company name), then "Delete user" (type their email) which demotes the
 // account to affiliate — referral link, earnings and /share stay intact.
 import { useEffect, useState } from "react";
-import { AlertTriangle, Building2, Check, Loader2, Lock, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Building2, Check, Loader2, Lock, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
@@ -50,6 +50,73 @@ function CompanyRow({ uid, company, onDeleted }) {
         >
           {busy ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />} Delete
         </button>
+      </div>
+    </div>
+  );
+}
+
+function TransferBlock({ userId, block, onDone }) {
+  const [target, setTarget] = useState("");
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isPartner = block.kind === "partner";
+  const tgt = (block.targets || []).find(t => t.id === target);
+  const ok = tgt && norm(typed) === norm(tgt.name);
+  const summary = isPartner
+    ? `${fmt(block.enterprises)} enterprise(s), ${fmt(block.companies)} companies, ${fmt(block.users)} users`
+    : `${fmt(block.companies)} companies, ${fmt(block.users)} users, ${fmt(block.invoices)} invoice records`;
+  const transfer = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/admin/users/${userId}/transfer-firm`, { target_id: target, confirm_name: typed });
+      const m = r.data?.moved || {};
+      toast.success(`Transferred to ${tgt.name} — ${fmt(m.companies)} companies, ${fmt(m.users)} users moved.`);
+      onDone();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Transfer failed");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-900" data-testid="delete-client-enterprise-block">
+      <b>{isPartner ? "Partner" : "Enterprise"} owner — {block.name}</b> still has {summary} under it.
+      Transfer them to another {isPartner ? "partner" : "enterprise"} to unlock Delete user.
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span>Transfer users to</span>
+        <select
+          value={target}
+          onChange={e => { setTarget(e.target.value); setTyped(""); }}
+          className="h-8 px-2 rounded-md border border-amber-300 bg-white text-xs text-slate-800"
+          data-testid="delete-client-transfer-select"
+        >
+          <option value="">Choose {isPartner ? "a partner" : "an enterprise"}…</option>
+          {(block.targets || []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        {tgt && (
+          <>
+            <input
+              value={typed}
+              onChange={e => setTyped(e.target.value)}
+              placeholder={`Type "${tgt.name}" to confirm`}
+              className="h-8 w-56 px-2 rounded-md border border-amber-300 bg-white text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              data-testid="delete-client-transfer-input"
+            />
+            <button
+              type="button"
+              disabled={!ok || busy}
+              onClick={transfer}
+              className="h-8 px-3 rounded-md bg-amber-600 text-white text-xs font-semibold hover:bg-amber-700 disabled:opacity-40 inline-flex items-center gap-1"
+              data-testid="delete-client-transfer-btn"
+            >
+              {busy ? <Loader2 size={12} className="animate-spin" /> : <ArrowRightLeft size={12} />} Transfer
+            </button>
+          </>
+        )}
+      </div>
+      {(block.targets || []).length === 0 && (
+        <div className="mt-1.5 text-amber-800">No other {isPartner ? "partner" : "enterprise with an owner"} exists to transfer to — create one first.</div>
+      )}
+      <div className="mt-1.5 text-[11px] text-amber-800/80">
+        Future {isPartner ? "partner" : "enterprise"} billing follows the target owner's Stripe customer. Their own {isPartner ? "Partner" : "Firm"} Books becomes a regular company you can delete below.
       </div>
     </div>
   );
@@ -132,16 +199,7 @@ export default function DeleteClientModal({ userId, onClose, onChanged }) {
                 </div>
               </div>
               {block && (
-                <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="delete-client-enterprise-block">
-                  <b>{block.kind === "partner" ? "Partner" : "Enterprise"} owner — {block.name}</b>
-                  {" "}still has {block.kind === "partner" ? `${fmt(block.enterprises)} enterprise(s) and ` : ""}{fmt(block.companies)} companies{block.kind === "enterprise" ? ` and ${fmt(block.users)} users` : ""} under it.
-                  <div className="mt-2 flex items-center gap-2">
-                    <span>Transfer users to</span>
-                    <select disabled className="h-8 px-2 rounded-md border border-amber-200 bg-white text-xs text-slate-400" data-testid="delete-client-transfer-select">
-                      <option>Coming in the next pass…</option>
-                    </select>
-                  </div>
-                </div>
+                <TransferBlock userId={userId} block={block} onDone={() => { load(); onChanged?.(); }} />
               )}
               {!block && p.owned_companies.length > 0 && (
                 <div className="mt-2 text-[11px] text-slate-500 inline-flex items-center gap-1"><Lock size={11} /> Unlocks once every company below is deleted.</div>
