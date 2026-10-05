@@ -74,7 +74,9 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
 
   // Quick-action strip pinned beside the pointer that clicked the check,
   // so the common "yes, all of them" path is one short move away.
-  const strip = anchor ? (() => {
+  // Hidden on phones / thin screens — the footer buttons are right there
+  // and the strip would sit on top of them.
+  const strip = anchor && window.innerWidth >= 768 ? (() => {
     const w = 240, h = ruleExists ? 52 : 96;
     const left = Math.max(8, Math.min(anchor.x - w + 24, window.innerWidth - w - 8));
     const top = anchor.y + 14 + h > window.innerHeight ? anchor.y - h - 14 : anchor.y + 14;
