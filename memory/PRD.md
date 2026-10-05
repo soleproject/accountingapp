@@ -958,3 +958,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `ChatReviewTour` new props `layout="bottom-bar"` + `barAnchor` (testid/`css:`); `useBarSpan` measures the anchor's left/width (400ms poll + resize/scroll) so the narrator spans exactly the transactions table; horizontal layout (chapter + copy left, controls right), stays bottom for welcome/finale too; mobile falls back to full-width bottom sheet. Card layout unchanged for other tours.
 - `useAnchorRect(anchor, idx, reserveBottom)`: popup-ghost beats reserve 420px and nudge-scroll (scrollBy on nearest `main`) so the ghost never hides under the bar.
 - Transactions.jsx: `data-testid="txn-table-wrap"` on the table wrapper; tour mounted with `layout="bottom-bar" barAnchor="txn-table-wrap"`.
+
+## 2026-10-05 — Tour beats: copy, re-anchoring, receipts chapter ✅ self-tested
+- `ChatReviewTour`: new beat field `afterClickAnchor` — once the beat's click fires, the spotlight re-targets (menu item → `modal-panel`; paperclip → `receipt-popup-panel`) so the opened UI is bright immediately.
+- `transactionsBeats.js`: "more" beat now opens with "Next, every row…"; "link" beat uses `afterClickAnchor: "modal-panel"`; NEW chapter 5 "Receipts" — `paperclip` (highlights `txn-receipt-badge-*`, explains orange = exact / amber = confirm) and `receipt-popup` (clicks it, spotlights the popup, `exitClick: receipt-popup-close`); finale copy mentions the paperclip. 12 beats total.
+- Sample receipt now shows a real image: `/app/frontend/public/sample-receipt.png` (Home Depot demo) via `attachment_data_url: "/sample-receipt.png"`; `receipt-popup-panel` testid added to the popup's inner panel.

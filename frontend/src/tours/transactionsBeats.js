@@ -11,6 +11,7 @@ export const TXN_CHAPTERS = [
   { key: "approve", title: "Approving" },
   { key: "ask", title: "When something's off" },
   { key: "link", title: "Linking invoices & bills" },
+  { key: "receipts", title: "Receipts" },
 ];
 
 const HOLD_SHORT = 1500;
@@ -22,6 +23,7 @@ const HOLD_LONG = 3600;
 const FIRST_ROW_CHECK = "css:tbody tr [data-testid='txn-approve-btn']";
 const FIRST_ROW_SPARKLE = "css:tbody tr [data-testid^='txn-ai-']";
 const FIRST_ROW_MORE = "css:tbody tr button[data-testid^='txn-more-']";
+const FIRST_ROW_PAPERCLIP = "css:tbody tr [data-testid^='txn-receipt-badge-']";
 
 export const TXN_BEATS = [
   {
@@ -81,7 +83,7 @@ export const TXN_BEATS = [
     key: "more",
     chapter: "link",
     narrator:
-      "One more thing. Every row has a three-dots menu at the far right — edit, split, link to paperwork, or ask your client. I'll switch back to All so every row shows, then open it.",
+      "Next, every row has a three-dots menu at the far right — edit, split, link to paperwork, or ask your client. I'll switch back to All so every row shows, then open it.",
     anchor: FIRST_ROW_MORE,
     cursor: { clicks: ["txn-filter-all", FIRST_ROW_MORE], delay: 1800 },
     dock: "left",
@@ -94,6 +96,7 @@ export const TXN_BEATS = [
       "See 'Link to invoice / bill'? When a payment belongs to an invoice you sent, or a bill you received, just click this and I match the money to the paperwork. Let me show you.",
     anchor: "txn-link-btn",
     cursor: { click: true, delay: 3200 },
+    afterClickAnchor: "modal-panel",
     dock: "left",
     wait: HOLD_SHORT,
   },
@@ -108,10 +111,29 @@ export const TXN_BEATS = [
     wait: HOLD_LONG,
   },
   {
-    key: "finale",
-    chapter: "link",
+    key: "paperclip",
+    chapter: "receipts",
     narrator:
-      "That's the whole loop: To do, green check, sparkles when you want me, and the three dots to link payments to invoices and bills. You can replay this anytime from the Tour button.",
+      "See the orange paperclip on this row? It means a receipt is already attached — snapped on a phone, emailed in, or uploaded — and I matched it to the bank line for you. Orange is an exact match; amber means I'm fairly sure but want you to confirm.",
+    anchor: FIRST_ROW_PAPERCLIP,
+    wait: HOLD_LONG,
+  },
+  {
+    key: "receipt-popup",
+    chapter: "receipts",
+    narrator:
+      "Click it and the receipt opens: the photo on one side, the line items and the category I gave each one on the other. From here you can confirm the match, unlink it, swap in a different receipt, or snap a new one.",
+    anchor: FIRST_ROW_PAPERCLIP,
+    cursor: { click: true, delay: 1400 },
+    afterClickAnchor: "receipt-popup-panel",
+    exitClick: "receipt-popup-close",
+    wait: HOLD_LONG,
+  },
+  {
+    key: "finale",
+    chapter: "receipts",
+    narrator:
+      "That's the whole loop: To do, green check, sparkles when you want me, the three dots to link payments to invoices and bills, and the paperclip for receipts. You can replay this anytime from the Tour button.",
     center: true,
     finale: true,
     wait: HOLD_SHORT,

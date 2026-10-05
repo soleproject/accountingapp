@@ -366,7 +366,6 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     return beat.cursor?.move || beat.anchor || null;
   }, [beat, clickStep]);
   // Ghost popups render ~180px below the anchor — keep room so the bottom bar never covers them.
-  const rect = useAnchorRect(beat?.anchor, idx, beat?.ghost?.kind === "popup" && !topBar ? 420 : 220, topBar ? 170 : 60);
   const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
   // Extra spotlight anchors — cut additional holes in the dim mask
   // for beats that need to highlight more than one element at once.
@@ -382,6 +381,9 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     const hasClicks = !!(beat?.cursor?.clicks?.length || beat?.cursor?.click);
     setClicksComplete(!hasClicks);
   }, [idx, beat]);
+  // `afterClickAnchor` re-targets the spotlight once the beat's click has fired (e.g. menu item → the modal it opened).
+  const activeAnchor = clicksComplete && beat?.afterClickAnchor ? beat.afterClickAnchor : beat?.anchor;
+  const rect = useAnchorRect(activeAnchor, `${idx}-${clicksComplete ? 1 : 0}`, beat?.ghost?.kind === "popup" && !topBar ? 420 : 220, topBar ? 170 : 60);
 
   // Auto-advance timer. When voice is on we wait until the narrator
   // has finished speaking, THEN we wait for any pending clicks, THEN

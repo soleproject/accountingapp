@@ -480,7 +480,7 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
     if (!rid) { setErr(true); return; }
     if (isSample) {
       const acct = { account_code: txn?.category_account_code, account_name: txn?.category_account_name };
-      setR({ merchant: txn?.merchant || "The Home Depot", date: txn?.date, amount: Math.abs(Number(txn?.amount || 0)), attachment_filename: "sample-receipt.png",
+      setR({ merchant: txn?.merchant || "The Home Depot", date: txn?.date, amount: Math.abs(Number(txn?.amount || 0)), attachment_filename: "sample-receipt.png", attachment_data_url: "/sample-receipt.png",
              notes: "Sample receipt — on your real data the photo, line items and categories show here.",
              line_items: [{ description: "4x4x8 PT POST", amount: 119.88, ...acct }, { description: "QUIKRETE 80LB CONCRETE", amount: 69.8, ...acct }, { description: "CYPRESS MULCH 2CF", amount: 59.76, ...acct }] });
       return;
@@ -500,6 +500,7 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
       <div
         className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
         onMouseDown={(e) => e.stopPropagation()}
+        data-testid="receipt-popup-panel"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b">
           <div className="flex items-center gap-2 min-w-0">
