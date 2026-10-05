@@ -23,6 +23,7 @@ const HOLD_LONG = 3600;
 const FIRST_ROW_CHECK = "css:tbody tr [data-testid='txn-approve-btn']";
 const FIRST_ROW_SPARKLE = "css:tbody tr [data-testid^='txn-ai-']";
 const FIRST_ROW_MORE = "css:tbody tr button[data-testid^='txn-more-']";
+const FIRST_ROW_CATEGORY = "css:tbody tr [data-testid^='txn-cat-picker-']";
 const FIRST_ROW_PAPERCLIP = "css:tbody tr [data-testid^='txn-receipt-badge-']";
 
 export const TXN_BEATS = [
@@ -49,6 +50,7 @@ export const TXN_BEATS = [
     narrator:
       "Each row has a green check on the right. If the category looks right, click it and the transaction is approved and posted — that's it. If a row is still Uncategorized, the check is greyed out until you give it a real category.",
     anchor: FIRST_ROW_CHECK,
+    spotlights: [FIRST_ROW_CATEGORY],
     wait: HOLD_LONG,
   },
   {

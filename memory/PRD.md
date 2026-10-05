@@ -968,3 +968,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Beats 1/4/8/10 reworded per user (checked/uncheck wording, "Link to invoice or bill", "Now, see the orange paperclip…"). Beat 12 "That's it!…", beat 13 recap of the five moves, beat 14 finale "I will put you on the To do screen…" (button "Let's go 🎉").
 - `closeTxnTour({completed:true})` now sets filter=unapproved (To do) on live data instead of restoring the pre-tour filter; skip/close still restores.
 - Beat 7 reworded ("…I'll open it so you can see."); no longer switches back to All — stays on To do and single-clicks the row's three-dots menu.
+- Beat 3 ("check") adds `spotlights: [FIRST_ROW_CATEGORY]` (`txn-cat-picker-*`) so the category field is highlighted alongside the green check.
