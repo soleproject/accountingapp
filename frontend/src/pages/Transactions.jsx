@@ -20,6 +20,7 @@ import {
   SlidersHorizontal, Paperclip, FileText, Loader2, Eye, MessageSquareWarning, Lightbulb, PartyPopper, Link2, Camera,
 } from "lucide-react";
 import ChatReviewTour from "@/components/tour/ChatReviewTour";
+import { buildSampleTxns, filterSample, sampleProgress, SAMPLE_INVOICES, SAMPLE_BILLS } from "@/tours/transactionsSample";
 import { TXN_BEATS, TXN_CHAPTERS } from "@/tours/transactionsBeats";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
 import ContactPickerModal from "@/components/ContactPickerModal";
@@ -459,7 +460,9 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
   const [cands, setCands] = useState(null);
   const [pane, setPane] = useState("receipt");
   const suggested = txn?.receipt_match_status === "suggested";
+  const isSample = String(rid || "").startsWith("sample-");
   const act = async (fn, okMsg) => {
+    if (isSample) { toast.message("Sample data — nothing is saved", { duration: 1800 }); onClose(); return; }
     setBusy(true);
     try { await fn(); toast.success(okMsg); onChanged?.(); onClose(); }
     catch (e) { toast.error(e?.response?.data?.detail || "That didn't work"); }
@@ -475,8 +478,15 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
   };
   useEffect(() => {
     if (!rid) { setErr(true); return; }
+    if (isSample) {
+      const acct = { account_code: txn?.category_account_code, account_name: txn?.category_account_name };
+      setR({ merchant: txn?.merchant || "The Home Depot", date: txn?.date, amount: Math.abs(Number(txn?.amount || 0)), attachment_filename: "sample-receipt.png",
+             notes: "Sample receipt — on your real data the photo, line items and categories show here.",
+             line_items: [{ description: "4x4x8 PT POST", amount: 119.88, ...acct }, { description: "QUIKRETE 80LB CONCRETE", amount: 69.8, ...acct }, { description: "CYPRESS MULCH 2CF", amount: 59.76, ...acct }] });
+      return;
+    }
     api.get(`/companies/${cid}/receipts/${rid}`).then((res) => setR(res.data)).catch(() => setErr(true));
-  }, [cid, rid]);
+  }, [cid, rid, isSample]);
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -1403,6 +1413,9 @@ export default function Transactions() {
   // (see the group above `bulkPreviewAcctId`) so the bulk-categorize
   // useEffect can safely reference them.
   const [txns, setTxns] = useState([]);
+  const [sampleMode, setSampleMode] = useState(false);
+  const sampleRef = useRef([]);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   // Client-side column sort — null means "server/natural order".
   // Clicking a header toggles asc→desc→asc and sets the active column.
   const [sortBy,  setSortBy]  = useState(null);
@@ -1512,6 +1525,16 @@ export default function Transactions() {
   const load = async () => {
     if (!currentId) return;
     const seq = ++loadSeq.current;
+    if (sampleMode) {
+      let a = accts;
+      if (!a.length) { a = (await api.get(`/companies/${currentId}/accounts`)).data.accounts || []; setAccts(a); }
+      if (!sampleRef.current.length) sampleRef.current = buildSampleTxns(a, currentId);
+      const rows = filterSample(sampleRef.current, filter);
+      setTxns(rows);
+      setPagination({ total: rows.length, page: 1, pages: 1, limit: pageSize });
+      setInvoices(SAMPLE_INVOICES); setBills(SAMPLE_BILLS); setSelected(new Set());
+      return;
+    }
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
     else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed" || filter === "receipt_verify") {
@@ -1560,13 +1583,20 @@ export default function Transactions() {
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
-    const [t, a, i, b] = await Promise.all([
-      api.get(`/companies/${currentId}/transactions${qs}`),
-      api.get(`/companies/${currentId}/accounts`),
-      api.get(`/companies/${currentId}/invoices`),
-      api.get(`/companies/${currentId}/bills`),
-    ]);
+    let t, a, i, b;
+    try {
+      [t, a, i, b] = await Promise.all([
+        api.get(`/companies/${currentId}/transactions${qs}`),
+        api.get(`/companies/${currentId}/accounts`),
+        api.get(`/companies/${currentId}/invoices`),
+        api.get(`/companies/${currentId}/bills`),
+      ]);
+    } catch (e) {
+      if (seq === loadSeq.current) toast.error(e?.response?.status === 429 ? "Slow down a sec — too many requests. Retrying shortly." : "Couldn't load transactions.");
+      return;
+    }
     if (seq !== loadSeq.current) return;
+    setLoadedOnce(true);
     setTxns(t.data.transactions || []);
     setPagination(t.data.pagination || { total: (t.data.transactions || []).length, page: 1, pages: 1, limit: pageSize });
     setAccts(a.data.accounts || []);
@@ -1597,7 +1627,7 @@ export default function Transactions() {
       });
   }, [currentId]);
 
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter, txnTypeFilter, similarView]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [currentId, sampleMode, filter, page, pageSize, debouncedSearch, dateFrom, dateTo, isLetsReview, lrContactId, isNoContactReview, ncrGroupKey, filterBankAccountId, filterCategoryId, filterContactId, filterAmountMin, filterAmountMax, directionFilter, txnTypeFilter, similarView]);
 
   // "Show N similar" from the AI panel: same-page via action bus, cross-page
   // via sessionStorage (the panel navigates here first, then we hydrate).
@@ -1662,8 +1692,8 @@ export default function Transactions() {
     if (startIt) setTimeout(startTxnTour, 350);
   };
   useEffect(() => {
-    if (fromOnboarding && txns.length) setTourInviteOpen(true);
-  }, [fromOnboarding, txns.length]);
+    if (fromOnboarding && loadedOnce) setTourInviteOpen(true);
+  }, [fromOnboarding, loadedOnce]);
   useEffect(() => {
     if (!fromCheckout) return;
     // Returning customers (re-subscribed after a cancel) have already
@@ -1675,23 +1705,26 @@ export default function Transactions() {
     return () => clearTimeout(t);
   }, [fromCheckout]);
   const txnTourSnapRef = useRef(null);
-  const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; setTxnTourOpen(true); };
+  // The tour runs on sample rows rendered through the real table so every
+  // beat has a live target even for a brand-new company. Nothing is saved.
+  const startTxnTour = () => { txnTourSnapRef.current = { filter, page }; sampleRef.current = []; setSampleMode(true); setTxnTourOpen(true); };
   const closeTxnTour = () => {
     setTxnTourOpen(false);
+    setSampleMode(false); sampleRef.current = [];
     try { localStorage.setItem(TXN_TOUR_SEEN_KEY, "1"); } catch (_) { /* ignore */ }
     const snap = txnTourSnapRef.current; txnTourSnapRef.current = null;
     if (snap && snap.filter !== filter) { setFilter(snap.filter); setPage(snap.page || 1); }
   };
   useEffect(() => {
     if (txnTourOpen || tourInviteOpen || fromOnboarding || fromCheckout || isReviewMode || isLetsReview || isNoContactReview || tourParam) return;
-    if (!txns.length) return;
+    if (!loadedOnce) return;
     let seen = false;
     try { seen = localStorage.getItem(TXN_TOUR_SEEN_KEY) === "1"; } catch (_) { /* ignore */ }
     if (seen) return;
     const t = setTimeout(startTxnTour, 900);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txns.length, isReviewMode, isLetsReview, isNoContactReview, tourParam]);
+  }, [loadedOnce, isReviewMode, isLetsReview, isNoContactReview, tourParam]);
   useActionListener("chat-cta:restart-transactions-tour", () => startTxnTour());
   useEffect(() => {
     if (!similarView) return;
@@ -2434,7 +2467,15 @@ export default function Transactions() {
     }
   };
 
+  const sampleMutate = (id, patch) => {
+    sampleRef.current = patch === null
+      ? sampleRef.current.filter((t) => t.id !== id)
+      : sampleRef.current.map((t) => (t.id === id ? { ...t, ...patch } : t));
+    toast.message("Sample data — nothing is saved", { duration: 1800 });
+    load();
+  };
   const approve = async (id, anchor = null) => {
+    if (sampleMode) return sampleMutate(id, { human_reviewed: true, posted: true, needs_review: false });
     let r;
     try {
       r = await api.post(`/companies/${currentId}/transactions/${id}/approve-with-suggestion`);
@@ -2451,6 +2492,7 @@ export default function Transactions() {
     }
   };
   const unapprove = async (id) => {
+    if (sampleMode) return sampleMutate(id, { human_reviewed: false, posted: false });
     await api.post(`/companies/${currentId}/transactions/${id}/unapprove`);
     load();
   };
@@ -2465,15 +2507,21 @@ export default function Transactions() {
     return approve(t.id, e ? { x: e.clientX, y: e.clientY } : null);
   };
   const recategorize = async (id) => {
+    if (sampleMode) return sampleMutate(id, { ai_source: "ai", ai_confidence: 0.93, ai_reasoning: "Re-categorized (sample)." });
     setBusy(true);
     await api.post(`/companies/${currentId}/ai/recategorize/${id}`);
     setBusy(false); toast.success("Re-categorized by AI"); load();
   };
   const updateCategory = async (id, acctId) => {
+    if (sampleMode) {
+      const a = accts.find((x) => x.id === acctId);
+      return sampleMutate(id, { category_account_id: acctId, category_account_name: a?.name || null, category_account_code: a?.code || null });
+    }
     await api.patch(`/companies/${currentId}/transactions/${id}`, { category_account_id: acctId });
     load();
   };
   const updateContact = async (id, contactId) => {
+    if (sampleMode) return sampleMutate(id, { contact_id: contactId || null });
     try {
       await api.patch(`/companies/${currentId}/transactions/${id}`, { contact_id: contactId || "" });
       load();
@@ -2482,6 +2530,7 @@ export default function Transactions() {
     }
   };
   const del = async (id) => {
+    if (sampleMode) return sampleMutate(id, null);
     if (!confirm("Delete this transaction?")) return;
     await api.delete(`/companies/${currentId}/transactions/${id}`);
     load();
@@ -2530,6 +2579,12 @@ export default function Transactions() {
     <div className="space-y-4">
       {txnTourOpen && (
         <ChatReviewTour beats={TXN_BEATS} chapters={TXN_CHAPTERS} finaleLabel="Got it 🎉" onClose={closeTxnTour} />
+      )}
+      {sampleMode && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-testid="txn-sample-banner">
+          <Sparkles size={13} className="text-amber-600 shrink-0" />
+          <span><b>Sample data for the tour</b> — these rows aren't yours and nothing you click here is saved. Your real transactions come back when the tour ends.</span>
+        </div>
       )}
       {tourInviteOpen && !txnTourOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="txn-tour-invite">
@@ -2593,6 +2648,7 @@ export default function Transactions() {
       )}
       <CleanupCopilot
         currentId={currentId}
+        sampleProgress={sampleMode ? sampleProgress(sampleRef.current) : null}
         autoTrigger={params.get("auto") === "1"}
         hideChips={true}
         forceStep={isLetsReview ? 2 : (isNoContactReview ? 3 : null)}
@@ -3703,7 +3759,7 @@ export default function Transactions() {
       {creating && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} onClose={() => { setCreating(false); load(); }} />}
       {editing && <ManualTxnModal accts={accts} currentId={currentId} contactOptions={filterContactOptions} invoices={invoices} bills={bills} initialTxn={editing} onClose={() => { setEditing(null); load(); }} onOpenMultiLink={() => setLinking(editing)} />}
       {splitting && <SplitModal txn={splitting} accts={accts} currentId={currentId} onClose={() => { setSplitting(null); load(); }} />}
-      {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} onClose={() => { setLinking(null); load(); }} />}
+      {linking && <LinkModal txn={linking} invoices={invoices} bills={bills} currentId={currentId} sampleDocs={sampleMode ? { invoices: SAMPLE_INVOICES, bills: SAMPLE_BILLS } : null} onClose={() => { setLinking(null); load(); }} />}
       {similarApprove && (
         <SimilarApproveModal currentId={currentId} similar={similarApprove.similar} ruleExists={similarApprove.ruleExists}
                              anchor={similarApprove.anchor} onClose={() => setSimilarApprove(null)} />
@@ -5344,7 +5400,7 @@ export function SplitModal({ txn, accts, currentId, onClose }) {
   );
 }
 
-export function LinkModal({ txn, invoices, bills, currentId, onClose, token, itemId, onApplied }) {
+export function LinkModal({ txn, invoices, bills, currentId, onClose, token, itemId, onApplied, sampleDocs = null }) {
   const fmtMoney = useMoneyFmt();
   // Token-mode: swap the JWT-authed `api` client for a plain axios so
   // the same UI works inside a client-facing magic-link session.
@@ -5394,7 +5450,10 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose, token, ite
     const url = kind === "invoice"
       ? `/companies/${currentId}/invoices/open`
       : `/companies/${currentId}/bills/open`;
-    _get(url)
+    const fetchDocs = sampleDocs
+      ? Promise.resolve({ data: kind === "invoice" ? { invoices: sampleDocs.invoices } : { bills: sampleDocs.bills } })
+      : _get(url);
+    fetchDocs
       .then(r => {
         const rows = r.data.invoices || r.data.bills || [];
         setOpenDocs(rows);
@@ -5475,6 +5534,11 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose, token, ite
       .map(([doc_id, amount]) => ({ [kind === "invoice" ? "invoice_id" : "bill_id"]: doc_id, amount: Number(amount) }));
     if (!applications.length) {
       toast.error(`Pick at least one ${kind}.`);
+      return;
+    }
+    if (sampleDocs) {
+      toast.message("Sample data — nothing is saved", { duration: 1800 });
+      onClose();
       return;
     }
     setLoading(true);

@@ -259,11 +259,12 @@ function StepSubtitle({ step, onNavigate }) {
 
 
 
-export default function CleanupCopilot({ currentId, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, forceSubLabel = null, headerOnly = false }) {
+export default function CleanupCopilot({ currentId, sampleProgress = null, onApplyAction, onStartSession, autoTrigger, inline = false, reportHeader = null, inlineTitle = null, inlineSubtitle = null, initialViewMode = null, autoStartTour = false, hideChips = false, forceStep = null, forceSubLabel = null, headerOnly = false }) {
   const navigate = useNavigate();
   const { focus } = useAiFocus();
   const { user } = useAuth();
-  const [data, setData] = useState(null);
+  const [rawData, setData] = useState(null);
+  const data = sampleProgress ? { ...(rawData || {}), progress: sampleProgress } : rawData;
   const [busy, setBusy] = useState(false);
   // Permanent dismissal (contact was actually handled, not just skipped).
   const [dismissed, setDismissed] = useState(new Set());
