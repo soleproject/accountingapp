@@ -349,6 +349,18 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
 
   // Auto-advance timer. When voice is on we wait until the narrator
   // has finished speaking, THEN we wait for any pending clicks, THEN
+  // Seconds-until-next badge beside the Next button. Only ticks while
+  // the auto-advance timer is actually running (voice done, clicks done).
+  const [countdownEnd, setCountdownEnd] = useState(null);
+  const [secsLeft, setSecsLeft] = useState(null);
+  useEffect(() => {
+    if (!countdownEnd) { setSecsLeft(null); return; }
+    const tick = () => setSecsLeft(Math.max(0, Math.ceil((countdownEnd - Date.now()) / 1000)));
+    tick();
+    const h = setInterval(tick, 200);
+    return () => clearInterval(h);
+  }, [countdownEnd]);
+
   // hold for `beat.wait` ms so the CPA can read + look at what
   // happened on-screen. When voice is off, `beat.wait` is the total
   // post-click dwell time. This ordering (voice → click → hold) is
@@ -361,6 +373,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     if (voiceOn && !voiceComplete) return; // hold until voice ends
     if (!clicksComplete) return; // wait for click sequence
     const wait = beat.wait ?? 2600;
+    setCountdownEnd(Date.now() + wait);
     timerRef.current = setTimeout(() => {
       if (beat.finale && beat.autoClose) {
         onClose?.({ completed: true });
@@ -368,8 +381,9 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         setIdx((k) => Math.min(k + 1, BEATS.length - 1));
       }
     }, wait);
-    return () => clearTimeout(timerRef.current);
+    return () => { clearTimeout(timerRef.current); setCountdownEnd(null); };
   }, [idx, paused, beat, voiceOn, voiceComplete, clicksComplete, onClose]);
+
 
   // Cursor "click" beats — dispatch a real .click() on the target
   // testid so the underlying UI actually reacts (opens Show-all,
@@ -818,6 +832,15 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
                 >
                   Next <ChevronRight size={14} />
                 </button>
+              )}
+              {secsLeft !== null && !paused && !beat?.finale && (
+                <span
+                  className="ml-1 inline-flex items-center justify-center min-w-[26px] h-[26px] px-1.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[11px] font-mono tabular-nums"
+                  title="Seconds until the next step"
+                  data-testid="chat-review-tour-v2-countdown"
+                >
+                  {secsLeft}s
+                </span>
               )}
             </div>
           </div>
