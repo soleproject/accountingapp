@@ -457,6 +457,7 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
   const [busy, setBusy] = useState(false);
   const [picking, setPicking] = useState(false);
   const [cands, setCands] = useState(null);
+  const [pane, setPane] = useState("receipt");
   const suggested = txn?.receipt_match_status === "suggested";
   const act = async (fn, okMsg) => {
     setBusy(true);
@@ -510,8 +511,17 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
             <button type="button" onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" aria-label="Close" data-testid="receipt-popup-close"><X size={16} /></button>
           </div>
         </div>
+        <div className="md:hidden flex items-center justify-center px-4 py-2 border-b bg-slate-50" data-testid="receipt-popup-pane-toggle">
+          <div className="inline-flex rounded-full border border-slate-300 bg-white p-0.5 text-xs font-medium">
+            {[["receipt", "Receipt"], ["categories", "Categories"]].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setPane(k)}
+                className={`px-4 py-1.5 rounded-full transition-colors ${pane === k ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"}`}
+                aria-pressed={pane === k} data-testid={`receipt-popup-pane-${k}`}>{label}</button>
+            ))}
+          </div>
+        </div>
         <div className="grid md:grid-cols-[1fr_300px] gap-0 overflow-hidden flex-1 min-h-0">
-          <div className="bg-slate-100 flex items-center justify-center overflow-auto min-h-[320px]">
+          <div className={`bg-slate-100 items-center justify-center overflow-auto min-h-[320px] ${pane === "receipt" ? "flex" : "hidden md:flex"}`} data-testid="receipt-popup-image-pane">
             {err ? (
               <div className="text-sm text-slate-500 p-6">Couldn't load this receipt.</div>
             ) : !r ? (
@@ -524,7 +534,7 @@ function ReceiptPopup({ cid, rid, txn, onClose, onChanged, onSnapNew }) {
               <img src={url} alt="Receipt" className="max-w-full max-h-[70vh] object-contain" data-testid="receipt-popup-image" />
             )}
           </div>
-          <div className="border-l overflow-y-auto p-4 text-xs">
+          <div className={`md:border-l overflow-y-auto p-4 text-xs ${pane === "categories" ? "block" : "hidden md:block"}`} data-testid="receipt-popup-categories-pane">
             {r?.ai_narrative && <p className="text-slate-600 mb-3">{r.ai_narrative}</p>}
             {(r?.line_items || []).length > 0 && (
               <>
@@ -3426,6 +3436,7 @@ export default function Transactions() {
             currentId={currentId}
             onReload={() => loadRef.current?.()}
             onEdit={(t) => setEditing(t)}
+            onViewReceipt={(t) => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
           />
         ) : (
         <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>

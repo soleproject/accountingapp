@@ -931,3 +931,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - NEW: `GET /receipts/verify-count`, `POST /transactions/{tid}/receipt/verify|unlink|rematch {transaction_id:=receipt id}`; list filter `status=receipt_verify` (both list endpoints).
 - FE Transactions: amber ringed paperclip for suggested (orange = verified); toolbar chip "N receipts to verify" (`txn-receipts-verify-chip`) toggles the filter; `ReceiptPopup` header status chip + action bar: **Looks right** (suggested only) · **Unlink** · **Match a different receipt** (inline picker from `/receipt-candidates`, unmatched receipts only) · **Snap a new receipt** (opens Edit transaction → Add receipt).
 - Not done (backlog): "Receipts to verify" line in grey Cockpit card / Owner Dashboard catch-up.
+
+## 2026-10-05 — ReceiptPopup mobile Receipt | Categories toggle ✅ self-tested (390px + 1920px)
+- `ReceiptPopup` (Transactions.jsx): segmented toggle `receipt-popup-pane-toggle` (`receipt-popup-pane-receipt` / `receipt-popup-pane-categories`) shown only `<md`; desktop keeps the split view. Panes: `receipt-popup-image-pane`, `receipt-popup-categories-pane`.
+- `MobileTxnCards.jsx` now renders the orange/amber paperclip badge (`txn-receipt-badge-mobile-{id}`) → opens the same popup (was missing on mobile cards).
