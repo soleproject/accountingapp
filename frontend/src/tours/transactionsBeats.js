@@ -83,9 +83,9 @@ export const TXN_BEATS = [
     key: "more",
     chapter: "link",
     narrator:
-      "Next, every row has a three-dots menu at the far right — edit, split, link to paperwork, or ask your client. I'll switch back to All so every row shows, then open it.",
+      "Next, every row has a three-dots menu at the far right — edit, split, link to paperwork, or ask your client. I'll open it so you can see.",
     anchor: FIRST_ROW_MORE,
-    cursor: { clicks: ["txn-filter-all", FIRST_ROW_MORE], delay: 1800 },
+    cursor: { click: true, delay: 1800 },
     dock: "left",
     wait: HOLD_SHORT,
   },
