@@ -17,13 +17,13 @@
  */
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Undo2, ChevronRight, Paperclip } from "lucide-react";
+import { CheckCircle2, Undo2, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import AccountPicker from "@/components/AccountPicker";
 import { ContactBadge } from "@/components/ContactBadge";
 
 
-function TxnCard({ t, accts, updateCategory, currentId, onReload, onEdit, onViewReceipt }) {
+function TxnCard({ t, accts, updateCategory, currentId, onReload, onEdit, renderActions }) {
   const [dx, setDx] = useState(0);                  // touch delta X
   const startX = useRef(null);
 
@@ -109,15 +109,8 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload, onEdit, onView
                 {t.contact_name || <span className="text-slate-400 font-normal">No contact</span>}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 min-w-0">
-              <span className="truncate">{t.merchant || t.description || "(no payee)"}</span>
-              {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                <button type="button" onClick={(e) => { e.stopPropagation(); onViewReceipt?.(t); }}
-                  className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full border ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300 ring-2 ring-amber-200" : "bg-orange-50 text-orange-600 border-orange-200"}`}
-                  title="View receipt" data-testid={`txn-receipt-badge-mobile-${t.id}`}>
-                  <Paperclip size={11} />
-                </button>
-              )}
+            <div className="text-xs text-slate-500 mt-0.5 truncate">
+              {t.merchant || t.description || "(no payee)"}
             </div>
             <div className="text-sm text-slate-800 font-medium mt-1 truncate">
               {cat ? cat.name : (t.needs_review ? "Uncategorized" : "—")}
@@ -132,13 +125,23 @@ function TxnCard({ t, accts, updateCategory, currentId, onReload, onEdit, onView
             <ChevronRight size={14} className="ml-auto text-slate-300 mt-1" />
           </div>
         </div>
+        {renderActions && (
+          <div
+            className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end gap-1"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            data-testid={`mobile-txn-actions-${t.id}`}
+          >
+            {renderActions(t)}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 
-export default function MobileTxnCards({ txns, accts, updateCategory, currentId, onReload, onEdit, onViewReceipt }) {
+export default function MobileTxnCards({ txns, accts, updateCategory, currentId, onReload, onEdit, renderActions }) {
   if (!txns.length) {
     return (
       <div className="rounded-xl border bg-white p-8 text-center text-sm text-slate-500 italic"
@@ -158,7 +161,7 @@ export default function MobileTxnCards({ txns, accts, updateCategory, currentId,
           currentId={currentId}
           onReload={onReload}
           onEdit={onEdit}
-          onViewReceipt={onViewReceipt}
+          renderActions={renderActions}
         />
       ))}
     </div>

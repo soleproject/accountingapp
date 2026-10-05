@@ -3497,7 +3497,46 @@ export default function Transactions() {
             currentId={currentId}
             onReload={() => loadRef.current?.()}
             onEdit={(t) => setEditing(t)}
-            onViewReceipt={(t) => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
+            renderActions={(t) => (
+              <>
+                {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                  <button type="button" onClick={() => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
+                    className={`mr-auto inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[11px] font-medium ${t.receipt_match_status === "suggested" ? "bg-amber-50 text-amber-700 border-amber-300" : "bg-orange-50 text-orange-600 border-orange-200"}`}
+                    title="View receipt" data-testid={`txn-receipt-badge-mobile-${t.id}`}>
+                    <Paperclip size={12} /> {t.receipt_match_status === "suggested" ? "Verify receipt" : "Receipt"}
+                  </button>
+                )}
+                <button
+                  title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}
+                  data-testid="txn-approve-btn"
+                  onClick={(e) => toggleApprove(t, e)}
+                  className={`p-2 rounded-lg ${t.human_reviewed ? "bg-emerald-100 text-emerald-700" : isUncategorizedTxn(t) ? "text-slate-300" : "text-emerald-600 hover:bg-emerald-50"}`}
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  title="Ask AI about this transaction"
+                  data-testid={`txn-ai-${t.id}`}
+                  onClick={() => {
+                    setFocus({ id: t.id, merchant: t.merchant, amount: t.amount, date: t.date }, { pin: true });
+                    emitAction("ai-open");
+                    emitAction("ai-tell-me-about", { txn: { id: t.id, merchant: t.merchant, description: t.description, contact_name: t.contact_name, amount: t.amount, date: t.date } });
+                  }}
+                  className="p-2 rounded-lg text-sky-500 hover:bg-sky-50"
+                >
+                  <Sparkles size={16} />
+                </button>
+                <RowMoreMenu
+                  t={t}
+                  onEdit={() => setEditing(t)}
+                  onRecategorize={() => recategorize(t.id)}
+                  onSplit={() => setSplitting(t)}
+                  onLink={() => setLinking(t)}
+                  onDelete={() => del(t.id)}
+                  onAskClient={() => askClientRef.current?.(t)}
+                />
+              </>
+            )}
           />
         ) : (
         <div ref={tableWrapRef} data-testid="txn-table-wrap" className={tableNarrow ? "" : "overflow-x-auto"}>

@@ -974,3 +974,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — Compact tour ticker ✅ self-tested (1100px w/ AI panel, 390px)
 - `ChatReviewTour` bar layouts: `compact` when window < 768 or bar width < 900 (e.g. AI panel squeezes the table). Compact = one thin row (≈42px): mute · word-by-word ticker (`useTypedWords`, 380ms/word, shows trailing 6 words / 4 on phones, flex-end so the tail is always visible, `chat-review-tour-v2-ticker`) · n/N · Back · Next/Finish · Pause(icon) · X(skip). On md+ compact spans from the table's left edge to the window's right edge.
 - Non-compact bar: controls column is `w-auto` (was fixed 300px, which collapsed the copy into one word per line on ~1100px screens).
+
+## 2026-10-05 — Mobile transaction cards: action row ✅ self-tested (390px)
+- `MobileTxnCards` takes `renderActions(t)`; each card ends with a row (`mobile-txn-actions-{id}`): Receipt chip (orange / amber "Verify receipt", left) · green check (`txn-approve-btn`, same toggleApprove) · sparkles (`txn-ai-{id}`, AI focus) · `RowMoreMenu` (edit/split/link/ask client/delete). Actions stop propagation so taps don't open the Edit modal.
+- Note: the demo Home Depot 2026-09-06 receipt had been unlinked (POST receipt/unlink at 16:27Z, likely manual) — re-matched via `/receipts/{rid}/match`.
