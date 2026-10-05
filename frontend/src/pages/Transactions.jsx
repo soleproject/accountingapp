@@ -451,12 +451,89 @@ function NarrowFieldRow({ label, children, align = "left" }) {
   );
 }
 
+function ReceiptPopup({ cid, rid, txn, onClose }) {
+  const [r, setR] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    if (!rid) { setErr(true); return; }
+    api.get(`/companies/${cid}/receipts/${rid}`).then((res) => setR(res.data)).catch(() => setErr(true));
+  }, [cid, rid]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const url = r?.attachment_data_url;
+  const isPdf = url?.startsWith("data:application/pdf");
+  const money = (n) => `$${Math.abs(Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4" onMouseDown={onClose} data-testid="receipt-popup">
+      <div
+        className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200"><Paperclip size={12} /></span>
+            <div className="min-w-0">
+              <div className="font-semibold text-slate-900 truncate">{r?.merchant || r?.contact_name || txn?.merchant || txn?.description || "Receipt"}</div>
+              <div className="text-[11px] text-slate-500">
+                {r?.date || txn?.date} · {money(r?.amount ?? txn?.amount)}{r?.attachment_filename ? ` · ${r.attachment_filename}` : ""}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link to="/receipts" className="text-xs text-indigo-700 hover:underline" data-testid="receipt-popup-open-page">Open Receipts</Link>
+            <button type="button" onClick={onClose} className="p-1.5 rounded-md hover:bg-slate-100" aria-label="Close" data-testid="receipt-popup-close"><X size={16} /></button>
+          </div>
+        </div>
+        <div className="grid md:grid-cols-[1fr_300px] gap-0 overflow-hidden flex-1 min-h-0">
+          <div className="bg-slate-100 flex items-center justify-center overflow-auto min-h-[320px]">
+            {err ? (
+              <div className="text-sm text-slate-500 p-6">Couldn't load this receipt.</div>
+            ) : !r ? (
+              <Loader2 className="animate-spin text-slate-400" size={20} />
+            ) : !url ? (
+              <div className="text-sm text-slate-500 p-6">No image on this receipt.</div>
+            ) : isPdf ? (
+              <iframe title="Receipt" src={url} className="w-full h-[70vh]" />
+            ) : (
+              <img src={url} alt="Receipt" className="max-w-full max-h-[70vh] object-contain" data-testid="receipt-popup-image" />
+            )}
+          </div>
+          <div className="border-l overflow-y-auto p-4 text-xs">
+            {r?.ai_narrative && <p className="text-slate-600 mb-3">{r.ai_narrative}</p>}
+            {(r?.line_items || []).length > 0 && (
+              <>
+                <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold mb-1.5">Line items</div>
+                <div className="divide-y divide-slate-100">
+                  {r.line_items.map((l, i) => (
+                    <div key={i} className="py-1.5 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-slate-800 truncate">{l.description}</div>
+                        <div className="text-[10px] text-slate-400 truncate">{l.account_code ? `${l.account_code} · ` : ""}{l.account_name}</div>
+                      </div>
+                      <div className="tabular-nums text-slate-900 shrink-0">{money(l.amount)}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {r?.notes && <div className="mt-3 text-slate-600"><span className="text-slate-400">Note:</span> {r.notes}</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function NarrowTxnCardList({
   txns, accts, currentId,
   selected, allChecked, setSelected, toggleSel,
   setFocus, emitAction, fmtDate, fmtMoney,
   toggleApprove, setEditing, recategorize, setSplitting, setLinking,
   del, askClientRef, updateCategory, showProvenance, setLinkedDocPreview,
+  onViewReceipt,
 }) {
   return (
     <div data-testid="txn-cards-narrow">
@@ -572,9 +649,9 @@ function NarrowTxnCardList({
                 {t.merchant || t.description}
               </div>
               {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-600 border border-orange-200" title="Receipt attached" data-testid={`txn-receipt-badge-card-${t.id}`}>
+                <button type="button" onClick={(e) => { e.stopPropagation(); onViewReceipt?.(t); }} className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100" title="View receipt" data-testid={`txn-receipt-badge-card-${t.id}`}>
                   <Paperclip size={11} />
-                </span>
+                </button>
               )}
               {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
                 <MatchDot row={t} mode="compact" />
@@ -1279,6 +1356,8 @@ export default function Transactions() {
   // Rich linked-invoice/bill chip preview modal — clicking the chip
   // renders the linked doc in-place instead of navigating away.
   const [linkedDocPreview, setLinkedDocPreview] = useState(null);
+  // Paperclip click → receipt popup (image + line items) right on this page.
+  const [receiptPopup, setReceiptPopup] = useState(null);
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
@@ -3104,6 +3183,14 @@ export default function Transactions() {
         />
       )}
 
+      {receiptPopup && (
+        <ReceiptPopup
+          cid={currentId}
+          rid={receiptPopup.rid}
+          txn={receiptPopup.txn}
+          onClose={() => setReceiptPopup(null)}
+        />
+      )}
       {linkedDocPreview && (
         <LinkedDocPreview
           preview={linkedDocPreview}
@@ -3266,6 +3353,7 @@ export default function Transactions() {
         <div ref={tableWrapRef} className={tableNarrow ? "" : "overflow-x-auto"}>
           {tableNarrow ? (
             <NarrowTxnCardList
+              onViewReceipt={(t) => setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t })}
               txns={txns}
               accts={accts}
               currentId={currentId}
@@ -3327,13 +3415,15 @@ export default function Transactions() {
                 const rowActions = (
                   <div className="flex items-center gap-1 justify-end">
                     {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
-                      <span
-                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200"
-                        title="Receipt attached"
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setReceiptPopup({ rid: t.matched_receipt_id || t.receipt_id, txn: t }); }}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100"
+                        title="View receipt"
                         data-testid={`txn-receipt-badge-${t.id}`}
                       >
                         <Paperclip size={12} />
-                      </span>
+                      </button>
                     )}
                     <button
                       title={t.human_reviewed ? "Unapprove" : isUncategorizedTxn(t) ? "Pick a category before approving" : "Approve"}

@@ -418,6 +418,35 @@ async def link_receipt_to_transaction(
         await notify_receipt_matched(company_id, receipt, txn)
 
 
+async def unlink_receipt_from_transaction(company_id: str, rid: str, tid: str) -> None:
+    """Receipt deleted → transaction goes back to uncategorized / needs review."""
+    now = _now_iso()
+    txn = await db.transactions.find_one({"id": tid, "company_id": company_id})
+    if not txn or rid not in (txn.get("matched_receipt_id"), txn.get("receipt_id")):
+        return
+    attachments = [a for a in (txn.get("attachments") or []) if a.get("receipt_id") != rid]
+    await db.transactions.update_one(
+        {"id": tid, "company_id": company_id},
+        {"$set": {
+            "line_items": [], "splits": [], "attachments": attachments,
+            "category_account_id": None, "category_account_name": None,
+            "attachment_data_url": None, "attachment_filename": None,
+            "receipt_ai_narrative": None,
+            "human_reviewed": False, "needs_review": True, "updated_at": now,
+        },
+         "$unset": {"matched_receipt_id": "", "receipt_id": ""}},
+    )
+
+
+async def unmatch_receipt_for_deleted_transaction(company_id: str, tid: str) -> int:
+    """Transaction deleted → its receipt goes back to unmatched."""
+    r = await db.receipts.update_many(
+        {"company_id": company_id, "matched_transaction_id": tid},
+        {"$set": {"matched_transaction_id": None, "matched_at": None, "match_transaction_id": None,
+                  "updated_at": _now_iso()}})
+    return r.modified_count
+
+
 async def notify_receipt_matched(company_id: str, receipt: dict, txn: dict) -> None:
     """Bell notification for a match the user didn't watch happen (Plaid
     landed the charge after the receipt was snapped). Goes to whoever

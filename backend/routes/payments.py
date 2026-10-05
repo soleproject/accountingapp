@@ -758,6 +758,15 @@ async def analyze_receipt_vision(
     return {"analysis": analysis or None}
 
 
+@router.get("/companies/{cid}/receipts/{rid}")
+async def get_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    r = await db.receipts.find_one({"id": rid, "company_id": cid}, {"_id": 0})
+    if not r:
+        raise HTTPException(404, "Receipt not found")
+    return r
+
+
 @router.patch("/companies/{cid}/receipts/{rid}")
 async def update_receipt(
     cid: str, rid: str, inp: ReceiptCreate,
@@ -792,6 +801,12 @@ async def update_receipt(
 @router.delete("/companies/{cid}/receipts/{rid}")
 async def delete_receipt(cid: str, rid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    rec = await db.receipts.find_one({"id": rid, "company_id": cid}, {"_id": 0, "matched_transaction_id": 1})
+    # Matched receipt → the transaction loses the receipt-derived split,
+    # category, and attachment and goes back to the review queue.
+    if rec and rec.get("matched_transaction_id"):
+        from receipt_match import unlink_receipt_from_transaction
+        await unlink_receipt_from_transaction(cid, rid, rec["matched_transaction_id"])
     await db.receipts.delete_one({"id": rid, "company_id": cid})
     try:
         from posting_service import reverse_document_je
