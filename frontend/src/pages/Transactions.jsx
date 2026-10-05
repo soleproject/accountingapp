@@ -1508,8 +1508,10 @@ export default function Transactions() {
     return () => clearTimeout(h);
   }, [search]);
 
+  const loadSeq = useRef(0);
   const load = async () => {
     if (!currentId) return;
+    const seq = ++loadSeq.current;
     const params = new URLSearchParams();
     if (filter === "review") params.set("needs_review", "true");
     else if (filter === "ai" || filter === "uncategorized" || filter === "unapproved" || filter === "reviewed" || filter === "receipt_verify") {
@@ -1564,6 +1566,7 @@ export default function Transactions() {
       api.get(`/companies/${currentId}/invoices`),
       api.get(`/companies/${currentId}/bills`),
     ]);
+    if (seq !== loadSeq.current) return;
     setTxns(t.data.transactions || []);
     setPagination(t.data.pagination || { total: (t.data.transactions || []).length, page: 1, pages: 1, limit: pageSize });
     setAccts(a.data.accounts || []);

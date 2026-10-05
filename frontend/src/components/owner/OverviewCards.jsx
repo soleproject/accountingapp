@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { AreaChart, Area, BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
-import { HelpCircle, Receipt, AlertTriangle, FileUp, ArrowRight } from "lucide-react";
+import { HelpCircle, Receipt, AlertTriangle, FileUp, ArrowRight, Paperclip } from "lucide-react";
 import { Card, Pill, Why, Big, Kpi, Button, fmtDay, fmtWhole, TONE } from "./ui";
 
 const BOOK_STATUS = { complete: ["ok", "Complete"], nearly: ["ok", "Nearly complete"], behind: ["warn", "Catching up"] };
@@ -119,7 +119,7 @@ export function CashCard({ cash, fmt }) {
   );
 }
 
-const ICONS = { question: HelpCircle, receipt: Receipt, invoice: AlertTriangle, statement: FileUp };
+const ICONS = { question: HelpCircle, receipt: Receipt, receipt_verify: Paperclip, invoice: AlertTriangle, statement: FileUp };
 
 export function AttentionCard({ items, onAction }) {
   return (

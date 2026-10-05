@@ -935,3 +935,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — ReceiptPopup mobile Receipt | Categories toggle ✅ self-tested (390px + 1920px)
 - `ReceiptPopup` (Transactions.jsx): segmented toggle `receipt-popup-pane-toggle` (`receipt-popup-pane-receipt` / `receipt-popup-pane-categories`) shown only `<md`; desktop keeps the split view. Panes: `receipt-popup-image-pane`, `receipt-popup-categories-pane`.
 - `MobileTxnCards.jsx` now renders the orange/amber paperclip badge (`txn-receipt-badge-mobile-{id}`) → opens the same popup (was missing on mobile cards).
+
+## 2026-10-05 — "Receipt matches to confirm" on Owner "What needs me?" + Cockpit grey card ✅ self-tested (API + UI)
+- `owner_dashboard.py::_attention`: item `id=receipt-verify`, `kind=receipt_verify` (Paperclip icon), tone warn, "N receipt match(es) to confirm", subtitle "<who> · $amt · <date> — amount or date is slightly off", action **Review** → `/accounting/transactions?filter=receipt_verify`. Placed after "receipts are missing".
+- `responsibilities.py`: new CATALOG key `receipt_matches_to_confirm` (grey `variant=cleanup`, hidden when 0, default assignment both, not expandable → "Open" link to the filtered Transactions page).
+- Transactions.jsx `load()`: added `loadSeq` stale-response guard — deep-link `?filter=receipt_verify` previously lost to a slower unfiltered request racing in after company-switch reset.

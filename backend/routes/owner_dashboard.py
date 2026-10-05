@@ -235,6 +235,21 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
             "subtitle": (m0.get("title") or m0.get("detail") or "")[:90],
             "action_label": "Snap it", "href": f"/client-review/{batch.get('client_token')}" if batch else "/owner/documents", "count": len(missing),
         })
+    sugg_q = {"company_id": cid, "receipt_match_status": "suggested"}
+    sugg_n = await db.transactions.count_documents(sugg_q)
+    if sugg_n:
+        s0 = await db.transactions.find_one(sugg_q, {"merchant": 1, "description": 1, "contact_name": 1, "amount": 1, "date": 1}, sort=[("date", -1)])
+        who = (s0.get("contact_name") or s0.get("merchant") or s0.get("description") or "Receipt")[:40]
+        try:
+            when = date.fromisoformat(str(s0.get("date") or "")[:10]).strftime("%b %-d")
+        except ValueError:
+            when = s0.get("date") or ""
+        items.append({
+            "id": "receipt-verify", "kind": "receipt_verify", "tone": "warn",
+            "title": "1 receipt match to confirm" if sugg_n == 1 else f"{sugg_n} receipt matches to confirm",
+            "subtitle": f"{who} · ${abs(float(s0.get('amount') or 0)):,.2f} · {when} — amount or date is slightly off",
+            "action_label": "Review", "href": "/accounting/transactions?filter=receipt_verify", "count": sugg_n,
+        })
     overdue = [e for e in proj.get("events", []) if e.get("kind") == "invoice" and e.get("days_overdue", 0) > 0] + (proj.get("excluded_ar") or [])
     if overdue:
         worst = max(overdue, key=lambda e: e.get("days_overdue", 0))
