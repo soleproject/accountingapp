@@ -64,15 +64,7 @@ export default function OwnerDashboard() {
   const onAttention = (it) => {
     if (it.href) navigate(it.href);
   };
-  const startCatchup = async () => {
-    try {
-      const r = await api.post(`/companies/${currentId}/owner-dashboard/catchup`, {});
-      if (r.data?.review_url) navigate(r.data.review_url);
-      else toast.success("Nothing older is waiting — you're all caught up.");
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not start a catch-up.");
-    }
-  };
+  const startCatchup = () => navigate("/accounting/todo?view=cleanup");
 
   if (!currentId) {
     return <div className="p-10 text-slate-500 text-sm" data-testid="owner-dashboard-no-company">No company is linked to your account yet. Your bookkeeper will connect one shortly.</div>;

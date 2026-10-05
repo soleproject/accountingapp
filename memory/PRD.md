@@ -1017,3 +1017,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-05 — Michael Co 2 Office Equipment reclass ✅ self-tested
 - Created expense `6360 Office Equipment` (6350 was already Fuel & Vehicle Expense in this company); repointed 3 bills (BILL-2004/2005/2014) + their 3 JE lines; deleted asset row 1650. P&L now shows Office Equipment $5,446.79 under expenses; Balance Sheet no longer lists it. Script: `backend/scripts/reclass_michael_co2_office_equipment.py`.
+
+## 2026-10-05 — "Continue catch-up" → To Do clean-up view ✅ self-tested (screenshot)
+- OwnerDashboard `startCatchup` now navigates to `/accounting/todo?view=cleanup` (no longer mints a client-review batch).
+- ToDo.jsx reads `view=cleanup`: heading "Clean-up items for {company}", hides PendingReview/AgentInquiries cards, scrolls to panel. ResponsibilitiesPanel new props `filter="cleanup"` (keeps only `variant==="cleanup"` items, hides preamble) + `onClearFilter` ("Show all items" banner, testid `resp-panel-cleanup-filter` / `resp-panel-show-all`).

@@ -89,6 +89,8 @@ export default function ResponsibilitiesPanel({
   returnLabel,
   returnPath,
   preamble = null,
+  filter = null,
+  onClearFilter,
 }) {
   const fmtMoney = useMoneyFmt();
   const [period, setPeriod] = useState(currentPeriod());
@@ -161,7 +163,9 @@ export default function ResponsibilitiesPanel({
   };
 
   const isCurrent = data?.is_current !== false;
-  const items = data?.items || [];
+  const allItems = data?.items || [];
+  const cleanupOnly = filter === "cleanup";
+  const items = cleanupOnly ? allItems.filter(i => i.variant === "cleanup") : allItems;
 
   // Build a link href for the "Open →" affordance. If we have a
   // returnPath, tag it in the query so the target page can render a
@@ -238,10 +242,18 @@ export default function ResponsibilitiesPanel({
           state on any one card dims the rest for focus. See index.css. */}
       <div className="space-y-2 cockpit-cards-group">
 
-      {/* Optional preamble — rendered above the items list. Used by
-          Client Cockpit to hoist the Monitoring Cash Flow card into
-          the responsibilities section as its top row. */}
-      {preamble}
+      {cleanupOnly && (
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-700" data-testid="resp-panel-cleanup-filter">
+          <span>Showing <b>clean-up items</b> only — older work you can chip away at your own pace.</span>
+          {onClearFilter && (
+            <button onClick={onClearFilter} className="font-medium text-slate-900 underline underline-offset-2 hover:text-slate-700" data-testid="resp-panel-show-all">
+              Show all items
+            </button>
+          )}
+        </div>
+      )}
+
+      {!cleanupOnly && preamble}
 
       {/* List */}
       {busy && !data ? (
