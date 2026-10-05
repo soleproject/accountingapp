@@ -970,3 +970,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Beat 7 reworded ("…I'll open it so you can see."); no longer switches back to All — stays on To do and single-clicks the row's three-dots menu.
 - Beat 3 ("check") adds `spotlights: [FIRST_ROW_CATEGORY]` (`txn-cat-picker-*`) so the category field is highlighted alongside the green check.
 - `ChatReviewTour` new beat field `spotlightsDelay` (ms) — extra `spotlights` appear N ms into the beat; beat 3 uses 2800ms so the category field lights up when the narrator says "If the category looks right".
+
+## 2026-10-05 — Compact tour ticker ✅ self-tested (1100px w/ AI panel, 390px)
+- `ChatReviewTour` bar layouts: `compact` when window < 768 or bar width < 900 (e.g. AI panel squeezes the table). Compact = one thin row (≈42px): mute · word-by-word ticker (`useTypedWords`, 380ms/word, shows trailing 6 words / 4 on phones, flex-end so the tail is always visible, `chat-review-tour-v2-ticker`) · n/N · Back · Next/Finish · Pause(icon) · X(skip). On md+ compact spans from the table's left edge to the window's right edge.
+- Non-compact bar: controls column is `w-auto` (was fixed 300px, which collapsed the copy into one word per line on ~1100px screens).
