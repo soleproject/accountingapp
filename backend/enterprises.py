@@ -20,6 +20,7 @@ Data model (collection: `enterprises`):
 from __future__ import annotations
 
 from typing import Optional
+import os
 import uuid
 
 from db import db, now_iso
@@ -27,6 +28,7 @@ from db import db, now_iso
 
 DEFAULT_SLUG = "smartbooks"
 DEFAULT_NAME = "SmartBooks"
+DEFAULT_OWNER_EMAIL = (os.environ.get("DEFAULT_ENTERPRISE_OWNER_EMAIL") or "admin@bigsaas.ai").strip().lower()
 
 # Valid Stripe-mapped billing products (Phase A stores the choice; Phase C
 # wires the Stripe price IDs).
@@ -240,6 +242,33 @@ async def ensure_personal_enterprise_for_pro(user_id: str) -> Optional[dict]:
     return ent
 
 
+async def attach_direct_companies_to_default(default_ent: dict) -> int:
+    """Self-serve companies (no firm context) belong to the SmartBooks
+    enterprise. Idempotent: only touches companies with no enterprise_id,
+    skipping Firm/Partner Books and companies owned by pros/partners.
+    Billing is untouched — they keep their own per-company subscription."""
+    eid = default_ent["id"]
+    owner_id = default_ent.get("owner_user_id")
+    now = now_iso()
+    attached = 0
+    cursor = db.companies.find(
+        {"enterprise_id": {"$in": [None, ""]}, "is_firm_books": {"$ne": True}, "is_partner_books": {"$ne": True},
+         "deleted_at": {"$in": [None, ""]}},
+        {"_id": 0, "id": 1, "owner_user_id": 1})
+    async for c in cursor:
+        owner = await db.users.find_one({"id": c.get("owner_user_id")}, {"_id": 0, "role": 1}) if c.get("owner_user_id") else None
+        if owner and owner.get("role") in ("pro", "partner", "superadmin"):
+            continue
+        await db.companies.update_one({"id": c["id"]}, {"$set": {"enterprise_id": eid, "updated_at": now}})
+        attached += 1
+        if owner_id and owner_id != c.get("owner_user_id"):
+            have = await db.memberships.find_one({"company_id": c["id"], "user_id": owner_id})
+            if not have:
+                await db.memberships.insert_one({"id": str(uuid.uuid4()), "user_id": owner_id, "company_id": c["id"],
+                                                 "role": "pro", "created_at": now, "via": "platform_default"})
+    return attached
+
+
 async def ensure_default_enterprise() -> dict:
     """Guarantee the platform-default SmartBooks enterprise exists and every
     existing Pro is attached to it. Idempotent — safe to call on every boot.
@@ -262,6 +291,19 @@ async def ensure_default_enterprise() -> dict:
             "updated_at": now,
         }
         await db.enterprises.insert_one(existing)
+
+    # Platform owner (admin@bigsaas.ai by default) runs the SmartBooks
+    # enterprise: branding, team, and the pro seat on every self-serve
+    # company that signs up on the platform host.
+    if not existing.get("owner_user_id"):
+        owner = await db.users.find_one({"email": DEFAULT_OWNER_EMAIL}, {"_id": 0, "id": 1})
+        if owner:
+            await db.enterprises.update_one({"id": existing["id"]},
+                                            {"$set": {"owner_user_id": owner["id"], "updated_at": now}})
+            await db.users.update_one({"id": owner["id"], "role": {"$in": ["pro", "superadmin"]}},
+                                      {"$set": {"enterprise_id": existing["id"]}})
+            existing["owner_user_id"] = owner["id"]
+    await attach_direct_companies_to_default(existing)
 
     # Back-fill every Pro without an enterprise_id → attach to default.
     await db.users.update_many(

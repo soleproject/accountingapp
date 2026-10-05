@@ -657,7 +657,7 @@ function EnterpriseCell({ client, enterprises, onChange }) {
     try {
       const r = await api.patch(`/admin/companies/${client.id}/enterprise`, { enterprise_id: eid });
       onChange?.(client.id, r.data);
-      toast.success(eid ? `Moved to ${r.data.enterprise_name}` : "Set to SmartBooks direct");
+      toast.success(eid ? `Moved to ${r.data.enterprise_name}` : "Removed from enterprise");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Couldn't update enterprise");
     } finally {
@@ -677,7 +677,7 @@ function EnterpriseCell({ client, enterprises, onChange }) {
           client.enterprise_id ? "font-medium text-indigo-800 bg-indigo-50 border-indigo-100" : "text-slate-400 border-transparent hover:border-slate-200"
         }`}
       >
-        <option value="">SmartBooks direct</option>
+        <option value="">No enterprise</option>
         {enterprises.map((e) => (
           <option key={e.id} value={e.id}>{e.name}</option>
         ))}

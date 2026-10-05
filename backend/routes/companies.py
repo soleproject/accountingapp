@@ -162,7 +162,21 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
                 if firm_pro:
                     firm_pro["enterprise_id"] = firm_pro.get("enterprise_id") or sibling["enterprise_id"]
                     slug_in = sibling.get("signup_firm_slug") or ((firm_pro.get("branding") or {}).get("signin_subdomain")) or ""
-    if firm_pro:
+    if not firm_pro and user.get("role") == "client":
+        # Still no firm → platform-host (self-serve) signup. These belong
+        # to the SmartBooks default enterprise; its owner takes the pro seat.
+        # Billing stays per-company (no billing_payer set here).
+        from enterprises import DEFAULT_SLUG
+        dflt = await db.enterprises.find_one({"slug": DEFAULT_SLUG}, {"_id": 0, "id": 1, "owner_user_id": 1})
+        if dflt:
+            firm_fields["enterprise_id"] = dflt["id"]
+            if dflt.get("owner_user_id"):
+                firm_pro = await db.users.find_one({"id": dflt["owner_user_id"]},
+                                                   {"_id": 0, "id": 1, "enterprise_id": 1, "role": 1})
+                if firm_pro:
+                    firm_pro["enterprise_id"] = dflt["id"]
+                    firm_pro["_platform_default"] = True
+    if firm_pro and not firm_pro.get("_platform_default"):
         slug = slug_in
         if firm_pro:
             ent_id = firm_pro.get("enterprise_id")
@@ -249,7 +263,8 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
     if firm_pro and firm_pro["id"] != user["id"] and firm_pro.get("role") in ("pro", "partner", "superadmin"):
         await db.memberships.insert_one({
             "id": str(uuid.uuid4()), "user_id": firm_pro["id"], "company_id": cid,
-            "role": "pro", "created_at": now, "via": "white_label_signup",
+            "role": "pro", "created_at": now,
+            "via": "platform_default" if firm_pro.get("_platform_default") else "white_label_signup",
         })
     # Auto-provision default CoA — branches on region. US companies
     # get the same 40-row starter CoA they've always had; UK companies
