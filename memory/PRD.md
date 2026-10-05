@@ -979,3 +979,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `MobileTxnCards` takes `renderActions(t)`; each card ends with a row (`mobile-txn-actions-{id}`): Receipt chip (orange / amber "Verify receipt", left) · green check (`txn-approve-btn`, same toggleApprove) · sparkles (`txn-ai-{id}`, AI focus) · `RowMoreMenu` (edit/split/link/ask client/delete). Actions stop propagation so taps don't open the Edit modal.
 - Note: the demo Home Depot 2026-09-06 receipt had been unlinked (POST receipt/unlink at 16:27Z, likely manual) — re-matched via `/receipts/{rid}/match`.
 - `SimilarApproveModal`: pointer-anchored quick strip (`similar-approve-quick-strip`) only renders when `window.innerWidth >= 768`; phones rely on the footer buttons.
+
+## 2026-10-05 — Mobile AI chat as bottom sheet ✅ self-tested (390px)
+- `AiPanel`: on mobile (`useIsMobile`) the aside is `fixed left-0 right-0` above the bottom nav (`bottom: 64px + safe-area`), full width, 46vh tall (`data-mobile-sheet="1"`); grows to ~78vh while the text input is focused (`typing` state via onFocus/onBlur). Collapsed on mobile renders nothing (Chat tab / sparkles emit `ai-open`). Resize handle hidden on mobile.
+- `Layout` mobile `main` paddingBottom grows to `46vh + 80px` while the panel is open so the last cards stay reachable above the sheet.
