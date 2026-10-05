@@ -554,6 +554,7 @@ async def receipt_match_preview(cid: str, inp: ReceiptMatchPreviewIn, user: dict
     def _row(x):
         return {"transaction_id": x["txn"]["id"], "date": x["txn"].get("date"), "amount": x["txn"].get("amount"),
                 "description": x["txn"].get("description") or x["txn"].get("merchant"),
+                "bank_account_id": x["txn"].get("bank_account_id") or x["txn"].get("plaid_account_id"),
                 "score": x["score"], "confidence": x["confidence"], "reasons": x["reasons"]}
     auto = bool(ranked) and ranked[0]["confidence"] == "high" and (
         len(ranked) == 1 or ranked[0]["score"] - ranked[1]["score"] >= 10)

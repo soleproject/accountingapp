@@ -226,7 +226,13 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     const h = setTimeout(() => {
       api.post(`/companies/${currentId}/receipts/match-preview`, {
         date, amount: Number(amount), merchant: vendorName, payment_account_id: payAcct || null,
-      }).then((r) => setMatchPreview(r.data)).catch(() => setMatchPreview(null));
+      }).then((r) => {
+        setMatchPreview(r.data);
+        // A confident bank match tells us which account paid — fill
+        // "Paid from" from the transaction instead of asking.
+        const acct = r.data?.will_link?.bank_account_id;
+        if (acct && !payAcct && paySource.some((a) => a.id === acct)) setPayAcct(acct);
+      }).catch(() => setMatchPreview(null));
     }, 350);
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -609,7 +615,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     // resolver hands the user a first-class choice between "Personal
     // Account" (auto-books a Due-to-Owner liability) and a scrollable
     // list of real asset/liability accounts.
+    const matchedAcct = matchPreview?.will_link?.bank_account_id;
     if (!payAcct && !isEdit) {
+      if (matchedAcct) { await commitSave(matchedAcct, /*paidPersonally=*/false); return; }
       setPaidFromResolverOpen(true);
       return;
     }
