@@ -35,14 +35,14 @@ router = APIRouter(prefix="/api", tags=["leads"])
 
 
 # ---- Models ------------------------------------------------------------
-VALID_ROLES = {"accounting_pro", "business_owner", "enterprise", "other"}
+VALID_ROLES = {"accounting_pro", "business_owner", "enterprise", "affiliate", "other"}
 VALID_STATUS = {"new", "contacted", "qualified", "converted", "dead"}
 
 
 class LeadIn(BaseModel):
     name: str = Field(..., min_length=2, max_length=120)
     email: EmailStr
-    role: str = Field(..., description="accounting_pro | business_owner | enterprise | other")
+    role: str = Field(..., description="accounting_pro | business_owner | enterprise | affiliate | other")
     ref_slug: Optional[str] = Field(None, max_length=40)
     notes: Optional[str] = Field(None, max_length=2000)
     phone: Optional[str] = Field(None, max_length=40)

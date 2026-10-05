@@ -14,13 +14,14 @@ import { toast } from "sonner";
 import {
   Inbox, Search, Loader2, ChevronLeft, Copy, Check, Trash2,
   Briefcase, User, Building2, HelpCircle, Filter, Mail, Phone,
-  ExternalLink,
+  ExternalLink, DollarSign,
 } from "lucide-react";
 
 const ROLE_LABELS = {
   accounting_pro: { label: "Accounting Pro", icon: Briefcase, color: "text-cyan-700 bg-cyan-50 border-cyan-200" },
   business_owner: { label: "Business Owner", icon: User,      color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
   enterprise:     { label: "Enterprise",     icon: Building2, color: "text-violet-700 bg-violet-50 border-violet-200" },
+  affiliate:      { label: "New Affiliate",  icon: DollarSign, color: "text-amber-700 bg-amber-50 border-amber-200" },
   other:          { label: "Other",          icon: HelpCircle, color: "text-slate-700 bg-slate-50 border-slate-200" },
 };
 
