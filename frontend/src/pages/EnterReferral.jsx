@@ -15,7 +15,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { toast } from "sonner";
 import {
-  Sparkles, Loader2, Building2, User, Briefcase, HelpCircle, ArrowRight,
+  Sparkles, Loader2, Building2, User, Briefcase, DollarSign, ArrowRight,
 } from "lucide-react";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
@@ -40,12 +40,19 @@ const ROLE_OPTIONS = [
     icon: Building2,
   },
   {
-    value: "other",
-    label: "Something else",
-    hint: "Investor, journalist, curious human — tell us in the notes",
-    icon: HelpCircle,
+    value: "affiliate",
+    label: "New Affiliate",
+    hint: "I want to share my own link and earn on every paying signup",
+    icon: DollarSign,
   },
 ];
+
+// Which roles must give us a company name, and what we call it.
+const COMPANY_LABEL = {
+  accounting_pro: "Firm name",
+  business_owner: "Business name",
+  enterprise: "Business name",
+};
 
 export default function EnterReferral() {
   const { slug: urlSlug } = useParams();
@@ -80,6 +87,10 @@ export default function EnterReferral() {
       toast.error("Name and email are required");
       return;
     }
+    if (COMPANY_LABEL[role] && !form.company_name.trim()) {
+      toast.error(`${COMPANY_LABEL[role]} is required`);
+      return;
+    }
     setSubmitting(true);
     try {
       await axios.post(`${API}/public/leads`, {
@@ -97,7 +108,7 @@ export default function EnterReferral() {
       if (slug) qs.set("ref", slug);
       if (firm?.slug) qs.set("firm", firm.slug);
       const q = qs.toString() ? `?${qs.toString()}` : "";
-      nav(`/signup${q}`, { replace: true });
+      nav(`${role === "affiliate" ? "/signup/affiliate" : "/signup"}${q}`, { replace: true });
     } catch (err) {
       const msg = err?.response?.data?.detail || "Something went wrong. Please try again.";
       toast.error(typeof msg === "string" ? msg : "Submission failed");
@@ -234,9 +245,13 @@ export default function EnterReferral() {
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
               />
             </Field>
-            <Field label={role === "accounting_pro" ? "Firm name (optional)" : "Business name (optional)"} testid="lead-company">
+            <Field
+              label={COMPANY_LABEL[role] ? `${COMPANY_LABEL[role]} *` : "Business name (optional)"}
+              testid="lead-company"
+            >
               <input
                 type="text"
+                required={Boolean(COMPANY_LABEL[role])}
                 value={form.company_name}
                 onChange={update("company_name")}
                 data-testid="lead-company-input"
@@ -254,7 +269,9 @@ export default function EnterReferral() {
               placeholder={
                 role === "accounting_pro"
                   ? "How many clients are you managing today? What accounting stack are you using?"
-                  : "Tell us a bit about your business or what you're looking for."
+                  : role === "affiliate"
+                    ? "Who do you plan to share your link with? Any audience or network you already have?"
+                    : "Tell us a bit about your business or what you're looking for."
               }
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none resize-none"
             />
@@ -274,7 +291,9 @@ export default function EnterReferral() {
               )}
             </button>
             <div className="text-xs text-slate-500">
-              We'll take you to signup next. Free 14-day trial, no card required.
+              {role === "affiliate"
+                ? "We'll take you to affiliate signup next. No subscription required."
+                : "We'll take you to signup next. Free 14-day trial, no card required."}
             </div>
           </div>
         </form>
