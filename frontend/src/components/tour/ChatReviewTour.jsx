@@ -44,7 +44,7 @@ function DemoCursor({ x, y, clicking }) {
       />
       {clicking && (
         <span
-          className="absolute -left-3 -top-3 w-14 h-14 rounded-full border-2 border-fuchsia-400 animate-ping"
+          className="absolute -left-3 -top-3 w-14 h-14 rounded-full border-2 border-emerald-400 animate-ping"
           aria-hidden
         />
       )}
@@ -74,8 +74,8 @@ function TypingGhost({ rect, text }) {
         width: Math.max(rect.width - 24, 240),
       }}
     >
-      <div className="bg-white/95 rounded px-3 py-2 shadow-lg border border-fuchsia-200">
-        <div className="text-[10px] uppercase tracking-wide text-fuchsia-600 font-semibold mb-0.5">
+      <div className="bg-white/95 rounded px-3 py-2 shadow-lg border border-emerald-200">
+        <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-semibold mb-0.5">
           Example answer
         </div>
         <div className="text-sm text-slate-800 font-medium">
@@ -103,8 +103,8 @@ function CheckboxesGhost({ rect }) {
         width: Math.max(rect.width - 32, 260),
       }}
     >
-      <div className="bg-white/95 rounded-lg px-3 py-2 shadow-lg border border-fuchsia-200 space-y-1.5">
-        <div className="text-[10px] uppercase tracking-wide text-fuchsia-600 font-semibold">
+      <div className="bg-white/95 rounded-lg px-3 py-2 shadow-lg border border-emerald-200 space-y-1.5">
+        <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">
           Split mode preview
         </div>
         {rows.map((r, i) => (
@@ -112,14 +112,14 @@ function CheckboxesGhost({ rect }) {
             <span
               className={`inline-block w-3.5 h-3.5 rounded border ${
                 r.checked
-                  ? "bg-fuchsia-500 border-fuchsia-500"
+                  ? "bg-emerald-500 border-emerald-500"
                   : "bg-white border-slate-300"
               }`}
             />
             <span className="text-slate-700 truncate">{r.label}</span>
           </div>
         ))}
-        <div className="pt-1 text-[11px] text-fuchsia-700 font-medium">
+        <div className="pt-1 text-[11px] text-emerald-700 font-medium">
           → Ask separately
         </div>
       </div>
@@ -139,22 +139,22 @@ function PopupGhost({ rect, ghost }) {
   const n = rows.filter((r) => r.on).length;
   return (
     <div className="fixed z-[10002] pointer-events-none" style={{ left: Math.max(16, Math.min(rect.left - 380, window.innerWidth - 420)), top: rect.bottom + 10, width: 400 }}>
-      <div className="bg-white rounded-xl shadow-2xl border border-fuchsia-200 overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl border border-emerald-200 overflow-hidden">
         <div className="px-3 pt-2 pb-1.5 border-b border-slate-100">
-          <div className="text-[10px] uppercase tracking-wide text-fuchsia-600 font-semibold">Same vendor · preview</div>
+          <div className="text-[10px] uppercase tracking-wide text-emerald-600 font-semibold">Same vendor · preview</div>
           <div className="text-[13px] font-semibold text-slate-900">{rows.length} more unapproved from {ghost.vendor || "Phoenix Business"}</div>
         </div>
         {rows.map((r, i) => (
           <div key={i} className="flex items-center gap-2 px-3 py-1 text-[12px] border-b border-slate-50">
-            <span className={`inline-block w-3.5 h-3.5 rounded border ${r.on ? "bg-fuchsia-500 border-fuchsia-500" : "bg-white border-slate-300"}`} />
+            <span className={`inline-block w-3.5 h-3.5 rounded border ${r.on ? "bg-emerald-500 border-emerald-500" : "bg-white border-slate-300"}`} />
             <span className="font-mono text-slate-500">{r.d}</span>
             <span className="text-slate-700 truncate flex-1">{r.m}</span>
             <span className="font-mono text-slate-800">{r.a}</span>
           </div>
         ))}
         <div className="flex items-center gap-2 px-3 py-2 bg-slate-50">
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded bg-fuchsia-600 text-white"><Check size={11} /> Categorize & approve {n}</span>
-          <span className="text-[11px] font-medium px-2 py-1 rounded border border-fuchsia-300 text-fuchsia-700 bg-white">Approve {n} + create rule</span>
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded bg-emerald-600 text-white"><Check size={11} /> Categorize & approve {n}</span>
+          <span className="text-[11px] font-medium px-2 py-1 rounded border border-emerald-300 text-emerald-700 bg-white">Approve {n} + create rule</span>
           <span className="ml-auto text-[11px] text-slate-500">No, just this one</span>
         </div>
       </div>
@@ -413,6 +413,17 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
       clearTimeout(t2);
     };
   }, [idx, beat, clickStep]);
+
+  // `exitClick` beats — when the tour leaves this beat (next/back/close),
+  // click the given testid so UI the beat opened (a modal) is put away.
+  useEffect(() => {
+    const sel = beat?.exitClick;
+    if (!sel) return;
+    return () => {
+      const el = resolveTarget(sel);
+      if (el) { try { el.click(); } catch (_) { /* ignore */ } }
+    };
+  }, [idx, beat]);
 
   // Esc to close, arrow keys to nav.
   useEffect(() => {
@@ -680,10 +691,10 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
             rx="12"
             ry="12"
             fill="none"
-            stroke="rgb(217, 70, 239)"
+            stroke="rgb(16, 185, 129)"
             strokeWidth="2"
             style={{
-              filter: "drop-shadow(0 0 12px rgba(217,70,239,0.6))",
+              filter: "drop-shadow(0 0 12px rgba(16,185,129,0.6))",
             }}
           />
         ))}
@@ -728,7 +739,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         >
           {/* Chapter header + voice mute */}
           <div className="flex items-center gap-2 mb-3">
-            <div className="text-[10px] uppercase tracking-wider text-fuchsia-600 font-semibold">
+            <div className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold">
               {chapterIdx >= 0
                 ? `Chapter ${chapterIdx + 1} · ${CHAPTER_LIST[chapterIdx].title}`
                 : "Tour"}
@@ -750,9 +761,9 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
                   key={b.key}
                   className={`inline-block w-1.5 h-1.5 rounded-full ${
                     i === idx
-                      ? "bg-fuchsia-500 w-4"
+                      ? "bg-emerald-500 w-4"
                       : i < idx
-                      ? "bg-fuchsia-300"
+                      ? "bg-emerald-300"
                       : "bg-slate-200"
                   } transition-all`}
                 />
@@ -789,7 +800,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
                 <button
                   type="button"
                   onClick={() => onClose?.({ completed: true })}
-                  className="inline-flex items-center gap-1 px-4 py-2 rounded-full bg-fuchsia-600 text-white text-sm font-semibold hover:bg-fuchsia-700 shadow-md"
+                  className="inline-flex items-center gap-1 px-4 py-2 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 shadow-md"
                   data-testid="chat-review-tour-v2-finish"
                 >
                   {finaleLabel || "Start reviewing 🎉"}

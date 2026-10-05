@@ -10,6 +10,7 @@ export const TXN_CHAPTERS = [
   { key: "find", title: "Find the work" },
   { key: "approve", title: "Approving" },
   { key: "ask", title: "When something's off" },
+  { key: "link", title: "Linking invoices & bills" },
 ];
 
 const HOLD_SHORT = 1500;
@@ -20,6 +21,7 @@ const HOLD_LONG = 3600;
 // shared testid, so the first match is the first visible row.
 const FIRST_ROW_CHECK = "css:tbody tr [data-testid='txn-approve-btn']";
 const FIRST_ROW_SPARKLE = "css:tbody tr [data-testid^='txn-ai-']";
+const FIRST_ROW_MORE = "css:tbody tr button[data-testid^='txn-more-']";
 
 export const TXN_BEATS = [
   {
@@ -76,10 +78,40 @@ export const TXN_BEATS = [
     wait: HOLD_LONG,
   },
   {
-    key: "finale",
-    chapter: "ask",
+    key: "more",
+    chapter: "link",
     narrator:
-      "That's the whole loop: To do, green check, sparkles when you want me. You can replay this anytime from the Tour button.",
+      "One more thing. Every row has a three-dots menu at the far right — edit, split, link to paperwork, or ask your client. I'll switch back to All so every row shows, then open it.",
+    anchor: FIRST_ROW_MORE,
+    cursor: { clicks: ["txn-filter-all", FIRST_ROW_MORE], delay: 1800 },
+    dock: "left",
+    wait: HOLD_SHORT,
+  },
+  {
+    key: "link",
+    chapter: "link",
+    narrator:
+      "See 'Link to invoice / bill'? When a payment belongs to an invoice you sent, or a bill you received, just click this and I match the money to the paperwork. Let me show you.",
+    anchor: "txn-link-btn",
+    cursor: { click: true, delay: 3200 },
+    dock: "left",
+    wait: HOLD_SHORT,
+  },
+  {
+    key: "multilink",
+    chapter: "link",
+    narrator:
+      "Pick the invoice or bill and the payment is applied — the totals at the bottom keep you balanced. In fact, you can tick several at once and link multiple invoices or bills to the same transaction, like one deposit that covers three invoices.",
+    anchor: "modal-panel",
+    exitClick: "cancel-btn",
+    dock: "left",
+    wait: HOLD_LONG,
+  },
+  {
+    key: "finale",
+    chapter: "link",
+    narrator:
+      "That's the whole loop: To do, green check, sparkles when you want me, and the three dots to link payments to invoices and bills. You can replay this anytime from the Tour button.",
     center: true,
     finale: true,
     wait: HOLD_SHORT,
