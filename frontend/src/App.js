@@ -173,7 +173,9 @@ function Protected({ children }) {
   // Affiliate-only accounts see the Refer & earn page and nothing
   // else. Any deep-link into a client/pro surface bounces to /share.
   // The Layout component reads the same role and hides the sidebar.
-  if (user.role === "affiliate" && pathname !== "/share") {
+  // The pricing page is the one exception — that's the affiliate's
+  // upgrade path (Share → Upgrade → pick a plan).
+  if (user.role === "affiliate" && pathname !== "/share" && pathname !== "/welcome/pricing") {
     return <Navigate to="/share" replace />;
   }
   return children;

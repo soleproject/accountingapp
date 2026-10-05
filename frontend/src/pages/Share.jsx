@@ -790,28 +790,13 @@ function PayoutsTab() {
 // referral slug + earnings history come along for the ride).
 // --------------------------------------------------------------------------
 function UpgradePill() {
-  const { user, setUser } = useAuth();
+  const { user } = useAuth();
   const nav = useNavigate();
-  const [busy, setBusy] = useState(false);
+  const busy = false;
   if (user?.role !== "affiliate") return null;
-  const upgrade = async () => {
-    if (!window.confirm(
-      "Upgrade to a full account? You'll keep your referral link and " +
-      "all earnings. We'll take you to the onboarding flow to set up " +
-      "your first company."
-    )) return;
-    setBusy(true);
-    try {
-      const r = await api.post("/affiliate/upgrade");
-      localStorage.setItem("axiom_token", r.data.token);
-      localStorage.setItem("axiom_user", JSON.stringify(r.data.user));
-      setUser(r.data.user);
-      toast.success("Welcome to the full experience.");
-      nav("/onboarding");
-    } catch (e) {
-      toast.error(e.response?.data?.detail || "Couldn't upgrade");
-    } finally { setBusy(false); }
-  };
+  // Role conversion + company creation happen on the pricing page the
+  // moment a plan is picked — so backing out leaves the affiliate intact.
+  const upgrade = () => nav("/welcome/pricing?from=affiliate");
   return (
     <div
       className="mb-5 flex items-center gap-3 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3"
