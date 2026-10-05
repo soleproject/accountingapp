@@ -357,7 +357,7 @@ async def _monthly_todos(cid: str) -> dict:
     txns = await db.transactions.find({"company_id": cid}).to_list(50000)
 
     # Bucket the unreviewed rows into the three checklist steps.
-    #   Step 1 · "Review AI categorized" — Rows the AI Cleanup Review page
+    #   Step 1 · "AI Transaction Review" — Rows the AI Cleanup Review page
     #            will ACTUALLY surface: real category, has a contact, AND the
     #            contact's AI-categorized rows all agree on the same account
     #            (unanimous opinion). Count reported = # of DISTINCT
@@ -488,7 +488,7 @@ async def _monthly_todos(cid: str) -> dict:
     steps = {
         "step1": {
             "key": "ai_categorized",
-            "title": "Review AI categorized",
+            "title": "AI Transaction Review",
             "subtitle": "One-click approve the AI's high-confidence categorizations.",
             "count": ai_ready_txns,
             "unit": "categories",

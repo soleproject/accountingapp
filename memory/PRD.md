@@ -1005,3 +1005,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — Step 1 card respects "AI Transaction Review" mode ✅ self-tested
 - `CleanupCopilot` reads `dashboard-todos-mode`: `chat` → review-chat CTAs (existing), NEW `ai` → Step 1 = `/accounting/transactions?filter=unapproved` (work it on the Transactions page), other steps → `/accounting/review-chat?tab=checks`; `checklist` → backend `cta_link` (ai-cleanup-review stepper + tour) unchanged.
 - Step 1 in `ai` mode → `/accounting/transactions?filter=unapproved&txnTour=1`; Transactions.jsx consumes `txnTour=1` (after first load) → strips the param and calls `startTxnTour()`.
+
+## 2026-10-05 — Step 1 card title rename ✅ self-tested (curl)
+- `backend/routes/firm_glance.py` step1.title: "Review AI categorized" → "AI Transaction Review". Frontend renders `Step 1: {title}` → "Step 1: AI Transaction Review".
