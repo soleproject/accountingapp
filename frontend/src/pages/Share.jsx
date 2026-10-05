@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useNavigate } from "react-router-dom";
+import AddCompanyModal from "@/components/AddCompanyModal";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
 import {
@@ -791,13 +791,15 @@ function PayoutsTab() {
 // --------------------------------------------------------------------------
 function UpgradePill() {
   const { user } = useAuth();
-  const nav = useNavigate();
+  const [modalOpen, setModalOpen] = useState(false);
   const busy = false;
   if (user?.role !== "affiliate") return null;
-  // Role conversion + company creation happen on the pricing page the
-  // moment a plan is picked — so backing out leaves the affiliate intact.
-  const upgrade = () => nav("/welcome/pricing?from=affiliate");
+  // Same popup as "Add new company" — role flips to client when they
+  // submit, then they go straight into onboarding for the new company.
+  const upgrade = () => setModalOpen(true);
   return (
+    <>
+    <AddCompanyModal open={modalOpen} onClose={() => setModalOpen(false)} mode="upgrade" />
     <div
       className="mb-5 flex items-center gap-3 rounded-lg border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3"
       data-testid="upgrade-pill"
@@ -822,6 +824,7 @@ function UpgradePill() {
         Upgrade
       </button>
     </div>
+    </>
   );
 }
 

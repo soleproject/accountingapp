@@ -19,14 +19,13 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Toaster, toast } from "sonner";
 import {
-  Check, Star, ArrowRight, ArrowLeft, Crown, Loader2, Sparkles,
+  Check, Star, ArrowRight, Crown, Loader2, Sparkles,
 } from "lucide-react";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
-import { useAuth } from "@/lib/auth";
 import { CompanySwitcher, ProfileMenu } from "@/components/Layout";
 import { api } from "@/lib/api";
 
@@ -205,11 +204,7 @@ export default function PricingPlans() {
   // reaches this page AFTER company creation, so `currentId` should
   // always be set; we still guard against it below and surface a
   // toast if it's missing rather than silently no-op.
-  const { currentId, companies, switchCompany, refresh } = useCompany();
-  const { user, setUser } = useAuth();
-  const [searchParams] = useSearchParams();
-  // Affiliate upgrade path: Share → Upgrade lands here with ?from=affiliate.
-  const fromAffiliate = searchParams.get("from") === "affiliate" || user?.role === "affiliate";
+  const { currentId, companies } = useCompany();
 
   // Annual is the recommended default — it's the plan we WANT people
   // on (better retention, cheaper to serve monthly infra). Sits atop
@@ -290,26 +285,13 @@ export default function PricingPlans() {
       nav(NEXT_AFTER_PRICING);
       return;
     }
-    let cid = currentId;
+    if (!currentId) {
+      toast.error("Couldn't find your company yet — please refresh and try again.");
+      return;
+    }
     setLoadingPlanId(plan.id);
     try {
-      // Affiliate → full account: flip the role (keeps slug + earnings),
-      // then mint their first company so checkout has something to bill.
-      if (user?.role === "affiliate") {
-        const up = await api.post("/affiliate/upgrade");
-        localStorage.setItem("axiom_token", up.data.token);
-        localStorage.setItem("axiom_user", JSON.stringify(up.data.user));
-        setUser(up.data.user);
-        const c = await api.post("/companies", { name: `${(user.name || "My").trim()}'s Business` });
-        cid = c.data?.company_id || c.data?.id;
-        if (cid) { switchCompany?.(cid); refresh?.(); }
-      }
-      if (!cid) {
-        toast.error("Couldn't find your company yet — please refresh and try again.");
-        setLoadingPlanId(null);
-        return;
-      }
-      const r = await api.post(`/companies/${cid}/billing/checkout-session`, {
+      const r = await api.post(`/companies/${currentId}/billing/checkout-session`, {
         product: plan.stripeProduct,
         cadence,                                  // "monthly" | "annual" — from cadence toggle
         origin_url: window.location.origin,
@@ -412,16 +394,6 @@ export default function PricingPlans() {
       </div>
 
       <div className="max-w-[1500px] mx-auto">
-
-        {fromAffiliate && (
-          <nav className="mb-4 flex items-center gap-1.5 text-sm text-slate-500" aria-label="Breadcrumb" data-testid="pricing-breadcrumb">
-            <Link to="/share" className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 hover:underline" data-testid="pricing-back-to-share">
-              <ArrowLeft size={14} /> Refer &amp; earn
-            </Link>
-            <span className="text-slate-300">/</span>
-            <span className="text-slate-800 font-medium">Upgrade to the full platform</span>
-          </nav>
-        )}
 
         {/* Centered marketing header — crown, headline, feature-chip
             row, and cadence toggle stack on the same axis. Replaces
