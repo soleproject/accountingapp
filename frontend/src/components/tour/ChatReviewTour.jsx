@@ -414,6 +414,17 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     };
   }, [idx, beat, clickStep]);
 
+  // `exitClick` beats — when the tour leaves this beat (next/back/close),
+  // click the given testid so UI the beat opened (a modal) is put away.
+  useEffect(() => {
+    const sel = beat?.exitClick;
+    if (!sel) return;
+    return () => {
+      const el = resolveTarget(sel);
+      if (el) { try { el.click(); } catch (_) { /* ignore */ } }
+    };
+  }, [idx, beat]);
+
   // Esc to close, arrow keys to nav.
   useEffect(() => {
     const onKey = (e) => {

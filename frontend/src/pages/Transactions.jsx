@@ -674,6 +674,9 @@ export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDele
     const onDoc = (e) => {
       if (menuRef.current?.contains(e.target)) return;
       if (btnRef.current?.contains(e.target)) return;
+      // Guided tour drives this menu with synthetic clicks — a mousedown on
+      // the tour card (Next / Back) must not dismiss it mid-demo.
+      if (e.target?.closest?.('[data-testid="chat-review-tour-v2"]')) return;
       setOpen(false);
     };
     const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
@@ -3643,6 +3646,7 @@ export function Modal({ title, children, onClose, wide }) {
       <div
         className={`rounded-xl bg-white shadow-2xl w-full my-auto max-h-[90vh] flex flex-col ${wide ? "max-w-2xl" : "max-w-md"}`}
         onMouseDown={(e) => e.stopPropagation()}
+        data-testid="modal-panel"
       >
         <div className="flex items-center justify-between px-5 py-3 border-b sticky top-0 bg-white rounded-t-xl z-10">
           <h3 className="font-heading font-semibold">{title}</h3>
