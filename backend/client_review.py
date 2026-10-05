@@ -815,9 +815,19 @@ def _first_name(email: str, contact_name: str | None = None) -> str:
     return first.title() if first else "there"
 
 
+async def receipts_matched_last_7d(company_id: str) -> int:
+    """Receipts auto-attached to bank transactions in the last 7 days —
+    surfaced as one line in the weekly email instead of per-event noise."""
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    return await db.receipts.count_documents({
+        "company_id": company_id, "matched_transaction_id": {"$nin": [None, ""]},
+        "matched_at": {"$gte": since},
+    })
+
+
 def _render_batch_email(
     *, first_name: str, item_count: int, review_url: str,
-    schedule_url: str, firm_name: str | None,
+    schedule_url: str, firm_name: str | None, receipts_matched: int = 0,
 ) -> tuple[str, str, str]:
     """Return (subject, html, text) for the batch email.
 
@@ -829,6 +839,16 @@ def _render_batch_email(
                f"{'s' if item_count != 1 else ''} when you have a moment")
     est = _est_minutes(item_count)
     sig_line = firm_name or "Your bookkeeping team"
+    matched_html = ""
+    matched_text = ""
+    if receipts_matched:
+        _r = f"{receipts_matched} receipt{'s' if receipts_matched != 1 else ''}"
+        matched_html = f"""
+  <p style="margin:16px 0 0;font-size:13px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:8px;padding:10px 12px;">
+    &#128206; Good news: {_r} you uploaded this week {'were' if receipts_matched != 1 else 'was'} matched to bank transactions automatically — nothing to do there.
+  </p>"""
+        matched_text = (f"Good news: {_r} you uploaded this week "
+                        f"{'were' if receipts_matched != 1 else 'was'} matched to bank transactions automatically.\n\n")
 
     html = f"""\
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:#0f172a;line-height:1.5;max-width:560px;margin:0 auto;padding:24px 20px;">
@@ -857,7 +877,7 @@ def _render_batch_email(
     Every question has a "not sure — send to my bookkeeper" option if
     you'd rather defer. Takes {est} if you knock them out in one sitting.
   </p>
-
+{matched_html}
   <p style="margin:32px 0 0;font-size:14px;color:#334155;">— {sig_line}</p>
 </div>"""
     text = (
@@ -870,6 +890,7 @@ def _render_batch_email(
         f"Every question has a \"not sure — send to my bookkeeper\" "
         f"option if you'd rather defer. Takes {est} if you knock them "
         f"out in one sitting.\n\n"
+        f"{matched_text}"
         f"— {sig_line}\n"
     )
     return subject, html, text
@@ -931,6 +952,7 @@ async def dispatch_batch_email(batch: dict) -> dict:
         review_url=review_url,
         schedule_url=schedule_url,
         firm_name=firm_name,
+        receipts_matched=await receipts_matched_last_7d(batch["company_id"]),
     )
 
     result = await dispatch(

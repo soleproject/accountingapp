@@ -488,6 +488,7 @@ async def create_receipt(cid: str, inp: ReceiptCreate, user: dict = Depends(get_
     rid = str(uuid.uuid4()); now = now_iso()
     doc = {
         "id": rid, "company_id": cid, **inp.model_dump(),
+        "uploaded_by": user["id"],
         "created_at": now, "updated_at": now,
     }
     await db.receipts.insert_one(doc)

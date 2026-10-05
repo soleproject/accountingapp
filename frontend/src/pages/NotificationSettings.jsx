@@ -29,6 +29,8 @@ const CATEGORIES = [
     hint: "When someone mentions you in the AI chat, a deal note, or a client thread." },
   { key: "bill_due",          label: "Bills due soon or overdue",
     hint: "A vendor bill hits its due date or goes past due." },
+  { key: "receipt_matched",   label: "Receipt matched to a transaction",
+    hint: "A receipt you uploaded earlier gets attached automatically when the bank charge arrives." },
   { key: "anomaly",           label: "Anomalies + large transactions",
     hint: "AI flags an unusual transaction, a duplicate, or a category that broke a rule." },
   { key: "timesheet_approval",label: "Timesheets needing approval",

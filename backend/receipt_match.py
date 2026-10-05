@@ -279,7 +279,7 @@ async def find_pending_receipt_match(
 
 
 async def link_receipt_to_transaction(
-    company_id: str, receipt: dict, txn: dict,
+    company_id: str, receipt: dict, txn: dict, *, notify_user: bool = False,
 ) -> None:
     """Cross-link a receipt and a transaction, copy the receipt's line-
     item split onto the transaction (transactions live directly on the
@@ -372,6 +372,7 @@ async def link_receipt_to_transaction(
         {"id": rid, "company_id": company_id},
         {"$set": {
             "matched_transaction_id": tid,
+            "matched_at":             now,
             "updated_at":             now,
         }},
     )
@@ -380,3 +381,30 @@ async def link_receipt_to_transaction(
         "receipt %s linked to transaction %s (%d line item split)",
         rid, tid, len(norm_lines),
     )
+    if notify_user:
+        await notify_receipt_matched(company_id, receipt, txn)
+
+
+async def notify_receipt_matched(company_id: str, receipt: dict, txn: dict) -> None:
+    """Bell notification for a match the user didn't watch happen (Plaid
+    landed the charge after the receipt was snapped). Goes to whoever
+    uploaded the receipt, else the company owner(s)."""
+    try:
+        from routes.notifications import notify
+        amt = abs(float(txn.get("amount") or 0))
+        who = (txn.get("merchant") or txn.get("merchant_name") or txn.get("description")
+               or receipt.get("vendor") or "a transaction")
+        targets = [receipt.get("uploaded_by")] if receipt.get("uploaded_by") else [
+            m["user_id"] async for m in db.memberships.find(
+                {"company_id": company_id, "role": "owner"}, {"_id": 0, "user_id": 1})]
+        for uid in targets:
+            await notify(
+                company_id, uid, "receipt_matched",
+                f"Receipt matched: {who} · ${amt:,.2f}",
+                f"The {receipt.get('vendor') or 'receipt'} you uploaded is now attached to the "
+                f"{txn.get('date') or ''} bank transaction.",
+                link=f"/accounting/transactions?focus={txn.get('id')}",
+                source={"type": "receipt_match", "id": f"{receipt.get('id')}:{txn.get('id')}"},
+            )
+    except Exception:  # noqa: BLE001 — never break the match itself
+        logger.exception("receipt_matched notification failed")

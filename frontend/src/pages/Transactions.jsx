@@ -571,6 +571,11 @@ function NarrowTxnCardList({
               <div className="text-sm text-slate-800 break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
                 {t.merchant || t.description}
               </div>
+              {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                <span className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-50 text-teal-700 border border-teal-200" title="Receipt attached" data-testid={`txn-receipt-badge-card-${t.id}`}>
+                  <Paperclip size={11} />
+                </span>
+              )}
               {["SalesReceipt", "Deposit", "Purchase", "CreditMemo", "RefundReceipt"].includes(t.txn_type) && (
                 <MatchDot row={t} mode="compact" />
               )}
@@ -3416,6 +3421,15 @@ export default function Transactions() {
                       <div className="font-medium break-words break-all whitespace-normal leading-snug flex-1 min-w-0">
                         {t.merchant || t.description}
                       </div>
+                      {(t.matched_receipt_id || t.receipt_id || t.veryfi_receipt_id) && (
+                        <span
+                          className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-50 text-teal-700 border border-teal-200"
+                          title="Receipt attached"
+                          data-testid={`txn-receipt-badge-${t.id}`}
+                        >
+                          <Paperclip size={11} />
+                        </span>
+                      )}
                       {/* Reconciliation indicator — only shown on rows
                           that were authored via a full-page editor
                           (Sales Receipt, Deposit, etc.) since bank-
