@@ -192,7 +192,7 @@ function resolveTarget(idOrSelector) {
 // Since some anchors mount asynchronously (a modal that just opened
 // after a synthetic click on the previous beat), we retry for up to
 // ~1.5 s with a short interval until the element is found.
-function useAnchorRect(anchorTestId, beatIdx) {
+function useAnchorRect(anchorTestId, beatIdx, reserveBottom = 220) {
   const [rect, setRect] = useState(null);
   useEffect(() => {
     if (!anchorTestId) {
@@ -206,9 +206,16 @@ function useAnchorRect(anchorTestId, beatIdx) {
       if (!el) return null;
       const r = el.getBoundingClientRect();
       const outOfView =
-        r.top < 60 || r.bottom > window.innerHeight - 200;
+        r.top < 60 || r.bottom > window.innerHeight - reserveBottom;
       if (outOfView) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (r.top >= 60 && reserveBottom > 220) {
+          // Nudge just enough that the anchor + its ghost clear the bottom bar.
+          const scroller = el.closest("main, [data-scroll-root]") || window;
+          const delta = r.bottom - (window.innerHeight - reserveBottom) + 16;
+          (scroller === window ? window : scroller).scrollBy({ top: delta, behavior: "smooth" });
+        } else {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
       }
       setTimeout(() => {
         if (cancelled) return;
@@ -235,7 +242,7 @@ function useAnchorRect(anchorTestId, beatIdx) {
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [anchorTestId, beatIdx]);
+  }, [anchorTestId, beatIdx, reserveBottom]);
   return rect;
 }
 
@@ -290,8 +297,31 @@ function useAnchorRects(anchorTestIds, beatIdx) {
   return rects;
 }
 
-export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel }) {
+// Horizontal extent of an element (left/width), re-measured on resize +
+// scroll. Used by the bottom-bar layout to size the narrator to the table.
+function useBarSpan(selector) {
+  const [span, setSpan] = useState(null);
+  useEffect(() => {
+    if (!selector) { setSpan(null); return; }
+    const measure = () => {
+      const el = resolveTarget(selector);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0) setSpan((p) => (p && p.left === r.left && p.width === r.width ? p : { left: r.left, width: r.width }));
+    };
+    measure();
+    const iv = setInterval(measure, 400);
+    window.addEventListener("resize", measure);
+    window.addEventListener("scroll", measure, true);
+    return () => { clearInterval(iv); window.removeEventListener("resize", measure); window.removeEventListener("scroll", measure, true); };
+  }, [selector]);
+  return span;
+}
+
+export default function ChatReviewTour({ onClose, beats: propBeats, title, chapters: propChapters, finaleLabel, layout = "card", barAnchor = null }) {
   const BEATS = propBeats || CHAT_REVIEW_BEATS;
+  const bottomBar = layout === "bottom-bar";
+  const barSpan = useBarSpan(bottomBar ? barAnchor : null);
   const CHAPTER_LIST = propChapters || CHAPTERS;
   const TOTAL = BEATS.length;
   const [idx, setIdx] = useState(0);
@@ -330,7 +360,8 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
     }
     return beat.cursor?.move || beat.anchor || null;
   }, [beat, clickStep]);
-  const rect = useAnchorRect(beat?.anchor, idx);
+  // Ghost popups render ~180px below the anchor — keep room so the bottom bar never covers them.
+  const rect = useAnchorRect(beat?.anchor, idx, beat?.ghost?.kind === "popup" ? 420 : 220);
   const cursorRect = useAnchorRect(cursorTarget, `${idx}-${clickStep}`);
   // Extra spotlight anchors — cut additional holes in the dim mask
   // for beats that need to highlight more than one element at once.
@@ -736,8 +767,11 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           /accounting/review-chat. Falls back to a bottom sheet on
           mobile / narrow viewports. */}
       <div
+        style={bottomBar && barSpan && window.innerWidth >= 768 ? { left: barSpan.left, width: barSpan.width } : undefined}
         className={`fixed z-[10003] px-4 ${
-          beat.center
+          bottomBar
+            ? "left-0 right-0 md:right-auto bottom-3 pointer-events-none"
+            : beat.center
             ? "inset-0 flex items-center justify-center pointer-events-none"
             : beat.dock === "left"
               ? "left-4 right-4 bottom-6 md:right-auto md:left-72 md:max-w-md pointer-events-none"
@@ -747,10 +781,12 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
         }`}
       >
         <div
-          className="pointer-events-auto bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 md:p-6"
-          style={{ maxWidth: 480 }}
+          className={`pointer-events-auto bg-white rounded-2xl shadow-2xl border border-slate-200 ${bottomBar ? "p-4 md:px-5 md:py-3.5 md:flex md:items-center md:gap-6" : "p-5 md:p-6"}`}
+          style={bottomBar ? undefined : { maxWidth: 480 }}
           data-testid="chat-review-tour-v2-narrator"
+          data-layout={layout}
         >
+          <div className={bottomBar ? "md:flex-1 min-w-0" : ""}>
           {/* Chapter header + voice mute */}
           <div className="flex items-center gap-2 mb-3">
             <div className="text-[10px] uppercase tracking-wider text-emerald-600 font-semibold">
@@ -786,12 +822,14 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           </div>
 
           {/* Narrator copy */}
-          <div className="text-slate-800 text-[15px] leading-relaxed">
+          <div className={`text-slate-800 leading-relaxed ${bottomBar ? "text-sm md:text-[15px]" : "text-[15px]"}`}>
             {beat.narrator}
           </div>
+          </div>
 
+          <div className={bottomBar ? "md:shrink-0 md:w-[300px]" : ""}>
           {/* Controls */}
-          <div className="mt-5 flex items-center gap-2">
+          <div className={`flex items-center gap-2 ${bottomBar ? "mt-3 md:mt-0 md:justify-end" : "mt-5"}`}>
             <button
               type="button"
               onClick={() => setIdx((k) => Math.max(0, k - 1))}
@@ -846,7 +884,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
           </div>
 
           {/* Progress footnote */}
-          <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
+          <div className={`flex items-center justify-between text-[11px] text-slate-400 ${bottomBar ? "mt-1.5" : "mt-3"}`}>
             <span>
               Beat {idx + 1} of {TOTAL}
               {beatIdxInChapter >= 0 && beatsInChapter.length > 0 && (
@@ -864,6 +902,7 @@ export default function ChatReviewTour({ onClose, beats: propBeats, title, chapt
             >
               {paused ? "Resume" : "Pause"}
             </button>
+          </div>
           </div>
         </div>
       </div>

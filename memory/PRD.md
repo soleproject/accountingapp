@@ -952,3 +952,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Transactions.jsx: `sampleMode` state + `sampleRef`. `startTxnTour` → sample on; `closeTxnTour` → off + live reload. `load()` short-circuits to sample rows; approve/unapprove/updateCategory/updateContact/del/recategorize mutate locally via `sampleMutate` (toast "Sample data — nothing is saved"). Banner `txn-sample-banner`. CleanupCopilot gets `sampleProgress` prop (overrides donut/pitch). LinkModal gets `sampleDocs` prop (no fetch, no post). ReceiptPopup renders a static sample receipt for `sample-*` ids.
 - Auto-fire/onboarding invite now gated on `loadedOnce` instead of `txns.length` (tour fires for empty companies). `load()` now try/catches (429 toast) instead of unhandled rejection.
 - AiPanel: chat-history effect has a cancelled guard — fixes stale "I'm watching <previous company>" greeting after switching companies.
+
+## 2026-10-05 — Tour narrator as bottom bar ✅ self-tested (1920 + 390)
+- `ChatReviewTour` new props `layout="bottom-bar"` + `barAnchor` (testid/`css:`); `useBarSpan` measures the anchor's left/width (400ms poll + resize/scroll) so the narrator spans exactly the transactions table; horizontal layout (chapter + copy left, controls right), stays bottom for welcome/finale too; mobile falls back to full-width bottom sheet. Card layout unchanged for other tours.
+- `useAnchorRect(anchor, idx, reserveBottom)`: popup-ghost beats reserve 420px and nudge-scroll (scrollBy on nearest `main`) so the ghost never hides under the bar.
+- Transactions.jsx: `data-testid="txn-table-wrap"` on the table wrapper; tour mounted with `layout="bottom-bar" barAnchor="txn-table-wrap"`.
