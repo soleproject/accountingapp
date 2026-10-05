@@ -1988,7 +1988,7 @@ export default function CleanupCopilot({ currentId, sampleProgress = null, onApp
                   return "/accounting/review-chat?tab=no_category";
                 })();
                 const aiCta = String(activeStep.display || activeStep.n) === "1"
-                  ? "/accounting/transactions?filter=unapproved"
+                  ? "/accounting/transactions?filter=unapproved&txnTour=1"
                   : "/accounting/review-chat?tab=checks";
                 const targetHref = chatModeOn ? chatCta : aiModeOn ? aiCta : activeStep.cta_link;
                 // Chat-mode overrides — when the CPA has flipped todos
