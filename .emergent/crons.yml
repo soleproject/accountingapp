@@ -6,3 +6,10 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: plan-block-digest
+    description: "Daily 13:00 UTC email to superadmins listing customers blocked by plan gates or seat caps"
+    cron: "0 13 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/entitlement-digest"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true
