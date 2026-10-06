@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Send, Paperclip, Camera, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine, RotateCcw } from "lucide-react";
@@ -178,6 +179,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     };
   }, []);
   const chatEndRef = useRef(null);
+  const mainRef = useRef(null);
   const fileRef = useRef(null);
 
   // Top-level Category picker state, opened when the client taps the
@@ -240,10 +242,21 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     const isFormType = it && [10, 14].includes(it.item_type);
     if (isFormType && !cardMode) {
       window.scrollTo({ top: 0, behavior: "smooth" });
+    } else if (isFormType && cardMode) {
+      mainRef.current?.scrollTo({ top: 0 });
     } else {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
   }, [messages, activeIdx, session, sending]);
+
+  // Card mode is a body-level portal: lock page scroll so iOS doesn't shift
+  // the fixed overlay against the (scrolled) layout viewport.
+  useEffect(() => {
+    if (!cardMode) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, [cardMode]);
 
   // When embedded in the pro Cockpit (iframe), tell the parent whenever
   // the batch's progress changes so its row/chips refresh live.
@@ -1235,11 +1248,12 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     || messages[messages.length - 1]?.action?.type === "clarify";
   const cardDone = cardMode ? (session?.items || []).filter((i) => !isOpenItem(i)).length : 0;
 
-  return (
-    <div className={`${cardMode ? "fixed inset-0 md:top-16 z-50" : embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
+  const tree = (
+    <div className={`${cardMode ? "fixed inset-0 md:top-16 z-50" : embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`}
+         style={cardMode ? { height: "100dvh", maxHeight: "100dvh" } : undefined} data-testid="client-review-page">
       {/* Header */}
       {cardMode ? (
-        <header className="bg-white border-b border-slate-200 px-3 py-2.5 sticky top-0 z-10" data-testid="checkin-card-header">
+        <header className="bg-white border-b border-slate-200 px-3 py-2.5 sticky top-0 z-10" style={{ paddingTop: "max(0.625rem, env(safe-area-inset-top))" }} data-testid="checkin-card-header">
           <div className="flex items-center justify-between gap-2">
             <button onClick={() => onExit?.()} className="inline-flex items-center gap-1 h-11 px-2 -ml-1 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100" data-testid="checkin-card-back-to-list">
               <ChevronLeft size={18} /> All items
@@ -1418,7 +1432,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       )}
 
       {/* Chat */}
-      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4 ${cardMode ? "overflow-y-auto min-h-0" : ""}`}>
+      <main ref={mainRef} className={`flex-1 ${colW} mx-auto w-full px-4 py-4 ${cardMode ? "overflow-y-auto min-h-0" : ""}`}>
         <div className="space-y-3">
           {/* `visibleMessages` = the chat excluding the leading arrival
               transition bubble (rendered ABOVE the item card). Initial
@@ -2214,6 +2228,7 @@ ${companyName}`;
       )}
     </div>
   );
+  return cardMode ? createPortal(tree, document.body) : tree;
 }
 
 // -------------------------------------------------------------------------
