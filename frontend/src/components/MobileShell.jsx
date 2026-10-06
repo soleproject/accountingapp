@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, Home, Users, Calculator, MessageSquare, Bell, Compass, Receipt, FileText, ArrowLeftRight, FileMinus, BarChart3 } from "lucide-react";
+import { Menu, X, Home, Users, Calculator, MessageSquare, Bell, Compass, Receipt, FileText, ArrowLeftRight, FileMinus, BarChart3, ClipboardCheck } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { CompanySwitcher, ProfileMenu } from "@/components/Layout";
@@ -105,6 +105,7 @@ const NAV_TABS = [
   { to: "/owner",                   label: "My Business",  icon: Compass,        matchStarts: ["/owner"],                          product: "accounting" },
   { to: "/receipts",                label: "Receipts",     icon: Receipt,        matchStarts: ["/receipts"],                       product: "accounting" },
   { to: "/invoices",                label: "Invoices",     icon: FileText,       matchStarts: ["/invoices"],                       product: "accounting" },
+  { to: "/checkin",                 label: "Check-in",     icon: ClipboardCheck, matchStarts: ["/checkin"],                        product: "accounting" },
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, matchStarts: ["/accounting/transactions"],        product: "accounting" },
   { to: "/bills",                   label: "Bills",        icon: FileMinus,      matchStarts: ["/bills"],                          product: "accounting" },
   { to: "/reports",                 label: "Reports",      icon: BarChart3,      matchStarts: ["/reports"],                        product: "accounting" },

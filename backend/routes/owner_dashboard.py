@@ -251,7 +251,7 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
                 "id": "checkin", "kind": "question", "tone": "brand",
                 "title": "Your bookkeeper has a few quick questions" if len(pending) > 1 else "Your bookkeeper has a quick question",
                 "subtitle": f"{len(pending)} item{'s' if len(pending) > 1 else ''} · about {max(1, len(pending) // 2)} min",
-                "action_label": "Answer", "href": f"/client-review/{batch.get('client_token')}", "count": len(pending),
+                "action_label": "Answer", "href": "/checkin", "count": len(pending),
             })
     missing = await _missing_receipt_rows(cid, batch)
     if missing:
@@ -338,7 +338,7 @@ async def _team(cid: str, today: date, batch: Optional[dict], books: dict) -> di
         next_checkin = {
             "status": batch.get("status"), "total": total, "answered": answered,
             "sent_at": batch.get("email_sent_at") or batch.get("scheduled_for") or batch.get("created_at"),
-            "href": f"/client-review/{batch.get('client_token')}", "reason": batch.get("scheduled_reason"),
+            "href": "/checkin", "reason": batch.get("scheduled_reason"),
         }
 
     comms = await db.communications.find({"company_id": cid, "kind": {"$nin": ["internal", "system"]}}).sort("sent_at", -1).limit(5).to_list(5)
