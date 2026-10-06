@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><title>Mockup B · Checklist + Sheet</title>
+<style>
+.grp{font-size:10px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:#64748b;margin:6px 0 4px}
+.row2{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px 14px;display:flex;align-items:center;gap:12px;min-height:60px}
+.row2 .ck{width:22px;height:22px;border-radius:50%;border:2px solid #cbd5e1;flex:none}
+.row2 .ck.done{background:#10b981;border-color:#10b981}
+.row2 .t{flex:1;font-size:14px;font-weight:600;line-height:1.25}
+.row2 .t small{display:block;font-weight:400;color:#64748b;font-size:11px;margin-top:2px}
+.row2 .act{font-size:12px;font-weight:700;padding:8px 12px;border-radius:10px;background:#0f172a;color:#fff}
+.row2 .act.soft{background:#eef2ff;color:#4338ca}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:24px 24px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.25);padding:10px 16px 14px;display:flex;flex-direction:column;gap:12px}
+.grab{width:44px;height:5px;border-radius:3px;background:#cbd5e1;margin:0 auto}
+.dim{position:absolute;inset:0;background:rgba(15,23,42,.45)}
+</style></head><body>
+
+<!-- B1: landing checklist -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in · September</div></div><div class="sub">3 of 10 done</div></div><div class="bar"><i style="width:30%"></i></div></div>
+<div class="body" style="gap:8px;overflow:auto">
+  <div class="grp">Just tap (4) · ~1 min</div>
+  <div class="row2"><span class="ck"></span><div class="t">Owner's draw? $8,500 wire<small>Sep 27 · Wire transfer out</small></div><span class="act">Answer</span></div>
+  <div class="row2"><span class="ck"></span><div class="t">$12,400 deposit — where from?<small>Sep 29 · Unnamed source</small></div><span class="act">Answer</span></div>
+  <div class="row2"><span class="ck"></span><div class="t">Netflix $15.99 — business?<small>New recurring charge</small></div><span class="act">Answer</span></div>
+  <div class="row2"><span class="ck done"></span><div class="t" style="color:#94a3b8;text-decoration:line-through">Is "AMZN MKTP" Amazon?</div><span style="font-size:11px;color:#10b981;font-weight:700">Done</span></div>
+  <div class="grp">Snap a photo (3)</div>
+  <div class="row2"><span class="ck"></span><div class="t">Costco $184.55 receipt<small>Sep 22 · Office Supplies</small></div><span class="act soft">📷 Snap</span></div>
+  <div class="row2"><span class="ck"></span><div class="t">Business Checking statement<small>September · to finish reconciling</small></div><span class="act soft">⬆ Upload</span></div>
+  <div class="row2"><span class="ck"></span><div class="t">Office Depot $318.42 receipt<small>Sep 18</small></div><span class="act soft">📷 Snap</span></div>
+  <div class="grp">Tell us about it (2) · voice ok</div>
+  <div class="row2"><span class="ck"></span><div class="t">Venmo $300 — what was it for?<small>Jul 13 · Uncategorized</small></div><span class="act soft">🎤 Tell</span></div>
+  <div class="row2"><span class="ck"></span><div class="t">Lunch at Capriotti's $37.14 — who with?<small>Sep 28 · Meals</small></div><span class="act soft">🎤 Tell</span></div>
+</div>
+<div class="nav"><div><span class="ic"></span>My business</div><div><span class="ic"></span>Receipts</div><div><span class="ic"></span>Invoices</div><div class="on"><span class="ic"></span>Check-in</div><div><span class="ic"></span>More</div></div>
+</div><div class="label">B · landing — grouped by how you answer</div></div>
+
+<!-- B2: tap item in sheet -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in · September</div></div><div class="sub">3 of 10 done</div></div><div class="bar"><i style="width:30%"></i></div></div>
+<div class="body" style="gap:8px"><div class="grp">Just tap (4)</div><div class="row2"><span class="ck"></span><div class="t">Owner's draw? $8,500 wire</div></div><div class="row2"><span class="ck"></span><div class="t">$12,400 deposit — where from?</div></div></div>
+<div class="dim"></div>
+<div class="sheet" style="height:62%">
+  <div class="grab"></div>
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center"><div class="eyebrow">Owner's draw check · 1 of 4</div><div class="sub">✕</div></div>
+  <div class="q">Was this $8,500 wire moved to your personal account?</div>
+  <div class="meta"><span>Sep 27</span><span>·</span><span><b>WIRE TRANSFER OUT — SEE MEMO</b></span><span>·</span><span class="amt">-$8,500.00</span></div>
+  <div class="opts"><div class="opt yes">✓ Yes, my draw</div><div class="opt no">✕ No, something else</div></div>
+  <div style="flex:1"></div>
+  <div class="footer" style="border:0;padding:0"><div class="btn">‹ Prev</div><div class="btn ghost">Skip ▾</div><div class="btn primary">Next ›</div></div>
+</div>
+</div><div class="label">B · tap item opens a bottom sheet — big Prev/Next inside</div></div>
+
+<!-- B3: tell item in sheet with composer -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in · September</div></div><div class="sub">8 of 10 done</div></div><div class="bar"><i style="width:80%"></i></div></div>
+<div class="body"></div>
+<div class="dim"></div>
+<div class="sheet" style="height:84%">
+  <div class="grab"></div>
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center"><div class="eyebrow">Uncategorized · 1 of 2</div><div class="sub">✕</div></div>
+  <div class="q">Venmo · $300.00 — what was it for?</div>
+  <div class="meta"><span>Jul 13</span><span>·</span><span><b>Bank of America ···6084</b></span></div>
+  <div class="bubble me">paid my friend back for a personal dinner</div>
+  <div class="bubble">I'd book this to <b>3300 · Owner's Draw</b> — a personal payment isn't a business expense. <b>18 similar Venmo</b> payments can go the same way.<br><span class="chip" style="background:#0f172a;color:#fff;border-color:#0f172a">Use this</span><span class="chip">Use this for all 19</span><span class="chip">Something else</span></div>
+  <div style="flex:1"></div>
+  <div class="composer"><div class="mic">🎤</div><div class="in">Tell me, or type…</div></div>
+  <div class="footer" style="border:0;padding:0"><div class="btn">‹ Prev</div><div class="btn ghost">Skip ▾</div><div class="btn primary">Next ›</div></div>
+</div>
+</div><div class="label">B · "tell" item — composer lives only in this sheet</div></div>
+
+</body></html>

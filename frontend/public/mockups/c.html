@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_base.css"><title>Mockup C · Guided Feed</title>
+<style>
+.done{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:10px 14px;font-size:13px;display:flex;justify-content:space-between;align-items:center;color:#166534}
+.done small{color:#15803d;font-size:11px}
+.next{border:1px dashed #cbd5e1;border-radius:12px;padding:10px 14px;font-size:13px;color:#94a3b8;display:flex;justify-content:space-between}
+.cur{border:2px solid #4f46e5;box-shadow:0 10px 30px rgba(79,70,229,.15)}
+.foot2{background:#fff;border-top:1px solid #e5e7eb;padding:10px 12px;display:flex;gap:8px;align-items:center}
+.arrow{width:56px;height:56px;border-radius:14px;border:1.5px solid #cbd5e1;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;flex:none}
+.arrow.p{background:#0f172a;color:#fff;border-color:#0f172a}
+</style></head><body>
+
+<!-- C1: tap item current -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in</div></div><div class="sub">3 of 7 ✓</div></div><div class="bar"><i></i></div></div>
+<div class="body" style="gap:10px">
+  <div class="done"><span>✓ Netflix $15.99 → Business</span><small>undo</small></div>
+  <div class="done"><span>✓ $12,400 deposit → Customer payment</span><small>undo</small></div>
+  <div class="card cur"><div class="eyebrow">Owner's draw check</div>
+    <div class="q">Was this $8,500 wire moved to your personal account?</div>
+    <div class="meta"><span>Sep 27</span><span>·</span><span><b>WIRE OUT — SEE MEMO</b></span><span>·</span><span class="amt">-$8,500.00</span></div>
+    <div class="opts" style="margin-top:12px"><div class="opt yes">✓ Yes, my draw</div><div class="opt no">✕ No, something else</div></div></div>
+  <div class="next"><span>Costco $184.55 — receipt</span><span>up next</span></div>
+  <div class="next"><span>Venmo $300 — what for?</span><span></span></div>
+</div>
+<div class="foot2"><div class="arrow">‹</div><div class="btn ghost" style="flex:1;height:56px">Skip this one ▾</div><div class="arrow p">›</div></div>
+<div class="nav"><div><span class="ic"></span>My business</div><div><span class="ic"></span>Receipts</div><div><span class="ic"></span>Invoices</div><div class="on"><span class="ic"></span>Check-in</div><div><span class="ic"></span>More</div></div>
+</div><div class="label">C · feed — current card pinned, answered ones collapse above</div></div>
+
+<!-- C2: tell item current — footer morphs into composer -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in</div></div><div class="sub">5 of 7 ✓</div></div><div class="bar"><i style="width:71%"></i></div></div>
+<div class="body" style="gap:10px">
+  <div class="done"><span>✓ $8,500 wire → Loan to Owner</span><small>undo</small></div>
+  <div class="done"><span>✓ Costco receipt attached</span><small>undo</small></div>
+  <div class="card cur"><div class="eyebrow">Uncategorized</div>
+    <div class="q">Venmo · $300.00 — what was it for?</div>
+    <div class="meta"><span>Jul 13</span><span>·</span><span><b>Bank of America ···6084</b></span></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <div class="bubble me">paid my friend back for a personal dinner</div>
+      <div class="bubble">I'd book this to <b>3300 · Owner's Draw</b>. <b>18 similar Venmo</b> payments can go the same way.<br><span class="chip" style="background:#0f172a;color:#fff;border-color:#0f172a">Use this</span><span class="chip">Use this for all 19</span><span class="chip">Something else</span></div>
+    </div></div>
+  <div class="next"><span>Lunch at Capriotti's — who with?</span><span>up next</span></div>
+</div>
+<div class="foot2"><div class="arrow">‹</div><div class="composer" style="flex:1;height:56px"><div class="mic">🎤</div><div class="in">Tell me, or type…</div></div><div class="arrow p">›</div></div>
+<div class="nav"><div><span class="ic"></span>My business</div><div><span class="ic"></span>Receipts</div><div><span class="ic"></span>Invoices</div><div class="on"><span class="ic"></span>Check-in</div><div><span class="ic"></span>More</div></div>
+</div><div class="label">C · "tell" item — footer morphs into mic/composer between the arrows</div></div>
+
+<!-- C3: all done -->
+<div class="wrap"><div class="phone"><div class="notch"></div>
+<div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+<div class="hdr"><div class="row"><div><div class="sub">MY BUSINESS</div><div class="title">Quick Check-in</div></div><div class="sub">7 of 7 ✓</div></div><div class="bar"><i style="width:100%"></i></div></div>
+<div class="body" style="gap:10px">
+  <div class="card" style="text-align:center;padding:28px 16px;background:#ecfdf5;border-color:#a7f3d0"><div style="font-size:40px">✓</div><div class="q" style="margin-top:8px">September is caught up</div><div class="sub" style="margin-top:6px">7 answers · 2 receipts attached · 20 transactions booked · 1 rule saved</div></div>
+  <div class="done"><span>✓ Netflix $15.99 → Business</span><small>undo</small></div>
+  <div class="done"><span>✓ $12,400 deposit → Customer payment</span><small>undo</small></div>
+  <div class="done"><span>✓ $8,500 wire → Loan to Owner</span><small>undo</small></div>
+  <div class="done"><span>✓ Costco receipt attached</span><small>undo</small></div>
+  <div class="done"><span>✓ Venmo → Owner's Draw (×19)</span><small>undo</small></div>
+  <div class="done"><span>✓ Capriotti's lunch — with J. Ortiz, Q4 planning</span><small>undo</small></div>
+</div>
+<div class="foot2"><div class="btn primary" style="height:56px">Back to My business</div></div>
+<div class="nav"><div class="on"><span class="ic"></span>My business</div><div><span class="ic"></span>Receipts</div><div><span class="ic"></span>Invoices</div><div><span class="ic"></span>Check-in</div><div><span class="ic"></span>More</div></div>
+</div><div class="label">C · all done — summary + undo list</div></div>
+
+</body></html>
