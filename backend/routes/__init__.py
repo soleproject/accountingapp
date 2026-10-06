@@ -60,6 +60,7 @@ from routes.product_launches import router as product_launches_router  # noqa: F
 from routes.superadmin_diagnostics import router as superadmin_diagnostics_router  # noqa: F401
 from routes.admin_entitlements import router as admin_entitlements_router  # noqa: F401
 from routes.cron_entitlement_digest import router as cron_entitlement_digest_router  # noqa: F401
+from routes.billing_portal import router as billing_portal_router  # noqa: F401
 from routes.public_demo import router as public_demo_router  # noqa: F401
 from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
@@ -169,6 +170,7 @@ ALL_ROUTERS = [
     superadmin_diagnostics_router,
     admin_entitlements_router,
     cron_entitlement_digest_router,
+    billing_portal_router,
     public_demo_router,
     help_router,
     leads_router,

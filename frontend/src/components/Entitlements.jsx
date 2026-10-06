@@ -1,6 +1,8 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, Sparkles, X, ChevronDown, Users } from "lucide-react";
+import { Lock, Sparkles, X, ChevronDown, Users, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { useEntitlements, useQuota, FEATURE_COPY, PLAN_LABELS, QUOTA_COPY } from "@/lib/entitlements";
@@ -24,11 +26,33 @@ export function UpgradeModal() {
   const { user } = useAuth();
   const { current } = useCompany();
   const navigate = useNavigate();
+  const [busy, setBusy] = React.useState(false);
   if (!upgrade) return null;
   const isQuota = upgrade.code === "quota_exceeded";
   const [title, blurb] = isQuota ? [QUOTA_COPY[upgrade.kind]?.[1] || "Add more", FEATURE_COPY[upgrade.feature]?.[1] || ""] : (FEATURE_COPY[upgrade.feature] || ["This feature", ""]);
   const isPro = ["pro", "partner", "enterprise", "superadmin"].includes(user?.role);
   const planLabel = upgrade.min_plan_label || PLAN_LABELS[upgrade.min_plan];
+  const hasSub = !!current?.stripe_subscription_id && !["canceled", "unpaid", "incomplete_expired"].includes((current?.sub_status || current?.billing_state || "").toLowerCase());
+
+  // Existing subscriber → Stripe Customer Portal deep-linked to the plan change (prorated).
+  // No subscription yet → pricing page (new Checkout, trial if eligible).
+  const onUpgrade = async () => {
+    if (isPro) { closeUpgrade(); navigate("/admin/client-payments"); return; }
+    if (!hasSub || !current?.id) { closeUpgrade(); navigate("/pricing"); return; }
+    setBusy(true);
+    try {
+      const r = await api.post(`/companies/${current.id}/billing/portal-session`, {
+        origin_url: window.location.origin, return_path: window.location.pathname, target_product: upgrade.min_plan || undefined,
+      });
+      if (r.data?.portal_url) { window.location.href = r.data.portal_url; return; }
+      throw new Error("No portal URL");
+    } catch (e) {
+      const code = e.response?.data?.detail?.code;
+      if (code === "no_subscription") { closeUpgrade(); navigate("/pricing"); return; }
+      toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Couldn't open billing — please try again");
+      setBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 z-[1100] bg-black/50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeUpgrade(); }} data-testid="upgrade-modal">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
@@ -41,14 +65,14 @@ export function UpgradeModal() {
           {isQuota ? <QuotaBody upgrade={upgrade} isPro={isPro} companyName={current?.name} /> : isPro ? (
             <><b>{current?.name || "This company"}</b> is on <b>{upgrade.current_plan_label || "Core"}</b>. Upgrade them to <b>{planLabel}</b> (${upgrade.min_plan_price}/mo) or sponsor a seat to unlock this.</>
           ) : (
-            <>Your plan is <b>{upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo, 7-day free trial.</>
+            <>Your plan is <b>{upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo{hasSub ? ", prorated from today" : ", 7-day free trial"}.</>
           )}
         </div>
         <div className="flex items-center justify-end gap-2 mt-5">
           <button onClick={closeUpgrade} className="h-10 px-4 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700" data-testid="upgrade-modal-later">Not now</button>
-          <button onClick={() => { closeUpgrade(); navigate(isPro ? "/admin/client-payments" : "/pricing"); }}
-                  className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5" data-testid="upgrade-modal-cta">
-            <Sparkles size={14} /> {isPro ? "Manage plan" : planLabel ? `Upgrade to ${planLabel}` : "See plans"}
+          <button onClick={onUpgrade} disabled={busy}
+                  className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-60" data-testid="upgrade-modal-cta">
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {isPro ? "Manage plan" : planLabel ? `Upgrade to ${planLabel}` : "See plans"}
           </button>
         </div>
       </div>
