@@ -14,6 +14,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import Optional, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from entitlements import require_quota
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -1116,7 +1117,7 @@ async def plaid_import(cid: str, payload: dict, user: dict = Depends(get_current
     }
 
 
-@router.post("/companies/{cid}/plaid/connect-account")
+@router.post("/companies/{cid}/plaid/connect-account", dependencies=[Depends(require_quota("connected_accounts"))])
 async def plaid_connect_account(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     """Connect a single Plaid account to a ledger bank account. Auto-maps
     the Plaid subtype to (or creates) the correct chart-of-accounts entry,

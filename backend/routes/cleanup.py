@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from auth import get_current_user
 from db import db
+from entitlements import require_feature
 from routes.companies import require_company
 
 log = logging.getLogger("axiom.cleanup")
@@ -34,7 +35,7 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-@router.post("/companies/{cid}/cleanup/kickoff")
+@router.post("/companies/{cid}/cleanup/kickoff", dependencies=[Depends(require_feature("checkins"))])
 async def kickoff_cleanup(cid: str, user: dict = Depends(get_current_user)):
     """Read the company's ``compliance_flags`` and enqueue a scan.
 

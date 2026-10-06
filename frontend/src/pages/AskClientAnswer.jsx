@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
+import { usePublicBrand, PublicBrandMark, PublicBrandFooter } from "@/components/PublicBrand";
 import { toast } from "sonner";
 import {
   CheckCircle2, Loader2, AlertTriangle, Send, Sparkles, Bot, User as UserIcon,
@@ -211,11 +212,11 @@ export default function AskClientAnswer() {
     try { rec.start(); } catch { setListening(false); }
   };
 
-  if (error) return <Wrap><ErrorState msg={error} /></Wrap>;
+  if (error) return <Wrap brand={q?.brand}><ErrorState msg={error} /></Wrap>;
   if (!q)    return <Wrap><Loading /></Wrap>;
 
   if (chainPrompt && nextQ) {
-    return <Wrap>
+    return <Wrap brand={q?.brand}>
       <div className="text-center space-y-4 py-6" data-testid="chain-prompt">
         <CheckCircle2 size={40} className="text-emerald-500 mx-auto" />
         <div className="text-lg font-semibold text-slate-900">
@@ -258,7 +259,7 @@ export default function AskClientAnswer() {
       : asker
         ? `Thanks — ${asker} has your answer.`
         : "Thanks — your answer is saved.";
-    return <Wrap>
+    return <Wrap brand={q?.brand}>
       <div className="text-center space-y-3 py-8" data-testid="answer-done">
         <CheckCircle2 size={48} className="text-emerald-500 mx-auto" />
         <div className="text-lg font-semibold text-slate-900">{headline}</div>
@@ -296,7 +297,7 @@ export default function AskClientAnswer() {
   const messages = [initialQ, ...(q.chat_messages || [])];
 
   return (
-    <Wrap wide>
+    <Wrap wide brand={q?.brand}>
       <div className="space-y-4" data-testid="answer-chat">
         <div className="flex items-center gap-2 text-xs text-cyan-700">
           <Sparkles size={14} /> Question from your accountant
@@ -483,14 +484,14 @@ function TxnPanel({ txns, counterparty }) {
   );
 }
 
-function Wrap({ children, wide }) {
+function Wrap({ children, wide, brand }) {
+  usePublicBrand(brand);
   return (
     <div className="min-h-screen bg-slate-50 py-10 px-4">
       <div className={`${wide ? "max-w-2xl" : "max-w-xl"} mx-auto bg-white rounded-xl shadow-sm border p-6 sm:p-8`}>
+        {brand?.whitelabel && <div className="mb-4"><PublicBrandMark brand={brand} /></div>}
         {children}
-        <div className="mt-6 pt-4 border-t text-xs text-slate-400 text-center">
-          SmartBooks · <span className="font-mono-num">smartbookssoftware.ai</span>
-        </div>
+        <PublicBrandFooter brand={brand} className="mt-6 pt-4 border-t" />
       </div>
     </div>
   );

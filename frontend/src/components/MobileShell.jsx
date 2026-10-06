@@ -18,8 +18,9 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Menu, X, Home, Users, Calculator, MessageSquare, Bell, Compass, Receipt, FileText, ArrowLeftRight, FileMinus, BarChart3, ClipboardCheck } from "lucide-react";
+import { Menu, X, Home, Users, Calculator, MessageSquare, Bell, Compass, Receipt, FileText, ArrowLeftRight, FileMinus, BarChart3, ClipboardCheck, Lock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useEntitlements } from "@/lib/entitlements";
 import { useCompany } from "@/lib/company";
 import { CompanySwitcher, ProfileMenu } from "@/components/Layout";
 import NotificationBell from "@/components/NotificationBell";
@@ -105,7 +106,7 @@ const NAV_TABS = [
   { to: "/owner",                   label: "My Business",  icon: Compass,        matchStarts: ["/owner"],                          product: "accounting" },
   { to: "/receipts",                label: "Receipts",     icon: Receipt,        matchStarts: ["/receipts"],                       product: "accounting" },
   { to: "/invoices",                label: "Invoices",     icon: FileText,       matchStarts: ["/invoices"],                       product: "accounting" },
-  { to: "/checkin",                 label: "Check-in",     icon: ClipboardCheck, matchStarts: ["/checkin"],                        product: "accounting" },
+  { to: "/checkin",                 label: "Check-in",     icon: ClipboardCheck, matchStarts: ["/checkin"],                        product: "accounting", feature: "checkins" },
   { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight, matchStarts: ["/accounting/transactions"],        product: "accounting" },
   { to: "/bills",                   label: "Bills",        icon: FileMinus,      matchStarts: ["/bills"],                          product: "accounting" },
   { to: "/reports",                 label: "Reports",      icon: BarChart3,      matchStarts: ["/reports"],                        product: "accounting" },
@@ -119,6 +120,7 @@ export function MobileBottomNav() {
   const loc = useLocation();
   const nav = useNavigate();
   const { user } = useAuth();
+  const { can, openUpgrade } = useEntitlements();
   const enabled = user?.enabled_products || [];
 
   // Filter tabs the user doesn't have access to. Home is always
@@ -132,11 +134,19 @@ export function MobileBottomNav() {
     .sort((a, b) => b[0] - a[0])[0]?.[1];
   const isActive = (tab) => tab.to === activeTo;
 
+  const chatLocked = !can("chat");
   const openChat = () => {
+    if (chatLocked) { openUpgrade("chat"); return; }
     // AiPanel listens for `ai-open`; same event the header
     // Assistant button emits.
     emitAction("ai-open", { source: "nav" });
   };
+
+  const LockDot = ({ feature }) => (
+    <span className="absolute top-2 right-[calc(50%-18px)] w-4 h-4 rounded-full bg-slate-900 text-white grid place-items-center" data-testid={`mobile-nav-lock-${feature}`}>
+      <Lock size={9} />
+    </span>
+  );
 
   return (
     <nav
@@ -154,16 +164,19 @@ export function MobileBottomNav() {
         {visibleTabs.map(t => {
           const Icon = t.icon;
           const active = isActive(t);
+          const locked = !!t.feature && !can(t.feature);
           return (
             <button
               key={t.to}
               type="button"
-              onClick={() => nav(t.to)}
+              onClick={() => (locked ? openUpgrade(t.feature) : nav(t.to))}
+              data-locked={locked || undefined}
               data-testid={`mobile-nav-${t.label.toLowerCase().replace(/\s+/g, "-")}`}
-              className={`shrink-0 snap-start basis-[30%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
+              className={`relative shrink-0 snap-start basis-[30%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${
                 active ? "text-cyan-600" : "text-slate-500 hover:text-slate-800"
-              }`}
+              } ${locked ? "opacity-60" : ""}`}
             >
+              {locked && <LockDot feature={t.feature} />}
               <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
               <span className="truncate max-w-full px-1">{t.label}</span>
             </button>
@@ -173,9 +186,11 @@ export function MobileBottomNav() {
       <button
         type="button"
         onClick={openChat}
+        data-locked={chatLocked || undefined}
         data-testid="mobile-nav-chat"
-        className="shrink-0 w-[22%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 border-l border-slate-100"
+        className={`relative shrink-0 w-[22%] h-16 flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-800 border-l border-slate-100 ${chatLocked ? "opacity-60" : ""}`}
       >
+        {chatLocked && <LockDot feature="chat" />}
         <MessageSquare size={22} strokeWidth={1.8} />
         <span>Chat</span>
       </button>

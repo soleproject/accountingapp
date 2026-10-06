@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from db import db, now_iso, coerce
 from auth import get_current_user
+from entitlements import require_feature
 from deps import require_company
 from reconciliation_engine import month_recon_state
 
@@ -263,7 +264,7 @@ async def get_month_close(
     return await _month_status(cid, y, m)
 
 
-@router.post("/companies/{cid}/month-close/{ym}/checkpoint")
+@router.post("/companies/{cid}/month-close/{ym}/checkpoint", dependencies=[Depends(require_feature("month_close"))])
 async def sign_checkpoint(
     cid: str, ym: str, inp: CheckpointIn,
     user: dict = Depends(get_current_user),

@@ -30,6 +30,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from auth import get_current_user
 from deps import require_company
 from db import db, now_iso
+from entitlements import check_feature, require_feature
 
 router = APIRouter(prefix="/api")
 
@@ -106,7 +107,7 @@ async def list_classes(
     return {"classes": [_clean(r) for r in rows]}
 
 
-@router.post("/companies/{cid}/classes")
+@router.post("/companies/{cid}/classes", dependencies=[Depends(require_feature("classes"))])
 async def create_class(
     cid: str, payload: dict, user: dict = Depends(get_current_user),
 ) -> dict:

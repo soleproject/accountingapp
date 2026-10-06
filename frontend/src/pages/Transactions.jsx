@@ -45,6 +45,7 @@ import Step2Tour, { hasSeenStep2Tour } from "@/components/Step2Tour";
 import Step3BTour, { hasSeenStep3BTour } from "@/components/Step3BTour";
 import ReceiptMatchPicker from "@/components/ReceiptMatchPicker";
 import { useAuth } from "@/lib/auth";
+import { useFeature } from "@/lib/entitlements";
 
 const UNCAT_CODES = new Set(["9999", "6999", "4999"]);
 const isUncategorizedTxn = (t) =>
@@ -1450,6 +1451,7 @@ export default function Transactions() {
   const [contactPickerOpen, setContactPickerOpen] = useState(false);
   const [bulkUpdateOpen, setBulkUpdateOpen] = useState(false);
   const [ruleQueue, setRuleQueue] = useState(null);   // guided-rules flow
+  const automationsGate = useFeature("automations");
   // { title, body, confirmLabel, variant, exec } — set by any bulk
   // action that needs a second confirm before writing to Mongo.
   const [pendingConfirm, setPendingConfirm] = useState(null);
@@ -3386,7 +3388,8 @@ export default function Transactions() {
         />
       )}
 
-      {ruleQueue && (
+      {ruleQueue && !automationsGate.allowed && (() => { automationsGate.openUpgrade(); setRuleQueue(null); return null; })()}
+      {ruleQueue && automationsGate.allowed && (
         <CreateRuleModal
           key={`rq-${ruleQueue.index}`}         /* remount → fresh state per proposal */
           currentId={currentId}

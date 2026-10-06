@@ -222,6 +222,7 @@ import { canUseCockpit } from "@/lib/cockpitAccess";
 import { useBranding } from "@/lib/branding";
 import { useCompany } from "@/lib/company";
 import { useLabV3ReviewCount } from "@/lib/labV3Review";
+import { useEntitlements } from "@/lib/entitlements";
 import { detectProduct } from "./ProductRail";
 import Todo2CardList from "./sidebar/Todo2CardList";
 import SidebarModeToggle from "./sidebar/SidebarModeToggle";
@@ -285,27 +286,27 @@ const GROUPS = [
     items: [
       { to: "/accounting/transactions", label: "Transactions", icon: ArrowLeftRight },
       { to: "/accounting/chart-of-accounts", label: "Chart of Accounts", icon: ListTree },
-      { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true },
-      { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true },
+      { to: "/accounting/classes", label: "Classes", icon: Layers, classesEnabledOnly: true, feature: "classes" },
+      { to: "/accounting/budgets", label: "Budgets", icon: Target, budgetsEnabledOnly: true, feature: "budgets" },
       { to: "/accounting/assets", label: "Assets", icon: Building2 },
       { to: "/accounting/loans", label: "Loans", icon: Wallet },
       { to: "/accounting/payroll", label: "Payroll", icon: BadgeDollarSign, advancedPayrollEnabledOnly: true },
-      { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management" },
+      { to: "/inventory-management", label: "Inventory", icon: Boxes, matchPath: "/inventory-management", feature: "inventory" },
       { to: "/accounting/tags", label: "Tags", icon: Tags },
       { to: "/accounting/reconciliation", label: "Reconciliation", icon: CheckCheck },
       { to: "/accounting/bank-matches", label: "Bank Match Review", icon: Link2, advancedOnly: true },
       { to: "/accounting/checks", label: "Print Checks", icon: Printer },
       { to: "/accounting/journal-entries", label: "Journal Entries", icon: BookOpen },
       { to: "/accounting/general-ledger", label: "General Ledger", icon: Notebook },
-      { to: "/accounting/sales-tax", label: "Sales Tax Center", icon: Percent },
+      { to: "/accounting/sales-tax", label: "Sales Tax Center", icon: Percent, feature: "sales_tax" },
       { to: "/accounting/ai-cleanup-review", label: "AI Cleanup Review", icon: Sparkles },
       { to: "/accounting/rules", label: "AI Rules", icon: Wand2 },
-      { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck },
+      { to: "/accounting/book-review", label: "Book Review", icon: ClipboardCheck, feature: "bookkeeper_review" },
       // Lab v3 client review — only shown when the current company is
       // on `categorization_mode == "lab_v3"`. Badge shows how many
       // grouped questions are open, fetched via useLabV3ReviewCount.
       { to: "/accounting/review", label: "Client Review", icon: MessageSquareWarning, labV3Only: true, labV3Badge: true },
-      { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck },
+      { to: "/accounting/month-close", label: "Month Close", icon: CalendarCheck, feature: "month_close" },
       { to: "/accounting/close-books", label: "Close the Books", icon: Lock },
       // Audit log sits directly under Close the Books so the audit trail
       // lives inside the Accounting group next to the workflows it records.
@@ -927,6 +928,7 @@ export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
   const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled, currentId, current } = useCompany();
   const labV3Count = useLabV3ReviewCount(currentId);
+  const { can: canFeature, openUpgrade } = useEntitlements();
   const isLabV3 = current?.categorization_mode === "lab_v3";
   const logos = branding?.logos || {};
   // ------------------------------------------------------------------
@@ -1123,18 +1125,30 @@ export default function Sidebar({ collapsed, onToggle }) {
     // Lab v3 badge — number of open review questions on this company.
     // Only shown for items flagged `labV3Badge`, and only when count > 0.
     const badgeCount = (item.labV3Badge && labV3Count?.data?.questions_left) || 0;
+    const locked = !!item.feature && !canFeature(item.feature);
     return (
       <NavLink
         to={item.to}
-        onClick={() => { if (group) rememberSticky(group, item); }}
+        onClick={(e) => {
+          if (locked) { e.preventDefault(); openUpgrade(item.feature); return; }
+          if (group) rememberSticky(group, item);
+        }}
+        title={locked ? "Included in a higher plan — tap to see options" : undefined}
+        data-locked={locked || undefined}
         data-testid={`${TID.navLink}-${item.label.replace(/\s+/g, "-").toLowerCase()}`}
-        className={`nav-item flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+        className={`nav-item relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
           active ? "nav-item-active" : "text-slate-700"
-        } ${indent && !showCollapsed ? "pl-9" : ""}`}
+        } ${indent && !showCollapsed ? "pl-9" : ""} ${locked ? "opacity-60" : ""}`}
       >
         <Icon size={16} style={{ color: item.colorHex || NAV_COLOR }} strokeWidth={2} />
         {!showCollapsed && <span className="truncate">{item.label}</span>}
-        {!showCollapsed && badgeCount > 0 && (
+        {locked && (
+          <span className={`${showCollapsed ? "absolute -top-0.5 right-1" : "ml-auto"} inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white`}
+                data-testid={`nav-lock-${item.feature}`}>
+            <Lock size={9} />
+          </span>
+        )}
+        {!showCollapsed && !locked && badgeCount > 0 && (
           <span
             className="ml-auto inline-flex items-center justify-center min-w-[18px] h-[18px] px-1.5 rounded-full bg-indigo-600 text-white text-[10px] font-semibold font-mono-num"
             data-testid={`sidebar-badge-${item.label.replace(/\s+/g, "-").toLowerCase()}`}

@@ -14,6 +14,9 @@ api.interceptors.request.use((cfg) => {
   if (t && t !== "undefined" && t !== "null") {
     cfg.headers.Authorization = `Bearer ${t}`;
   }
+  // Preview-only plan switcher (ignored by the backend unless PLAN_PREVIEW_SWITCHER is on).
+  const pp = process.env.REACT_APP_PLAN_PREVIEW === "true" ? sessionStorage.getItem("plan_preview") : null;
+  if (pp && pp !== "real") cfg.headers["X-Plan-Preview"] = pp;
   return cfg;
 });
 

@@ -13,6 +13,7 @@ import { MissingReceiptsModal } from "@/components/owner/MissingReceiptsModal";
 import { OverdueInvoicesModal } from "@/components/owner/OverdueInvoicesModal";
 import { StatementUploadModal } from "@/components/owner/StatementUploadModal";
 import { Button } from "@/components/owner/ui";
+import { Gate } from "@/components/Entitlements";
 
 const TABS = [
   { key: "overview", label: "Overview", path: "/owner" },
@@ -126,7 +127,7 @@ export default function OwnerDashboard() {
             <BooksCard books={data.books} fmt={fmt} onCatchup={startCatchup}
               onReview={() => navigate(`/accounting/transactions?filter=unapproved&date_from=${data.books.period_start}&date_to=${data.books.period_end}`)} />
             <ProfitCard profit={data.profit} periodLabel={data.period.label.split(" ")[0]} fmt={fmt} />
-            <CashCard cash={data.cash} fmt={fmt} />
+            <Gate feature="outlook"><CashCard cash={data.cash} fmt={fmt} /></Gate>
             <AttentionCard items={data.attention} onAction={onAttention} />
           </div>
           <TeamStrip team={data.team} companyId={currentId} />

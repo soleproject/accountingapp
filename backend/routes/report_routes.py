@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -248,7 +249,7 @@ async def rep_cf_pdf(cid: str, request: Request, start: Optional[str] = None, en
                     headers={"Content-Disposition": "attachment; filename=cash_flow.pdf"})
 
 
-@router.get("/companies/{cid}/reports/sales-tax")
+@router.get("/companies/{cid}/reports/sales-tax", dependencies=[Depends(require_feature("sales_tax"))])
 async def rep_sales_tax(cid: str, start: Optional[str] = None, end: Optional[str] = None,
                         user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -256,7 +257,7 @@ async def rep_sales_tax(cid: str, start: Optional[str] = None, end: Optional[str
     return await R.compute_sales_tax(cid, start or s, end or e)
 
 
-@router.get("/companies/{cid}/reports/sales-tax/pdf")
+@router.get("/companies/{cid}/reports/sales-tax/pdf", dependencies=[Depends(require_feature("sales_tax"))])
 async def rep_sales_tax_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                             user: dict = Depends(get_current_user)):
     await require_company(user, cid)
@@ -429,7 +430,7 @@ async def rep_cf_csv(cid: str, request: Request, start: Optional[str] = None, en
     return _csv_response(R_csv.build_cash_flow_csv(data), "cash_flow.csv")
 
 
-@router.get("/companies/{cid}/reports/sales-tax/csv")
+@router.get("/companies/{cid}/reports/sales-tax/csv", dependencies=[Depends(require_feature("sales_tax"))])
 async def rep_sales_tax_csv(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                             user: dict = Depends(get_current_user)):
     await require_company(user, cid)

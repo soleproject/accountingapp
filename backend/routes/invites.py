@@ -31,6 +31,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Body
+from entitlements import require_quota
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
@@ -158,7 +159,7 @@ async def _send_invite_email(*, invite: dict, inviter: dict, company_names: list
 # Endpoints — CREATE
 # ==========================================================================
 
-@router.post("/companies/{cid}/invites")
+@router.post("/companies/{cid}/invites", dependencies=[Depends(require_quota("users"))])
 async def create_company_invite(
     cid: str, inp: CompanyInviteIn,
     user: dict = Depends(get_current_user),

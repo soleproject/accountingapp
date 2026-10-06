@@ -16,6 +16,7 @@ import { useParams } from "react-router-dom";
 import { NmiPayments } from "@nmipayments/nmi-pay-react";
 import { Loader2, ShieldCheck, CheckCircle2, Info } from "lucide-react";
 import axios from "axios";
+import { usePublicBrand, PublicBrandMark } from "@/components/PublicBrand";
 
 const BASE = process.env.REACT_APP_BACKEND_URL;
 
@@ -157,6 +158,7 @@ export default function HostedPay() {
   const [config, setConfig] = useState(null);
   const [err, setErr] = useState("");
   const [paid, setPaid] = useState(null);
+  usePublicBrand(config?.brand);
 
   useEffect(() => {
     fetchConfig(token)
@@ -183,6 +185,7 @@ export default function HostedPay() {
           <>
             {/* Header — merchant + invoice summary */}
             <div className="text-center mb-5">
+              {config.brand?.whitelabel && <div className="flex justify-center mb-3"><PublicBrandMark brand={config.brand} /></div>}
               <div className="text-[11px] uppercase tracking-widest font-semibold text-slate-500">{config.business_name}</div>
               <div className="text-2xl font-bold text-slate-900 mt-1">Invoice {invoice.number}</div>
               <div className="text-[13px] text-slate-500 mt-1">
@@ -206,7 +209,7 @@ export default function HostedPay() {
             )}
 
             <div className="mt-6 text-center text-[11px] text-slate-400">
-              Powered by <b>SmartBooks</b> · PCI DSS SAQ-A · NMI hosted fields
+              Powered by <b>{config?.brand?.whitelabel ? config.brand.brand_name : "SmartBooks"}</b> · PCI DSS SAQ-A · NMI hosted fields
             </div>
           </>
         )}

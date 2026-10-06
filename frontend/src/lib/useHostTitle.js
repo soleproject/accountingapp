@@ -11,7 +11,7 @@
 //   3. `/branding/by-host` — resolves subdomain / private-label root
 //   4. `useBranding()` from the authenticated user (overrides everything
 //      once they're signed in so a rename shows instantly)
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { api } from "@/lib/api";
 import { useBranding } from "@/lib/branding";
 
@@ -58,6 +58,8 @@ async function fetchAndApplyFirm(slug) {
 
 export function useHostTitle() {
   const { branding } = useBranding();
+  const brandingRef = useRef(branding);
+  useEffect(() => { brandingRef.current = branding; }, [branding]);
 
   // Priority chain: URL param → localStorage → host → default. Runs once
   // on mount; the branding-effect below rebrands on login.
@@ -82,7 +84,7 @@ export function useHostTitle() {
       // 3. Backend host-based resolver (subdomain / private-label root).
       try {
         const r = await api.get(`/branding/by-host?host=${encodeURIComponent(window.location.hostname)}`);
-        if (cancelled) return;
+        if (cancelled || brandingRef.current) return;  // a resolved brand already owns the title
         const d = r.data || {};
         if (d.mode === "firm" && d.firm_name) {
           document.title = d.firm_name;

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, Query
 from db import db
 from auth import get_current_user
 from deps import require_company
+from entitlements import require_feature
 import reports as R
 from routes.firm_glance import _pct_delta
 from routes.month_close import _month_status
@@ -493,7 +494,7 @@ async def owner_dashboard(
     }
 
 
-@router.post("/companies/{cid}/owner-dashboard/catchup")
+@router.post("/companies/{cid}/owner-dashboard/catchup", dependencies=[Depends(require_feature("checkins"))])
 async def start_catchup(cid: str, user: dict = Depends(get_current_user)):
     """Owner-paced catch-up: pull up to 7 grey Clean Up items into a
     check-in session the owner can work through right now. Never emailed."""

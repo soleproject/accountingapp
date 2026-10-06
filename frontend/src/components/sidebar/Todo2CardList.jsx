@@ -16,6 +16,8 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { canUseCockpit } from "@/lib/cockpitAccess";
+import { useEntitlements } from "@/lib/entitlements";
+import { Lock as LockIcon } from "lucide-react";
 import { useUserPref } from "@/hooks/useUserPref";
 import { reviewEta, reviewMinutes } from "@/components/DashboardTodos";
 import {
@@ -216,8 +218,8 @@ const ACCOUNTING_LINKS = [
   { subGroup: true, key: "purchases", label: "Purchases",        icon: ShoppingCart, items: PURCHASES_LINKS },
   { to: "/accounting/loans",              label: "Loans",              icon: Wallet },
   { to: "/accounting/assets",             label: "Assets",             icon: Building2 },
-  { to: "/inventory-management",          label: "Inventory",          icon: Boxes },
-  { to: "/accounting/sales-tax",          label: "Sales Tax Center",   icon: Percent },
+  { to: "/inventory-management",          label: "Inventory",          icon: Boxes, feature: "inventory" },
+  { to: "/accounting/sales-tax",          label: "Sales Tax Center",   icon: Percent, feature: "sales_tax" },
 
   { header: true, label: "Accounting" },
   { to: "/accounting/chart-of-accounts",  label: "Chart of Accounts",  icon: ListTree },
@@ -230,11 +232,11 @@ const ACCOUNTING_LINKS = [
   { header: true, label: "AI & Automation" },
   { to: "/accounting/ai-cleanup-review",  label: "AI Cleanup Review",  icon: Sparkles },
   { to: "/accounting/rules",              label: "AI Rules",           icon: Wand2 },
-  { to: "/accounting/book-review",        label: "Book Review",        icon: ClipboardCheck },
+  { to: "/accounting/book-review",        label: "Book Review",        icon: ClipboardCheck, feature: "bookkeeper_review" },
 
   { header: true, label: "Planning & Close" },
-  { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp },
-  { to: "/accounting/month-close",        label: "Month Close",        icon: CalendarCheck },
+  { to: "/accounting/projections",        label: "Projections",        icon: TrendingUp, feature: "outlook" },
+  { to: "/accounting/month-close",        label: "Month Close",        icon: CalendarCheck, feature: "month_close" },
   { to: "/accounting/close-books",        label: "Close the Books",    icon: Lock },
   { to: "/compliance",                    label: "Compliance",         icon: ShieldCheck },
 
@@ -846,6 +848,7 @@ function MoreAccordion({ navigate, activePath }) {
 }
 
 function AccountingAccordion({ navigate, activePath }) {
+  const { can: canFeature, openUpgrade } = useEntitlements();
   const [open, setOpen] = useState(() => {
     try { return localStorage.getItem("axiom_todo2_accounting_open") === "1"; }
     catch (_) { return false; }
@@ -967,20 +970,28 @@ function AccountingAccordion({ navigate, activePath }) {
             }
             const active = activePath === l.to;
             const Icon = l.icon;
+            const locked = !!l.feature && !canFeature(l.feature);
             return (
               <button
                 key={l.to}
                 type="button"
-                onClick={() => navigate(l.to)}
+                onClick={() => (locked ? openUpgrade(l.feature) : navigate(l.to))}
+                data-locked={locked || undefined}
+                title={locked ? "Included in a higher plan — tap to see options" : undefined}
                 className={`w-full flex items-center gap-3 rounded-md px-3 py-1.5 text-[13px] text-left transition-colors ${
                   active
                     ? "bg-slate-100 text-slate-900 font-medium"
                     : "text-slate-700 hover:bg-slate-100"
-                }`}
+                } ${locked ? "opacity-60" : ""}`}
                 data-testid={`sidebar-todo2-accounting-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
               >
                 <Icon size={14} className="text-slate-500" strokeWidth={2} />
-                <span className="truncate">{l.label}</span>
+                <span className="truncate flex-1">{l.label}</span>
+                {locked && (
+                  <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-slate-900 text-white" data-testid={`nav-lock-${l.feature}`}>
+                    <LockIcon size={9} />
+                  </span>
+                )}
               </button>
             );
           })}

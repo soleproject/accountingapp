@@ -52,6 +52,7 @@ from pydantic import BaseModel
 
 from db import db, now_iso
 from auth import get_current_user
+from entitlements import require_feature
 from deps import require_company
 
 
@@ -953,7 +954,7 @@ async def _forecast_confidence(cid: str, today: date, cash_breakdown: list[dict]
 # Endpoints
 # =============================================================================
 
-@router.get("/companies/{cid}/projections/cashflow")
+@router.get("/companies/{cid}/projections/cashflow", dependencies=[Depends(require_feature("outlook"))])
 async def projections_cashflow(
     cid: str,
     days: int = Query(120, ge=1, le=730),

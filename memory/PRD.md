@@ -364,6 +364,7 @@ sit adjacent right after.
 - **P1** Contact Identity Spec Phase 2 (cross-source AR/AP matching)
 - **P1** Marketing site migration (`www.smartbookssoftware.ai` vs `app.smartbookssoftware.ai`)
 - **P2** Sidebar Settings "Navigation Style" broken navigation
+- **P1** Flip ENTITLEMENTS_ENFORCE=true after reviewing /admin/entitlements (features + quotas both ready)
 - **P2** Multi-pod stale cache / Redis disconnect handling
 - **P2** Multi-company mirror booking
 - **P2** Directory approval workflow
@@ -1061,3 +1062,39 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Check-in card: real-phone offset fix ✅ self-tested (emulator); user to confirm on device
 - cardMode tree is now `createPortal(..., document.body)` with `height:100dvh`, header `paddingTop:max(.625rem, env(safe-area-inset-top))`, footer safe-area bottom, body scroll locked while open (iOS fixed-vs-scrolled-viewport quirk). Form items (10/14) scroll `mainRef` to top in cardMode.
+
+## 2026-10-06 — Edit Receipt opens the compact AI review card ✅ self-tested
+- Receipts.jsx RecModal: edit mode seeds `analysis`/`lineItems` from `initial.line_items` (or one synthetic line from amount+category) and defaults mode "ai"; `compact` no longer excludes isEdit (header strip w/ pencil, Add note, grouped categories, total, Update receipt / Rescan). Rescan in edit keeps the attachment and re-runs the scan. Bank-match strip shows "linked · verified" for matched receipts (`receipt-bank-match-linked`). Save: single synthetic line → no line_items sent, category = that line's account.
+
+## 2026-10-06 — Receipts list: row click opens edit ✅ self-tested
+- Receipts.jsx `<tr data-testid="receipt-row-{id}">` onClick → setEditing(r), ignored when the click target is inside a button/a/input.
+
+## 2026-10-06 — White-label branding on emails + public token pages ✅ self-tested
+- New `backend/brand_resolver.py`: `resolve_company_brand(cid)` (Enterprise→Partner→Pro cascade, WL-unlocked tiers only, explicit Private Label Name required) → {brand_name, whitelabel, slug, logo_url(/api/branding/logo/{slug}), theme_preset, theme_custom, app_url=public_base_url(slug)}; `apply_brand_to_html(html, brand)` rewrites footer/"Powered by"/SmartBooks mentions/domain/link host and injects a logo header.
+- `email_dispatcher.dispatch`: when `company_id` is passed and brand is white-label → From name = brand, html/subject branded. (Callers that omit company_id stay platform-branded.)
+- Token endpoints now return `brand`: GET /client-review/{token}, GET /q/{token}, GET /pay/{token}/config. Frontend `components/PublicBrand.jsx` (`usePublicBrand`, `PublicBrandMark`, `PublicBrandFooter`); BrandingProvider accepts `setPublicBrand` (palette/title for logged-out pages); useHostTitle no longer overrides a resolved brand title. Applied in ClientReviewPage (logo avatar + label), AskClientAnswer (mark + footer), HostedPay (mark + Powered by).
+
+## 2026-10-06 — Plan-based feature gating, Phase 1 (SHADOW MODE) ✅ self-tested
+- Decisions: gate follows the company; reconciliation = Core; manual rules Core / AI-offered rules gated (`automations`); My Business gates only outlook/cash cards; pros gated by client plan except own books; trial=full, past_due=grace, canceled=Core.
+- Backend `entitlements.py`: FEATURE_MIN_PLAN (chat/receipt_ai/outlook → assistant; checkins/statements_ai/month_close/bookkeeper_review/liability_ai/classes/automations/auto_emails → bookkeeper; bills_ai/adv_insights/adv_forecast/budgets/inventory/sales_tax/reimbursements → advanced). `company_entitlements()` all-access for superadmin, free_spot/enterprise payer, partner_sponsored, owner membership of pro/partner/enterprise user (own books), or no billing_product. `check_feature`/`require_feature` → 402 `upgrade_required` only when ENTITLEMENTS_ENFORCE=true or X-Plan-Preview override; otherwise logs to `entitlement_events`. `GET /companies/{cid}/entitlements`. Env: backend ENTITLEMENTS_ENFORCE=false, PLAN_PREVIEW_SWITCHER=true; frontend REACT_APP_PLAN_PREVIEW=true (preview only — do NOT set in prod).
+- Backend gates applied: ai/chat/stream (chat), receipts/analyze (receipt_ai), statements/upload (statements_ai), budgets POST, classes POST.
+- Frontend: `lib/entitlements.js` (EntitlementsProvider, useFeature, 402 interceptor → UpgradeModal), `components/Entitlements.jsx` (UpgradeModal, Gate lock/replace/hide, PlanPreviewPill "Viewing as"). Wired: routes projections(outlook)/checkin(checkins)/liability-payments/classes/budgets/inventory-management/sales-tax (replace); AiPanel locked rail (chat); Receipts AI tab (receipt_ai); StatementsTab dropzone (statements_ai); CashCard on My Business (outlook); Transactions ruleQueue (automations).
+- Pending after Phase 2: bills_ai/adv_insights/adv_forecast/reimbursements/liability_ai surfaces (features not built yet — no endpoints to gate), seat/account quota ENFORCEMENT, flip ENTITLEMENTS_ENFORCE after reviewing /admin/entitlements.
+
+## 2026-10-06 — Plan gating Phase 2 (still SHADOW MODE) ✅ testing agent iteration_105 (36/36 backend + full UI matrix)
+- Backend gates added (shadow-safe): cleanup/kickoff + owner-dashboard/catchup + checkin/voice-extract (checkins), month-close/{ym}/checkpoint (month_close), reports/sales-tax + /pdf + /csv (sales_tax), inventory-management/receive + /adjustments (inventory), rules/mine + rules/suggest-from-txns (automations), projections/cashflow (outlook), POST book-reviews (bookkeeper_review), invoices/{iid}/followup-schedule (auto_emails). Manual dunning send and manual rule creation stay Core.
+- `PLAN_QUOTAS` in entitlements.py (Core 1 user/3 accounts · Assistant 3/6 · Bookkeeper 5/unlimited · Advanced 5/unlimited; all 1 company + accountant). Returned as `quotas` on GET /companies/{cid}/entitlements. INFORMATIONAL ONLY — not enforced yet (user: "we are ready to add seating").
+- Nav lock glyphs: Sidebar.jsx `Item` + Todo2CardList.jsx AccountingAccordion (`feature` key on items → `nav-lock-<feature>`, click opens UpgradeModal, no navigation). MobileShell bottom nav: Check-in tab (checkins) + Chat button (chat) → `mobile-nav-lock-<feature>`. Invisible unless enforce/preview active.
+- NEW superadmin page `/admin/entitlements` (pages/AdminEntitlements.jsx; link `nav-admin-entitlements` on /admin) backed by `GET /api/admin/entitlements/events?days=` (routes/admin_entitlements.py): mode banner, would-block / companies / preview-hits / all-events stats, by-feature + by-plan bars, per company×feature table. Use it to decide when to flip ENTITLEMENTS_ENFORCE=true.
+- Tests: backend/tests/test_entitlements_phase2.py (testing agent).
+
+## 2026-10-06 — Seat & connected-account quotas (Phase 3, SHADOW MODE) ✅ testing agent iteration_106 (6/6 backend + UI)
+- Decisions: users cap = client-side memberships (owner/editor/reviewer/viewer, non-archived) + pending company invites with those roles; pro/accountant seats free. Connected accounts = mapped Plaid accounts (`plaid_items.account_mappings`); statement uploads don't count. Cap hit → upsell to next plan that fits (`next_plan_for`), no per-seat Stripe price. Grandfathered: only NEW invites/connections blocked. Follows ENTITLEMENTS_ENFORCE / X-Plan-Preview like features.
+- entitlements.py: `quota_usage`, `next_plan_for`, `quota_payload` (code `quota_exceeded`, feature `quota_<kind>`, used/limit/min_plan/next_limit), `check_quota`, `require_quota`. `company_entitlements` returns `usage` + `quotas` (null = unlimited for superadmin/sponsored/own_books/no_plan; Advanced keeps users=5). Gated: POST /companies/{cid}/invites (users), POST /companies/{cid}/plaid/connect-account (connected_accounts). Events carry min_plan/used/limit → /admin/entitlements shows "(1/1)".
+- Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
+- Tests: backend/tests/test_entitlements_quotas.py.
+
+## 2026-10-06 — Trial = full access + enforcement runbook (still SHADOW by user choice)
+- `company_entitlements`: `sub_status == "trialing"` → `full("trial")` (all features, no quotas). Verified matrix: trialing→trial/all-access, active→plan, past_due→plan+grace, canceled→Core.
+- Pre-flight script `backend/scripts/entitlements_preflight.py` (shadow events per company/feature, paid-plan companies with usage vs quota, over-limit flags). Preview result: 0 shadow blocks; 3 plan companies all free_spot; 44/47 no plan.
+- PROD FLIP RUNBOOK (Railway): backend Variables → add `ENTITLEMENTS_ENFORCE=true`; ensure `PLAN_PREVIEW_SWITCHER` absent/false; frontend `REACT_APP_PLAN_PREVIEW` absent/false; redeploy. First confirm Would-block = 0 on live `/admin/entitlements`. Preview flip = set ENTITLEMENTS_ENFORCE=true in backend/.env + restart.

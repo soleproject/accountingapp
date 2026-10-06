@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Upload, Loader2, FileText, Trash2, ChevronRight, CheckCircle2, RotateCw, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { Gate } from "@/components/Entitlements";
 
 /**
  * Bank-statement import tab (Veryfi).
@@ -378,6 +379,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
           </label>
         </div>
 
+        <Gate feature="statements_ai">
         <div
           data-testid="stmt-dropzone"
           role="button"
@@ -416,6 +418,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
             onChange={(e) => onFiles(e.target.files)}
           />
         </div>
+        </Gate>
 
         {(activeUploads.length + finishedUploads.length) > 0 && (
           <div className="mt-4">

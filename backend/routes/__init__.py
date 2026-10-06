@@ -58,6 +58,7 @@ from routes.feedback import router as feedback_router  # noqa: F401
 from routes.feature_flags import router as feature_flags_router  # noqa: F401
 from routes.product_launches import router as product_launches_router  # noqa: F401
 from routes.superadmin_diagnostics import router as superadmin_diagnostics_router  # noqa: F401
+from routes.admin_entitlements import router as admin_entitlements_router  # noqa: F401
 from routes.public_demo import router as public_demo_router  # noqa: F401
 from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
@@ -100,6 +101,7 @@ from routes.projections import router as projections_router  # noqa: F401
 from routes.projection_patterns import router as projection_patterns_router  # noqa: F401
 from routes.client_cockpit_cards import router as client_cockpit_cards_router  # noqa: F401
 from routes.owner_dashboard import router as owner_dashboard_router  # noqa: F401
+from routes.entitlements_routes import router as entitlements_router  # noqa: F401
 from routes.payroll import router as payroll_router  # noqa: F401
 from routes.reviewv2 import router as reviewv2_router  # noqa: F401
 from routes.lab_compare import router as lab_compare_router  # noqa: F401
@@ -164,6 +166,7 @@ ALL_ROUTERS = [
     feature_flags_router,
     product_launches_router,
     superadmin_diagnostics_router,
+    admin_entitlements_router,
     public_demo_router,
     help_router,
     leads_router,
@@ -202,6 +205,7 @@ ALL_ROUTERS = [
     projection_patterns_router,
     client_cockpit_cards_router,
     owner_dashboard_router,
+    entitlements_router,
     payroll_router,
     client_review_router,
     comms_threads_router,

@@ -9,6 +9,8 @@ import StatementsTab from "@/components/StatementsTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Link2, CheckCircle2, ChevronDown, ChevronRight, Zap as PlugZap, CircleDashed, Loader2, FileText } from "lucide-react";
+import { useQuota } from "@/lib/entitlements";
+import { QuotaNotice } from "@/components/Entitlements";
 
 export default function Connections() {
   const { currentId, current } = useCompany();
@@ -29,6 +31,7 @@ export default function Connections() {
   const [status, setStatus] = useState({ linked: false, connected: [], available: [] });
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [connecting, setConnecting] = useState(null); // plaid_account_id currently being connected
+  const acctQuota = useQuota("connected_accounts");
 
   const loadStatus = async () => {
     if (!currentId) return;
@@ -107,6 +110,7 @@ export default function Connections() {
   };
 
   const connectOne = async (plaidAccountId, label) => {
+    if (acctQuota.atCap) { acctQuota.openUpgrade(); return false; }
     setConnecting(plaidAccountId);
     try {
       const r = await api.post(`/companies/${currentId}/plaid/connect-account`, {
@@ -118,8 +122,12 @@ export default function Connections() {
         { duration: 7000 },
       );
       await loadStatus();
+      acctQuota.reload();
+      return true;
     } catch (e) {
+      if (e.response?.status === 402) return false;
       toast.error(`Connect failed: ${e.response?.data?.detail || e.message}`);
+      return true;
     } finally { setConnecting(null); }
   };
 
@@ -128,7 +136,7 @@ export default function Connections() {
     setBusy(true);
     try {
       for (const a of status.available) {
-        await connectOne(a.account_id, a.name);
+        if (!(await connectOne(a.account_id, a.name))) break;
       }
     } finally { setBusy(false); }
   };
@@ -208,6 +216,7 @@ export default function Connections() {
                         connected={status.connected} />
         <SyncHistoryPanel companyId={currentId} refreshKey={activeJob?.status} />
 
+        <QuotaNotice kind="connected_accounts" />
         <PlaidLinkButton companyId={currentId} companyName={current?.name} companyOwner={current?.owner_email} onSuccess={onLinked} />
 
         {/* Per-item editable "Download from" cutoff. Renders one row

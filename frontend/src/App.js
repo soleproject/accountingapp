@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { CompanyProvider } from "@/lib/company";
 import { BrandingProvider } from "@/lib/branding";
+import { EntitlementsProvider } from "@/lib/entitlements";
+import { UpgradeModal, PlanPreviewPill } from "@/components/Entitlements";
 import { useHostTitle } from "@/lib/useHostTitle";
 import { initPwa } from "@/lib/pwa";
 import { InstallPromptToast } from "@/components/InstallPrompt";
@@ -56,6 +58,7 @@ import ReviewV2Lab from "@/pages/ReviewV2Lab";
 import LabTransactionsCompare from "@/pages/LabTransactionsCompare";
 import PrintChecks from "@/pages/PrintChecks";
 import NotificationSettings from "@/pages/NotificationSettings";
+import { Gate } from "@/components/Entitlements";
 import Rules from "@/pages/Rules";
 import Onboarding from "@/pages/Onboarding";
 import Welcome from "@/pages/Welcome";
@@ -78,6 +81,7 @@ import AdminLeads from "@/pages/AdminLeads";
 import AdminAffiliates from "@/pages/AdminAffiliates";
 import ProAffiliates from "@/pages/ProAffiliates";
 import AdminCronRuns from "@/pages/AdminCronRuns";
+import AdminEntitlements from "@/pages/AdminEntitlements";
 import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
@@ -200,8 +204,11 @@ function App() {
       <AuthProvider>
         <CompanyProvider>
           <BrandingProvider>
+          <EntitlementsProvider>
             <HostTitle />
             <InstallPromptToast />
+            <UpgradeModal />
+            <PlanPreviewPill />
             <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/book/:slug" element={<PublicBookingPage />} />
@@ -236,7 +243,7 @@ function App() {
               <Route path="/owner" element={<OwnerDashboard />} />
               <Route path="/owner/:tab" element={<OwnerDashboard />} />
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
-              <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Projections /></ProductGuard>} />
+              <Route path="/accounting/projections" element={<ProductGuard product="accounting"><Gate feature="outlook" mode="replace"><Projections /></Gate></ProductGuard>} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/welcome" element={<Welcome />} />
               <Route path="/welcome/summary" element={<WelcomeSummary />} />
@@ -264,6 +271,7 @@ function App() {
               <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/admin/affiliates" element={<AdminAffiliates />} />
               <Route path="/admin/cron-runs" element={<AdminCronRuns />} />
+              <Route path="/admin/entitlements" element={<AdminEntitlements />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />
@@ -293,7 +301,7 @@ function App() {
               <Route path="/accounting/bank-matches" element={<AdvancedModeRoute><BankMatchReview /></AdvancedModeRoute>} />
               <Route path="/recurring" element={<Recurring />} />
               <Route path="/items" element={<Items />} />
-              <Route path="/inventory-management" element={<InventoryPage />} />
+              <Route path="/inventory-management" element={<Gate feature="inventory" mode="replace"><InventoryPage /></Gate>} />
               <Route path="/sales-reports" element={<SalesReports />} />
               <Route path="/payments" element={<Payments />} />
               <Route path="/receipts" element={<Receipts />} />
@@ -307,7 +315,7 @@ function App() {
               <Route path="/vendor-credits/new" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
               <Route path="/vendor-credits/:id/edit" element={<AdvancedModeRoute><VendorCreditEditor /></AdvancedModeRoute>} />
               <Route path="/refund-receipts" element={<RefundReceipts />} />
-              <Route path="/accounting/sales-tax" element={<SalesTax />} />
+              <Route path="/accounting/sales-tax" element={<Gate feature="sales_tax" mode="replace"><SalesTax /></Gate>} />
               <Route path="/settings/qbo-mirror" element={<QboMirror />} />
               <Route path="/settings/pfc-map" element={<PfcCategoryMap />} />
               <Route path="/settings/notifications" element={<NotificationSettings />} />
@@ -338,8 +346,8 @@ function App() {
               <Route path="/accounting/ai-cleanup-review" element={<AICleanupReview />} />
               <Route path="/accounting/check-register-review" element={<CheckRegisterReview />} />
               <Route path="/accounting/review-chat" element={<ChatReview />} />
-              <Route path="/checkin" element={<ProductGuard product="accounting"><CheckIn /></ProductGuard>} />
-              <Route path="/accounting/liability-payments" element={<EmbeddedCheckin scope="liability_payments" />} />
+              <Route path="/checkin" element={<ProductGuard product="accounting"><Gate feature="checkins" mode="replace"><CheckIn /></Gate></ProductGuard>} />
+              <Route path="/accounting/liability-payments" element={<Gate feature="liability_ai" mode="replace"><EmbeddedCheckin scope="liability_payments" /></Gate>} />
               <Route path="/accounting/receipt-followup" element={<EmbeddedCheckin scope="receipt_followup" />} />
               <Route path="/accounting/checks-review" element={<EmbeddedCheckin scope="checks" />} />
               <Route path="/accounting/lets-review" element={<LetsReview />} />
@@ -396,12 +404,12 @@ function App() {
               <Route path="/share" element={<Share />} />
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
               <Route path="/accounting/chart-of-accounts" element={<ChartOfAccounts />} />
-              <Route path="/accounting/classes" element={<Classes />} />
+              <Route path="/accounting/classes" element={<Gate feature="classes" mode="replace"><Classes /></Gate>} />
               <Route path="/accounting/projects" element={<ProductGuard product="projects"><ProjectsDashboard /></ProductGuard>} />
               <Route path="/accounting/projects/list" element={<Projects />} />
               <Route path="/accounting/projects/:projectId" element={<ProjectDetail />} />
-              <Route path="/accounting/budgets" element={<Budgets />} />
-              <Route path="/accounting/budgets/:budgetId" element={<BudgetEditor />} />
+              <Route path="/accounting/budgets" element={<Gate feature="budgets" mode="replace"><Budgets /></Gate>} />
+              <Route path="/accounting/budgets/:budgetId" element={<Gate feature="budgets" mode="replace"><BudgetEditor /></Gate>} />
               <Route path="/crm" element={<ProductGuard product="crm"><CrmOverview /></ProductGuard>} />
               <Route path="/home" element={<ProductGuard product="home"><HomeDashboard /></ProductGuard>} />
               <Route path="/crm/deals" element={<DealsBoard />} />
@@ -436,6 +444,7 @@ function App() {
           </Routes>
           <VoiceActionReview />
           <VoiceRecapReview />
+          </EntitlementsProvider>
           </BrandingProvider>
         </CompanyProvider>
       </AuthProvider>

@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -371,7 +372,7 @@ class InventoryReceiveIn(BaseModel):
     memo: Optional[str] = ""
 
 
-@router.post("/companies/{cid}/inventory-management/receive")
+@router.post("/companies/{cid}/inventory-management/receive", dependencies=[Depends(require_feature("inventory"))])
 async def receive_inventory(
     cid: str, inp: InventoryReceiveIn,
     user: dict = Depends(get_current_user),
@@ -415,7 +416,7 @@ async def delete_inventory_receipt(
     return {"ok": True, **result}
 
 
-@router.post("/companies/{cid}/inventory-management/adjustments")
+@router.post("/companies/{cid}/inventory-management/adjustments", dependencies=[Depends(require_feature("inventory"))])
 async def create_inventory_adjustment(
     cid: str, inp: InventoryAdjustmentIn,
     user: dict = Depends(get_current_user),

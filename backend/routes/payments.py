@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import check_feature, require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -699,7 +700,7 @@ class ReceiptAnalyzeIn(BaseModel):
     merchant: Optional[str] = None
 
 
-@router.post("/companies/{cid}/receipts/analyze")
+@router.post("/companies/{cid}/receipts/analyze", dependencies=[Depends(require_feature("receipt_ai"))])
 async def analyze_receipt_vision(
     cid: str, inp: ReceiptAnalyzeIn,
     user: dict = Depends(get_current_user),
