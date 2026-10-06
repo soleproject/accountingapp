@@ -276,6 +276,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         { to: "/admin/client-payments",  label: "Client Payments",       icon: Wallet },
         { to: "/admin/product-launches", label: "Product Launch",        icon: Rocket },
         { to: "/cockpit/payments-apps",  label: "Payments Applications", icon: CreditCard },
+        { to: "/admin/entitlements",     label: "Plan Gating",           icon: LockIcon },
       ]
     : [
         { to: "/cockpit",        label: "Today",          icon: Sunrise },
