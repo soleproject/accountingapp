@@ -38,6 +38,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from auth import get_current_user
 from db import db, now_iso
 from deps import require_company
+from entitlements import check_feature, require_feature
 
 router = APIRouter(prefix="/api")
 
@@ -101,7 +102,7 @@ async def list_budgets(
     return {"budgets": [_clean(r) for r in rows]}
 
 
-@router.post("/companies/{cid}/budgets")
+@router.post("/companies/{cid}/budgets", dependencies=[Depends(require_feature("budgets"))])
 async def create_budget(
     cid: str, payload: dict,
     user: dict = Depends(get_current_user),

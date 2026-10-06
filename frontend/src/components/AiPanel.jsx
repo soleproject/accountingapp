@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2, HelpCircle, Eye, Link as LinkIcon, Users, Layers, PlayCircle } from "lucide-react";
+import { Send, Sparkles, X, MessageSquare, Mic, MicOff, Volume2, VolumeX, ChevronDown, Trash2, HelpCircle, Eye, Link as LinkIcon, Users, Layers, PlayCircle, Lock } from "lucide-react";
 import { api, BACKEND_URL } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
@@ -14,6 +14,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { stripMarkdownForSpeech } from "@/lib/speechText";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { useFeature } from "@/lib/entitlements";
 
 
 // Feb 2026 — infer the GAAP account type from a spoken account name so
@@ -486,6 +487,26 @@ function summarizeComparison(kind, nowData, priorData, priorLabel = "prior perio
 const getSR = () => window.SpeechRecognition || window.webkitSpeechRecognition;
 
 export default function AiPanel({ collapsed, onToggle }) {
+  const chatGate = useFeature("chat");
+  if (!chatGate.allowed) return <LockedChatRail collapsed={collapsed} onToggle={onToggle} onUpgrade={() => chatGate.openUpgrade()} />;
+  return <AiPanelInner collapsed={collapsed} onToggle={onToggle} />;
+}
+
+function LockedChatRail({ collapsed, onToggle, onUpgrade }) {
+  return (
+    <div className={`h-full flex flex-col items-center justify-center gap-3 p-4 text-center bg-white border-l ${collapsed ? "w-12" : ""}`} data-testid="ai-panel-locked">
+      <span className="w-10 h-10 rounded-xl bg-slate-900 text-white grid place-items-center"><Lock size={16} /></span>
+      {!collapsed && (<>
+        <div className="text-sm font-semibold text-slate-900">AI Review Chat</div>
+        <div className="text-xs text-slate-500">Ask questions, review your books and run commands — included in AI Assistant.</div>
+        <button onClick={onUpgrade} className="h-9 px-4 rounded-xl bg-slate-900 text-white text-xs font-bold" data-testid="ai-panel-unlock">Unlock AI Assistant</button>
+      </>)}
+      {onToggle && <button onClick={onToggle} className="text-[11px] text-slate-400 underline" data-testid="ai-panel-locked-toggle">{collapsed ? "Expand" : "Collapse"}</button>}
+    </div>
+  );
+}
+
+function AiPanelInner({ collapsed, onToggle }) {
   const { currentId, current, companies, switchCompany } = useCompany();
   const { user } = useAuth();
   // Private-label the header (icon initial + firm name + "Assistant") so

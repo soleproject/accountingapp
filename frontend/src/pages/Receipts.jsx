@@ -8,6 +8,7 @@ import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 import useVoiceRecorder from "@/hooks/useVoiceRecorder";
 import ReceiptMatchPicker from "@/components/ReceiptMatchPicker";
 import { Link2 } from "lucide-react";
+import { useFeature } from "@/lib/entitlements";
 
 export default function Receipts() {
 
@@ -147,6 +148,7 @@ export default function Receipts() {
 
 function RecModal({ currentId, accts, contacts, initial, onClose, linkTransaction = null }) {
   const isEdit = !!initial;
+  const receiptAi = useFeature("receipt_ai");
   const [date, setDate] = useState(initial?.date || linkTransaction?.date || new Date().toISOString().slice(0, 10));
   const [contactId, setContactId] = useState(() => {
     if (initial?.contact_id) return initial.contact_id;
@@ -209,6 +211,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
   // preference doesn't override the edit path.
   const [mode, setMode] = useState(() => {
     if (initial) return "ai";
+    if (!receiptAi.allowed) return "manual";
     if (linkTransaction) return "ai";
     try {
       const saved = localStorage.getItem("receipt_modal_mode");
@@ -765,7 +768,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
           <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1" role="tablist">
             <button
               type="button"
-              onClick={() => setMode("ai")}
+              onClick={() => (receiptAi.allowed ? setMode("ai") : receiptAi.openUpgrade())}
               className={`flex-1 inline-flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition ${
                 mode === "ai" ? "bg-white shadow text-indigo-700" : "text-slate-500 hover:text-slate-800"
               }`}

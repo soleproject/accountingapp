@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import check_feature, require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -58,7 +59,7 @@ router = APIRouter(prefix="/api")
 # Plaid so the resulting rows land on the Transactions page with full
 # categorization + contact resolution.
 
-@router.post("/companies/{cid}/statements/upload")
+@router.post("/companies/{cid}/statements/upload", dependencies=[Depends(require_feature("statements_ai"))])
 async def statements_upload(
     cid: str,
     file: UploadFile = File(...),

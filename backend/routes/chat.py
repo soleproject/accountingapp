@@ -13,7 +13,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
@@ -49,14 +49,16 @@ from deps import (
 )
 
 from routes.anomaly import _diagnose_books
+from entitlements import check_feature, require_feature
 router = APIRouter(prefix="/api")
 
 
 # ----------------------- AI Chat (SSE) -----------------------
 
 @router.post("/ai/chat/stream")
-async def ai_chat_stream(inp: ChatIn, user: dict = Depends(get_current_user)):
+async def ai_chat_stream(inp: ChatIn, request: Request, user: dict = Depends(get_current_user)):
     await require_company(user, inp.company_id)
+    await check_feature(inp.company_id, "chat", user, request)
     session_id = inp.session_id or f"chat-{inp.company_id}-{user['id']}"
     now = now_iso()
     # Fetch prior turns for this session BEFORE inserting the new user

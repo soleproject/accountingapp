@@ -100,6 +100,7 @@ from routes.projections import router as projections_router  # noqa: F401
 from routes.projection_patterns import router as projection_patterns_router  # noqa: F401
 from routes.client_cockpit_cards import router as client_cockpit_cards_router  # noqa: F401
 from routes.owner_dashboard import router as owner_dashboard_router  # noqa: F401
+from routes.entitlements_routes import router as entitlements_router  # noqa: F401
 from routes.payroll import router as payroll_router  # noqa: F401
 from routes.reviewv2 import router as reviewv2_router  # noqa: F401
 from routes.lab_compare import router as lab_compare_router  # noqa: F401
@@ -202,6 +203,7 @@ ALL_ROUTERS = [
     projection_patterns_router,
     client_cockpit_cards_router,
     owner_dashboard_router,
+    entitlements_router,
     payroll_router,
     client_review_router,
     comms_threads_router,
