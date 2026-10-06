@@ -176,8 +176,26 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
   // fields with the business subtotal, and appends the breakdown
   // to notes so the pro can audit later.
   const [scanning, setScanning] = useState(false);
-  const [analysis, setAnalysis] = useState(null);   // full GPT-4o payload
-  const [lineItems, setLineItems] = useState([]);    // editable working copy
+  // Edit mode opens straight into the compact AI review card, seeded from
+  // the receipt's stored line items (or one synthetic line when it was
+  // never scanned) so editing looks identical to a fresh scan.
+  const seededEdit = (() => {
+    if (!initial) return null;
+    const stored = (initial.line_items || []).filter((l) => l && Number(l.amount) !== 0);
+    const acct = accts.find((a) => a.id === initial.category_account_id);
+    const lines = stored.length ? stored : [{
+      description: initial.notes?.split("\n")[0]?.slice(0, 60) || "Receipt",
+      amount: Number(initial.amount || 0),
+      account_id: initial.category_account_id || null,
+      account_code: acct?.code || "", account_name: acct?.name || "Uncategorized",
+    }];
+    return {
+      analysis: { narrative: initial.ai_narrative || null, line_items: lines, totals: { grand_total: Number(initial.amount || 0) }, _seeded: true },
+      lineItems: lines.map((x, i) => ({ ...x, _idx: i })),
+    };
+  })();
+  const [analysis, setAnalysis] = useState(seededEdit?.analysis || null);   // full GPT-4o payload
+  const [lineItems, setLineItems] = useState(seededEdit?.lineItems || []);    // editable working copy
   // Mode toggle at the top of the modal. "manual" shows the classic
   // full form; "ai" shows a big Take-photo / Upload-photo landing
   // page — after a scan lands we auto-populate the same fields and
@@ -188,7 +206,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
   // they log a receipt. Editing is always manual — a persisted "ai"
   // preference doesn't override the edit path.
   const [mode, setMode] = useState(() => {
-    if (initial) return "manual";
+    if (initial) return "ai";
     if (linkTransaction) return "ai";
     try {
       const saved = localStorage.getItem("receipt_modal_mode");
@@ -652,7 +670,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
         contact_id: c.id,
         contact_name: c.name,
         amount: parseFloat(amount),
-        category_account_id: cat || null,
+        category_account_id: (editedLines?.length === 1 && editedLines[0].account_id) ? editedLines[0].account_id : (cat || null),
         payment_account_id: paymentAcctId || null,
         match_transaction_id: linkTransaction?.transaction_id
           || (matchOverride !== undefined ? matchOverride : ((pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link))?.transaction_id || null)),
@@ -668,7 +686,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
         // scan produced editable lines. Backend groups by account_id
         // and books a split credit-per-account JE; empty/absent
         // triggers the single-category fallback.
-        line_items: (editedLines && editedLines.length)
+        line_items: (editedLines && editedLines.length && !(editedLines.length === 1 && analysis?._seeded))
           ? editedLines.map((l) => ({
               description:  l.description,
               amount:       Number(l.amount || 0),
@@ -855,7 +873,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
           // still editable — tapping the pill drops an inline editor
           // right underneath. Notes get their own sub-screen with a
           // dedicated big-mic voice-dictation button.
-          const compact = mode === "ai" && analysis && !isEdit;
+          const compact = mode === "ai" && analysis;
           if (!compact) return null;
 
           const vendorLabel = (contacts.find((c) => c.id === contactId) || {}).name
@@ -1261,7 +1279,14 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
                 </div>
               )}
 
+              {isEdit && initial?.matched_transaction_id ? (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 inline-flex items-center gap-2 w-full" data-testid="receipt-bank-match-linked">
+                  <Link2 size={13} className="shrink-0" />
+                  <span className="flex-1 min-w-0 truncate"><b>Bank match:</b> linked to a bank transaction{initial.match_status === "verified" ? " · verified" : ""}</span>
+                </div>
+              ) : (
               <BankMatchPreview preview={matchPreview} picked={pickedMatch} onPick={(c) => { setPickedMatch(c); if (!payAcct && c.bank_account_id) setPayAcct(c.bank_account_id); }} />
+              )}
 
               {/* Notes button — click to open dedicated note screen. */}
               <button
@@ -1322,11 +1347,11 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
                   className="flex-1 py-2 rounded-md bg-slate-900 text-white text-sm inline-flex items-center justify-center gap-1.5 disabled:opacity-60"
                 >
                   {busy && <Loader2 size={13} className="animate-spin" />}
-                  Save receipt
+                  {isEdit ? "Update receipt" : "Save receipt"}
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setAnalysis(null); setLineItems([]); setAttachment(null); }}
+                  onClick={() => { if (isEdit && attachment?.data_url) { runScan(); return; } setAnalysis(null); setLineItems([]); setAttachment(null); }}
                   disabled={busy}
                   className="px-4 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-60"
                   data-testid="receipt-ai-rescan-bottom"
@@ -1337,7 +1362,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
             </div>
           );
         })()}
-        {!(mode === "ai" && analysis && !isEdit) && (
+        {!(mode === "ai" && analysis) && (
         <>
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded px-2 py-1.5 text-sm" />
 
@@ -1571,7 +1596,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
           )}
         </div>
 
-        {!(mode === "ai" && analysis && !isEdit) && (
+        {!(mode === "ai" && analysis) && (
           <BankMatchPreview preview={matchPreview} picked={pickedMatch} onPick={(c) => { setPickedMatch(c); if (!payAcct && c.bank_account_id) setPayAcct(c.bank_account_id); }} />
         )}
 
@@ -1589,10 +1614,11 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
             {busy && <Loader2 size={13} className="animate-spin" />}
             {isEdit ? "Update receipt" : "Save receipt"}
           </button>
-          {mode === "ai" && analysis && !isEdit && (
+          {mode === "ai" && analysis && (
             <button
               type="button"
               onClick={() => {
+                if (isEdit && attachment?.data_url) { runScan(); return; }
                 setAnalysis(null);
                 setLineItems([]);
                 setAttachment(null);

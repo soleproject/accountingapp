@@ -1061,3 +1061,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Check-in card: real-phone offset fix ✅ self-tested (emulator); user to confirm on device
 - cardMode tree is now `createPortal(..., document.body)` with `height:100dvh`, header `paddingTop:max(.625rem, env(safe-area-inset-top))`, footer safe-area bottom, body scroll locked while open (iOS fixed-vs-scrolled-viewport quirk). Form items (10/14) scroll `mainRef` to top in cardMode.
+
+## 2026-10-06 — Edit Receipt opens the compact AI review card ✅ self-tested
+- Receipts.jsx RecModal: edit mode seeds `analysis`/`lineItems` from `initial.line_items` (or one synthetic line from amount+category) and defaults mode "ai"; `compact` no longer excludes isEdit (header strip w/ pencil, Add note, grouped categories, total, Update receipt / Rescan). Rescan in edit keeps the attachment and re-runs the scan. Bank-match strip shows "linked · verified" for matched receipts (`receipt-bank-match-linked`). Save: single synthetic line → no line_items sent, category = that line's account.
