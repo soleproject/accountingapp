@@ -1008,3 +1008,27 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-05 — Step 1 card title rename ✅ self-tested (curl)
 - `backend/routes/firm_glance.py` step1.title: "Review AI categorized" → "AI Transaction Review". Frontend renders `Step 1: {title}` → "Step 1: AI Transaction Review".
+
+## 2026-10-05 — Office Equipment → expense (de minimis <$2,500) ✅ self-tested
+- `seed.py`: US `1650 Office Equipment` (asset) removed → `6350 Office Equipment` (expense/operating_expense/operating_expense). UK `7140` → `6330`. `1600 Equipment` stays the fixed-asset account for ≥$2,500.
+- `industry_templates.py`: professional_services/advertising/healthcare/legal now seed `6610 Office Equipment` (expense) instead of asset 1500/1510.
+- Migration `backend/scripts/migrate_office_equipment_to_expense.py` flipped 11 zero-activity accounts in place; skipped **Michael Co 2, LLC** (acct 1650 has 3 bill JEs incl. $2,249.50 BILL-2004) — user to decide/reclass manually.
+- Verified: new company via POST /api/companies seeds 6350 as expense. Note: `tests/test_industry_template_switch.py::test_shared_codes_renamed_on_switch` fails pre-existing (unrelated).
+
+## 2026-10-05 — Michael Co 2 Office Equipment reclass ✅ self-tested
+- Created expense `6360 Office Equipment` (6350 was already Fuel & Vehicle Expense in this company); repointed 3 bills (BILL-2004/2005/2014) + their 3 JE lines; deleted asset row 1650. P&L now shows Office Equipment $5,446.79 under expenses; Balance Sheet no longer lists it. Script: `backend/scripts/reclass_michael_co2_office_equipment.py`.
+
+## 2026-10-05 — "Continue catch-up" → To Do clean-up view ✅ self-tested (screenshot)
+- OwnerDashboard `startCatchup` now navigates to `/accounting/todo?view=cleanup` (no longer mints a client-review batch).
+- ToDo.jsx reads `view=cleanup`: heading "Clean-up items for {company}", hides PendingReview/AgentInquiries cards, scrolls to panel. ResponsibilitiesPanel new props `filter="cleanup"` (keeps only `variant==="cleanup"` items, hides preamble) + `onClearFilter` ("Show all items" banner, testid `resp-panel-cleanup-filter` / `resp-panel-show-all`).
+
+## 2026-10-05 — Owner "Snap it" → missing-receipts picker → pre-linked New Receipt ✅ self-tested
+- Backend `owner_dashboard._missing_receipt_rows`: attention `receipts` item + `documents.missing_receipts` now carry `items[].transaction {transaction_id, merchant, description, amount, date, bank_account_id}`; title/count use total open findings.
+- `receipt_match.link_receipt_to_transaction` resolves open `missing_receipt` findings for the txn immediately (resolved_by=receipt_link).
+- Frontend: `RecModal` (Receipts.jsx, now named-exported) accepts `linkTransaction` → AI mode default, amber "Attaches to: …" strip (testid `receipt-link-target`), prefilled date/amount/paid-from/vendor, forces `match_transaction_id`, skips match-preview. New `components/owner/MissingReceiptsModal.jsx` (testids `missing-receipts-modal`, `missing-receipt-snap-{id}`). OwnerDashboard Snap it opens picker; DocumentsTab Snap receipt opens RecModal directly.
+
+## 2026-10-06 — Owner "Send reminder" → overdue invoices popup ✅ self-tested
+- New `components/owner/OverdueInvoicesModal.jsx` (testids `overdue-invoices-modal`, `overdue-invoice-expect-date-{id}`, `overdue-invoice-remind-{id}`): lists `money.invoices` with days_overdue>0; date input saves via `/projections/invoices/{id}/expected-date` on change (reloads dashboard), Send reminder posts `/communications/dunning` and flips to "Sent". OwnerDashboard `onAttention` id=overdue opens it.
+
+## 2026-10-06 — Owner "Upload" (statement needed) → inline upload popup ✅ self-tested
+- Attention `stmt-*` items now carry `account_id`, `account_name`, `period_label`. New `components/owner/StatementUploadModal.jsx` (testid `statement-upload-modal`) wraps `StatementsTab bare` with new `defaultAccountId` prop (preselects the bank account → drops skip the confirm modal). OwnerDashboard `onAttention` kind=statement opens it; closing reloads dashboard.

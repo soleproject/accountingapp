@@ -9,6 +9,9 @@ import { BooksCard, ProfitCard, CashCard, AttentionCard, TeamStrip } from "@/com
 import MoneyTab from "@/components/owner/MoneyTab";
 import DocumentsTab from "@/components/owner/DocumentsTab";
 import TeamTab from "@/components/owner/TeamTab";
+import { MissingReceiptsModal } from "@/components/owner/MissingReceiptsModal";
+import { OverdueInvoicesModal } from "@/components/owner/OverdueInvoicesModal";
+import { StatementUploadModal } from "@/components/owner/StatementUploadModal";
 import { Button } from "@/components/owner/ui";
 
 const TABS = [
@@ -61,18 +64,17 @@ export default function OwnerDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  const [receiptsOpen, setReceiptsOpen] = useState(false);
+  const [overdueOpen, setOverdueOpen] = useState(false);
+  const [stmtItem, setStmtItem] = useState(null);
+
   const onAttention = (it) => {
+    if (it.id === "receipts" && (it.items || []).some((m) => m.transaction)) { setReceiptsOpen(true); return; }
+    if (it.id === "overdue") { setOverdueOpen(true); return; }
+    if (it.kind === "statement" && it.account_id) { setStmtItem(it); return; }
     if (it.href) navigate(it.href);
   };
-  const startCatchup = async () => {
-    try {
-      const r = await api.post(`/companies/${currentId}/owner-dashboard/catchup`, {});
-      if (r.data?.review_url) navigate(r.data.review_url);
-      else toast.success("Nothing older is waiting — you're all caught up.");
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not start a catch-up.");
-    }
-  };
+  const startCatchup = () => navigate("/accounting/todo?view=cleanup");
 
   if (!currentId) {
     return <div className="p-10 text-slate-500 text-sm" data-testid="owner-dashboard-no-company">No company is linked to your account yet. Your bookkeeper will connect one shortly.</div>;
@@ -134,8 +136,29 @@ export default function OwnerDashboard() {
         </>
       )}
       {tab === "money" && <MoneyTab data={data} fmt={fmt} companyId={currentId} reload={load} />}
-      {tab === "documents" && <DocumentsTab data={data} companyId={currentId} />}
+      {tab === "documents" && <DocumentsTab data={data} companyId={currentId} reload={load} />}
       {tab === "team" && <TeamTab data={data} />}
+      {stmtItem && (
+        <StatementUploadModal companyId={currentId} item={stmtItem} onClose={() => { setStmtItem(null); load(); }} />
+      )}
+      {overdueOpen && (
+        <OverdueInvoicesModal
+          companyId={currentId}
+          invoices={data.money.invoices.filter((i) => i.days_overdue > 0)}
+          fmt={fmt}
+          onClose={() => setOverdueOpen(false)}
+          onChanged={load}
+        />
+      )}
+      {receiptsOpen && (
+        <MissingReceiptsModal
+          companyId={currentId}
+          items={(data.attention.find((a) => a.id === "receipts")?.items) || []}
+          periodLabel={data.books.period_label}
+          onClose={() => setReceiptsOpen(false)}
+          onSaved={() => { setReceiptsOpen(false); load(); }}
+        />
+      )}
     </div>
   );
 }

@@ -211,6 +211,33 @@ def _cash(proj: dict, today: date) -> dict:
 
 # ------------------------------------------------------------ attention ----
 
+async def _missing_receipt_rows(cid: str, batch: Optional[dict]) -> list[dict]:
+    """Open missing-receipt findings + the bank transaction each one points at,
+    so the owner UI can open the receipt modal pre-linked to that transaction."""
+    findings = await db.agent_findings.find(
+        {"company_id": cid, "kind": "missing_receipt", "status": "open"},
+        {"id": 1, "title": 1, "detail": 1, "meta": 1}).limit(5).to_list(5)
+    txn_ids = [(f.get("meta") or {}).get("txn_id") for f in findings]
+    txns = {t["id"]: t for t in await db.transactions.find(
+        {"company_id": cid, "id": {"$in": [t for t in txn_ids if t]}},
+        {"id": 1, "merchant": 1, "description": 1, "amount": 1, "date": 1, "bank_account_id": 1}).to_list(10)}
+    rows = []
+    for f in findings:
+        meta = f.get("meta") or {}
+        t = txns.get(meta.get("txn_id"))
+        rows.append({
+            "id": f.get("id"), "title": f.get("title"), "detail": f.get("detail"),
+            "amount": meta.get("amount"), "date": meta.get("date") or meta.get("txn_date"),
+            "href": f"/client-review/{batch.get('client_token')}" if batch else None,
+            "transaction": {
+                "transaction_id": t["id"], "merchant": t.get("merchant") or meta.get("merchant") or "",
+                "description": t.get("description") or "", "amount": abs(float(t.get("amount") or 0)),
+                "date": t.get("date"), "bank_account_id": t.get("bank_account_id"),
+            } if t else None,
+        })
+    return rows
+
+
 async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], proj: dict) -> list[dict]:
     items: list[dict] = []
     if batch:
@@ -225,15 +252,16 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
                 "subtitle": f"{len(pending)} item{'s' if len(pending) > 1 else ''} · about {max(1, len(pending) // 2)} min",
                 "action_label": "Answer", "href": f"/client-review/{batch.get('client_token')}", "count": len(pending),
             })
-    missing = await db.agent_findings.find(
-        {"company_id": cid, "kind": "missing_receipt", "status": "open"}, {"title": 1, "detail": 1, "meta": 1}).limit(5).to_list(5)
+    missing = await _missing_receipt_rows(cid, batch)
     if missing:
         m0 = missing[0]
+        n_missing = await db.agent_findings.count_documents({"company_id": cid, "kind": "missing_receipt", "status": "open"})
         items.append({
             "id": "receipts", "kind": "receipt", "tone": "warn",
-            "title": "A receipt is missing" if len(missing) == 1 else f"{len(missing)} receipts are missing",
+            "title": "A receipt is missing" if n_missing == 1 else f"{n_missing} receipts are missing",
             "subtitle": (m0.get("title") or m0.get("detail") or "")[:90],
-            "action_label": "Snap it", "href": f"/client-review/{batch.get('client_token')}" if batch else "/owner/documents", "count": len(missing),
+            "action_label": "Snap it", "href": f"/client-review/{batch.get('client_token')}" if batch else "/owner/documents", "count": n_missing,
+            "items": missing,
         })
     sugg_q = {"company_id": cid, "receipt_match_status": "suggested"}
     sugg_n = await db.transactions.count_documents(sugg_q)
@@ -267,6 +295,7 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
                 "title": f"{a['name']} statement needed",
                 "subtitle": f"{books['period_label']} · to finish reconciling",
                 "action_label": "Upload", "href": "/owner/documents", "count": 1,
+                "account_id": a["id"], "account_name": a["name"], "period_label": books["period_label"],
             })
     return items
 
@@ -400,10 +429,8 @@ async def _documents(cid: str, period_start: date, batch: Optional[dict]) -> dic
         rows.append({"id": s.get("id"), "type": "statement", "title": f"{s.get('account_name') or 'Bank'} statement · {(s.get('period_start') or '')[:7]}",
                      "added": (s.get("created_at") or "")[:10], "status": f"{s.get('transaction_count') or 0} transactions · {s.get('status') or ''}", "tone": "ok" if done else "mute"})
     rows.sort(key=lambda r: r["added"], reverse=True)
-    missing = await db.agent_findings.find({"company_id": cid, "kind": "missing_receipt", "status": "open"}, {"id": 1, "title": 1, "detail": 1, "meta": 1}).limit(5).to_list(5)
     return {
-        "missing_receipts": [{"id": m.get("id"), "title": m.get("title"), "detail": m.get("detail"), "amount": (m.get("meta") or {}).get("amount"), "date": (m.get("meta") or {}).get("date"),
-                              "href": f"/client-review/{batch.get('client_token')}" if batch else None} for m in missing],
+        "missing_receipts": await _missing_receipt_rows(cid, batch),
         "rows": rows,
         "counts": {"receipts": len(receipts), "statements": len(stmts)},
     }

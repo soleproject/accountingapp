@@ -13,10 +13,10 @@ import { useNavigate } from "react-router-dom";
  * statement's bank name + last-4; user can override via the account
  * selector.
  */
-export default function StatementsTab({ companyId, bare = false }) {
+export default function StatementsTab({ companyId, bare = false, defaultAccountId = null }) {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
-  const [accountId, setAccountId] = useState("auto");
+  const [accountId, setAccountId] = useState(defaultAccountId || "auto");
   const [uploading, setUploading] = useState([]); // [{tempId, filename, size, status, error}]
   const [imports, setImports] = useState([]);
   const [loading, setLoading] = useState(false);

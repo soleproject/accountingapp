@@ -407,6 +407,13 @@ async def link_receipt_to_transaction(
         }},
     )
 
+    # 2b. The transaction now has its receipt — close any open missing-receipt finding.
+    await db.agent_findings.update_many(
+        {"company_id": company_id, "kind": "missing_receipt", "status": "open", "meta.txn_id": tid},
+        {"$set": {"status": "resolved", "resolved_at": now, "resolved_by": "receipt_link",
+                  "resolved_reason": "receipt_attached"}},
+    )
+
     # 3. Reverse the receipt's JE if one was posted. Transactions own
     #    reporting — the receipt is now attachment/metadata only.
     if receipt.get("posted") or receipt.get("posted_je_id"):

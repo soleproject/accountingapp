@@ -143,13 +143,18 @@ export default function Receipts() {
   );
 }
 
-function RecModal({ currentId, accts, contacts, initial, onClose }) {
+function RecModal({ currentId, accts, contacts, initial, onClose, linkTransaction = null }) {
   const isEdit = !!initial;
-  const [date, setDate] = useState(initial?.date || new Date().toISOString().slice(0, 10));
-  const [contactId, setContactId] = useState(initial?.contact_id || "");
-  const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : "");
+  const [date, setDate] = useState(initial?.date || linkTransaction?.date || new Date().toISOString().slice(0, 10));
+  const [contactId, setContactId] = useState(() => {
+    if (initial?.contact_id) return initial.contact_id;
+    if (!linkTransaction?.merchant) return "";
+    const hit = contacts.find((c) => (c.name || "").trim().toLowerCase() === linkTransaction.merchant.trim().toLowerCase());
+    return hit?.id || "";
+  });
+  const [amount, setAmount] = useState(initial?.amount != null ? String(initial.amount) : (linkTransaction?.amount != null ? String(linkTransaction.amount) : ""));
   const [cat, setCat] = useState(initial?.category_account_id || "");
-  const [payAcct, setPayAcct] = useState(initial?.payment_account_id || "");
+  const [payAcct, setPayAcct] = useState(initial?.payment_account_id || linkTransaction?.bank_account_id || "");
   const [notes, setNotes] = useState(initial?.notes || "");
   const [attachment, setAttachment] = useState(
     initial?.attachment_data_url
@@ -157,8 +162,9 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
       : null
   );
   const [busy, setBusy] = useState(false);
-  const [addingVendor, setAddingVendor] = useState(false);
-  const [newVendorName, setNewVendorName] = useState("");
+  const linkedNoContact = !!linkTransaction?.merchant && !contacts.some((c) => (c.name || "").trim().toLowerCase() === linkTransaction.merchant.trim().toLowerCase());
+  const [addingVendor, setAddingVendor] = useState(linkedNoContact);
+  const [newVendorName, setNewVendorName] = useState(linkedNoContact ? linkTransaction.merchant : "");
   const [creatingVendor, setCreatingVendor] = useState(false);
   const fileRef = useRef(null);
   // ── AI receipt-split vision (GPT-4o) ─────────────────────────
@@ -183,6 +189,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   // preference doesn't override the edit path.
   const [mode, setMode] = useState(() => {
     if (initial) return "manual";
+    if (linkTransaction) return "ai";
     try {
       const saved = localStorage.getItem("receipt_modal_mode");
       return saved === "ai" || saved === "manual" ? saved : "manual";
@@ -224,7 +231,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
   const [pickedMatch, setPickedMatch] = useState(null);
   const [matchPickerOpen, setMatchPickerOpen] = useState(false);
   useEffect(() => {
-    if (isEdit || !date || !Number(amount)) { setMatchPreview(null); return; }
+    if (isEdit || linkTransaction || !date || !Number(amount)) { setMatchPreview(null); return; }
     const vendorName = (contacts.find((c) => c.id === contactId) || {}).name || newVendorName || null;
     const h = setTimeout(() => {
       api.post(`/companies/${currentId}/receipts/match-preview`, {
@@ -240,7 +247,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     }, 350);
     return () => clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId, isEdit, date, amount, contactId, newVendorName, payAcct]);
+  }, [currentId, isEdit, linkTransaction, date, amount, contactId, newVendorName, payAcct]);
   const [noteDraft, setNoteDraft]       = useState(initial?.notes || "");
   const [transcribing, setTranscribing] = useState(false);
   const [voiceError, setVoiceError]     = useState(null);
@@ -619,7 +626,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
     // resolver hands the user a first-class choice between "Personal
     // Account" (auto-books a Due-to-Owner liability) and a scrollable
     // list of real asset/liability accounts.
-    const effective = pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link);
+    const effective = linkTransaction || (pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link));
     // Several equally-likely bank transactions → let the user tap one.
     if (!isEdit && !effective && !pickedMatch?.none && (matchPreview?.candidates || []).length > 1) {
       setMatchPickerOpen(true);
@@ -647,7 +654,8 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
         amount: parseFloat(amount),
         category_account_id: cat || null,
         payment_account_id: paymentAcctId || null,
-        match_transaction_id: matchOverride !== undefined ? matchOverride : ((pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link))?.transaction_id || null),
+        match_transaction_id: linkTransaction?.transaction_id
+          || (matchOverride !== undefined ? matchOverride : ((pickedMatch?.none ? null : (pickedMatch || matchPreview?.will_link))?.transaction_id || null)),
         paid_personally: !!paidPersonally,
         notes,
         attachment_data_url: attachment?.data_url || null,
@@ -716,6 +724,16 @@ function RecModal({ currentId, accts, contacts, initial, onClose }) {
           <button onClick={onClose}><X size={16} /></button>
         </div>
         <div className="px-5 pb-5 space-y-3 flex-1 flex flex-col min-h-0 overflow-y-auto">
+
+        {linkTransaction && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2" data-testid="receipt-link-target">
+            <Paperclip size={14} className="text-amber-700 shrink-0" />
+            <div className="min-w-0 text-xs text-amber-900">
+              <div className="font-semibold truncate">Attaches to: {linkTransaction.merchant || linkTransaction.description} · ${Number(linkTransaction.amount || 0).toFixed(2)}</div>
+              <div className="text-amber-700/80 truncate">{linkTransaction.date} · {linkTransaction.description}</div>
+            </div>
+          </div>
+        )}
 
         {/* Mode toggle — AI vs Manual entry. AI-first shows a big
             "take a picture / upload a picture" landing that runs
@@ -2053,3 +2071,5 @@ function ReceiptCategoryPreview({ narrative, lineItems, grandTotal, onApply, onR
     </div>
   );
 }
+
+export { RecModal };

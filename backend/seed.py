@@ -21,7 +21,6 @@ DEFAULT_COA = [
     ("1500", "Prepaid Expenses", "asset", "current_asset", "vendor_prepayments"),
     ("1100", "Undeposited Funds", "asset", "current_asset", "money_in_transit"),
     ("1600", "Equipment", "asset", "fixed_asset", "property_plant_equipment"),
-    ("1650", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment"),
     ("1700", "Accumulated Depreciation", "asset", "fixed_asset", "depreciation_and_amortization"),
     # Liabilities
     ("2000", "Accounts Payable", "liability", "current_liability", "expected_payments_to_vendors"),
@@ -45,6 +44,8 @@ DEFAULT_COA = [
     ("6200", "Advertising & Marketing", "expense", "operating_expense", "operating_expense"),
     ("6250", "Dues & Subscriptions", "expense", "operating_expense", "operating_expense"),
     ("6300", "Office Supplies", "expense", "operating_expense", "operating_expense"),
+    # De minimis safe harbor: equipment under $2,500 is expensed, not capitalized (1600 Equipment).
+    ("6350", "Office Equipment", "expense", "operating_expense", "operating_expense"),
     ("6400", "Insurance", "expense", "operating_expense", "operating_expense"),
     ("6500", "Legal & Professional Fees", "expense", "operating_expense", "operating_expense"),
     ("6600", "Utilities", "expense", "operating_expense", "operating_expense"),
@@ -92,7 +93,6 @@ UK_COA = [
     ("7110", "Leasehold Improvements", "asset", "fixed_asset", "property_plant_equipment"),
     ("7120", "Plant & Machinery", "asset", "fixed_asset", "property_plant_equipment"),
     ("7130", "Motor Vehicles", "asset", "fixed_asset", "property_plant_equipment"),
-    ("7140", "Office Equipment", "asset", "fixed_asset", "property_plant_equipment"),
     ("7150", "Fixtures & Fittings", "asset", "fixed_asset", "property_plant_equipment"),
     ("7200", "Accumulated Depreciation", "asset", "fixed_asset", "depreciation_and_amortization"),
     # ── Current Assets — Bank & Cash (1000-1099)
@@ -156,6 +156,7 @@ UK_COA = [
     ("6300", "Telephone & Internet", "expense", "operating_expense", "operating_expense"),
     ("6310", "Software & Subscriptions", "expense", "operating_expense", "operating_expense"),
     ("6320", "Printing, Postage & Stationery", "expense", "operating_expense", "operating_expense"),
+    ("6330", "Office Equipment", "expense", "operating_expense", "operating_expense"),
     ("6400", "Insurance", "expense", "operating_expense", "operating_expense"),
     ("6500", "Accountancy Fees", "expense", "operating_expense", "operating_expense"),
     ("6510", "Legal & Professional Fees", "expense", "operating_expense", "operating_expense"),

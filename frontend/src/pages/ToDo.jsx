@@ -7,8 +7,8 @@
  * flow forward with live counts; month-scoped items filter per-period
  * when the month switcher moves.
  */
-import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useEffect, useRef } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useCompany } from "@/lib/company";
 import ResponsibilitiesPanel from "@/components/ResponsibilitiesPanel";
 import AgentInquiriesCard from "@/components/AgentInquiriesCard";
@@ -78,6 +78,22 @@ function CockpitViewPills() {
 
 export default function ToDo() {
   const { currentId, current } = useCompany();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const cleanupView = searchParams.get("view") === "cleanup";
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    if (cleanupView && currentId) {
+      const t = setTimeout(() => panelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 400);
+      return () => clearTimeout(t);
+    }
+  }, [cleanupView, currentId]);
+
+  const clearCleanupView = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  };
 
   if (!currentId) {
     return (
@@ -102,29 +118,33 @@ export default function ToDo() {
         <div className="text-[10px] uppercase tracking-widest text-slate-400 font-semibold">
           Accounting · To Do
         </div>
-        <div className="text-2xl font-bold text-slate-900">
-          Your monthly items for {current?.name}
+        <div className="text-2xl font-bold text-slate-900" data-testid="todo-heading">
+          {cleanupView ? `Clean-up items for ${current?.name}` : `Your monthly items for ${current?.name}`}
         </div>
         <p className="text-sm text-slate-500 mt-1">
-          Everything on this page was assigned to you (or shared) at onboarding.
+          {cleanupView
+            ? "Older items from before your books were current. Work through them at your own pace — nothing here blocks this month's close."
+            : <>Everything on this page was assigned to you (or shared) at onboarding.
           Perpetual items (bills, invoices) stay live until cleared. Month-scoped
           items (recon, closing) reset each month — use the arrows to check what's
-          still open from previous months.
+          still open from previous months.</>}
         </p>
       </div>
 
-      <PendingReviewCard companyId={currentId} />
+      {!cleanupView && <PendingReviewCard companyId={currentId} />}
 
-      <AgentInquiriesCard companyId={currentId} />
+      {!cleanupView && <AgentInquiriesCard companyId={currentId} />}
 
-      <div className="rounded-xl border bg-white p-4">
+      <div className="rounded-xl border bg-white p-4" ref={panelRef}>
         <ResponsibilitiesPanel
           companyId={currentId}
           scope="client"
-          emptyStateHint="No items assigned to you yet."
+          emptyStateHint={cleanupView ? "No clean-up items — you're all caught up." : "No items assigned to you yet."}
           returnLabel="Back to To Do"
-          returnPath="/accounting/todo"
+          returnPath={cleanupView ? "/accounting/todo?view=cleanup" : "/accounting/todo"}
           preamble={<CashFlowMonitorCard companyId={currentId} />}
+          filter={cleanupView ? "cleanup" : null}
+          onClearFilter={clearCleanupView}
         />
       </div>
     </div>
