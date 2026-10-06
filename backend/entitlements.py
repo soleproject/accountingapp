@@ -115,6 +115,8 @@ async def company_entitlements(cid: str, user: dict, override: Optional[str] = N
             return full("own_books")
         if not plan or plan not in PLAN_RANK:
             return full("no_plan_on_file")
+        if sub == "trialing":
+            return full("trial")
         if sub in ("canceled", "unpaid", "incomplete_expired"):
             return {**base, "all_access": False, "source": "canceled", "plan": "simple_start",
                     "plan_label": "Core", "features": features_for_rank(1), "grace": False,
