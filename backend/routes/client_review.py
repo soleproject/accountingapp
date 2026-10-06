@@ -111,6 +111,7 @@ async def get_session(token: str):
         "completed_at":     batch.get("completed_at"),
         "company_name":     meta["company_name"],
         "firm_name":        meta["firm_name"],
+        "brand":            await resolve_company_brand(batch["company_id"]),
         "greeting_name":    cr._first_name(
             batch.get("client_email") or "",
             contact_name=None,
@@ -3164,6 +3165,7 @@ async def open_pending_batch(
 # regardless of who owns it.
 
 from deps import require_company as _require_company
+from brand_resolver import resolve_company_brand
 
 
 @router.get("/latest-for-company/{company_id}")

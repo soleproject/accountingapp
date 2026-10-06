@@ -94,6 +94,10 @@ export function resolvePalette(preset, custom) {
 export function BrandingProvider({ children }) {
   const { user } = useAuth();
   const [branding, setBranding] = useState(null);
+  // Public token pages (no login) push the company's resolved brand here so
+  // the same palette/title logic applies.
+  const [publicBrand, setPublicBrand] = useState(null);
+  const effective = branding || publicBrand;
 
   const refresh = useCallback(async () => {
     if (!user) {
@@ -116,8 +120,8 @@ export function BrandingProvider({ children }) {
   // that reads `var(--brand-…)` picks them up. Kept side-effect-only so
   // components don't need to subscribe to the same tokens they render.
   useEffect(() => {
-    const preset = branding?.theme_preset || "default";
-    const p = resolvePalette(preset, branding?.theme_custom);
+    const preset = effective?.theme_preset || "default";
+    const p = resolvePalette(preset, effective?.theme_custom);
     const root = document.documentElement;
     root.style.setProperty("--brand-primary", p.primary);
     root.style.setProperty("--brand-accent", p.accent);
@@ -134,10 +138,10 @@ export function BrandingProvider({ children }) {
     }
     root.dataset.brandSidebar = isDark(p.sidebar_bg) ? "dark" : "light";
     root.dataset.brandTopbar = isDark(p.topbar_bg) ? "dark" : "light";
-  }, [branding]);
+  }, [effective]);
 
   return (
-    <BrandingContext.Provider value={{ branding, refresh }}>
+    <BrandingContext.Provider value={{ branding: effective, refresh, setPublicBrand }}>
       {children}
     </BrandingContext.Provider>
   );

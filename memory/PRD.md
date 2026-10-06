@@ -1067,3 +1067,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Receipts list: row click opens edit ✅ self-tested
 - Receipts.jsx `<tr data-testid="receipt-row-{id}">` onClick → setEditing(r), ignored when the click target is inside a button/a/input.
+
+## 2026-10-06 — White-label branding on emails + public token pages ✅ self-tested
+- New `backend/brand_resolver.py`: `resolve_company_brand(cid)` (Enterprise→Partner→Pro cascade, WL-unlocked tiers only, explicit Private Label Name required) → {brand_name, whitelabel, slug, logo_url(/api/branding/logo/{slug}), theme_preset, theme_custom, app_url=public_base_url(slug)}; `apply_brand_to_html(html, brand)` rewrites footer/"Powered by"/SmartBooks mentions/domain/link host and injects a logo header.
+- `email_dispatcher.dispatch`: when `company_id` is passed and brand is white-label → From name = brand, html/subject branded. (Callers that omit company_id stay platform-branded.)
+- Token endpoints now return `brand`: GET /client-review/{token}, GET /q/{token}, GET /pay/{token}/config. Frontend `components/PublicBrand.jsx` (`usePublicBrand`, `PublicBrandMark`, `PublicBrandFooter`); BrandingProvider accepts `setPublicBrand` (palette/title for logged-out pages); useHostTitle no longer overrides a resolved brand title. Applied in ClientReviewPage (logo avatar + label), AskClientAnswer (mark + footer), HostedPay (mark + Powered by).

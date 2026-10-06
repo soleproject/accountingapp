@@ -24,6 +24,7 @@ from pydantic import BaseModel, EmailStr
 from db import db, now_iso, coerce
 from auth import get_current_user, require_role
 from deps import require_company
+from brand_resolver import resolve_company_brand
 
 from email_dispatcher import (
     dispatch, get_prefs, set_prefs, public_base_url, DEFAULT_PREFS,
@@ -526,6 +527,7 @@ async def public_get_question(token: str):
         "expires_at": q.get("expires_at"),
         "company_name": (company or {}).get("name"),
         "counterparty_label": q.get("counterparty_label"),
+        "brand": await resolve_company_brand(q.get("company_id")),
         "batched": len(tx_list) > 1,
         "txn": tx_list[0] if tx_list else None,
         "txns": tx_list,

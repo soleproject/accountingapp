@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from db import db
+from brand_resolver import resolve_company_brand
 from auth import get_current_user
 from deps import require_company
 import nmi_service as nmi
@@ -134,6 +135,7 @@ async def public_pay_config(token: str):
     surcharge_pct = float(cred.get("surcharge_pct") or 0)
     surcharge_amount = float((balance * Decimal(str(surcharge_pct)) / Decimal(100)).quantize(Decimal("0.01")))
     return {
+        "brand": await resolve_company_brand(cid),
         "invoice": {
             "id":            inv["id"],
             "number":        inv.get("number"),

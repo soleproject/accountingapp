@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import axios from "axios";
+import { usePublicBrand } from "@/components/PublicBrand";
 import { Send, Paperclip, Camera, HelpCircle, Loader2, Check, CheckCircle2, ArrowRight, Calendar, X, Mic, MicOff, ChevronLeft, ChevronRight, Link2 as LinkChain, Pencil, Trash2, FileText, Eye, AlarmClock, Landmark, Percent, Home, ShieldAlert, ReceiptText, Users, Clock, AlertTriangle, Utensils, Plane, Wallet, ArrowDownToLine, RotateCcw } from "lucide-react";
 
 // A parked ("I don't have it now") item is skipped until its reminder time.
@@ -180,6 +181,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
   }, []);
   const chatEndRef = useRef(null);
   const mainRef = useRef(null);
+  usePublicBrand(session?.brand);
   const fileRef = useRef(null);
 
   // Top-level Category picker state, opened when the client taps the
@@ -1233,7 +1235,8 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     return <ParkedScreen session={session} parked={parkedItems} />;
   }
 
-  const firmLabel = session?.firm_name || "your bookkeeping team";
+  const firmLabel = session?.brand?.whitelabel ? session.brand.brand_name : (session?.firm_name || "your bookkeeping team");
+  const brand = session?.brand;
   const colW = embedded ? "max-w-4xl" : "max-w-2xl";
   const firmInitials = (session?.firm_name || "NG")
     .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
@@ -1279,7 +1282,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
             aria-hidden="true"
             data-testid="review-firm-avatar"
           >
-            {firmInitials}
+            {brand?.logo_url ? <img src={brand.logo_url} alt={brand.brand_name} className="w-9 h-9 object-contain rounded-xl bg-white" data-testid="public-brand-logo" /> : firmInitials}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[10.5px] text-slate-500 uppercase tracking-[0.15em] font-semibold">

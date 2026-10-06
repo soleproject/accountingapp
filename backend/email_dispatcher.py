@@ -200,6 +200,20 @@ async def dispatch(
     if firm_name_override:
         firm_name = firm_name_override
 
+    # Company-level white-label (Enterprise → Partner → Pro cascade): brand
+    # the From name AND the rendered body/footer/links/logo.
+    if company_id:
+        try:
+            from brand_resolver import resolve_company_brand, apply_brand_to_html
+            brand = await resolve_company_brand(company_id)
+            if brand.get("whitelabel"):
+                firm_name = firm_name_override or brand["brand_name"]
+                html = apply_brand_to_html(html, brand)
+                if subject:
+                    subject = subject.replace("SmartBooks", brand["brand_name"])
+        except Exception as e:  # never block sending on branding
+            logger.warning("brand resolve failed for company %s: %s", company_id, e)
+
     try:
         resp = await send_email(
             to=to, subject=subject, html=html, text=text, reply_to=reply_to,
