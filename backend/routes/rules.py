@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -764,7 +765,7 @@ async def dismiss_miner_notification(
     return {"ok": True}
 
 
-@router.post("/companies/{cid}/rules/mine")
+@router.post("/companies/{cid}/rules/mine", dependencies=[Depends(require_feature("automations"))])
 async def mine_rules_endpoint(cid: str,
                                user: dict = Depends(get_current_user)):
     """Manually re-run the rules miner for a company.
@@ -781,7 +782,7 @@ async def mine_rules_endpoint(cid: str,
     return {"ok": True, **result}
 
 
-@router.post("/companies/{cid}/rules/suggest-from-txns")
+@router.post("/companies/{cid}/rules/suggest-from-txns", dependencies=[Depends(require_feature("automations"))])
 async def suggest_rules_from_txns(
     cid: str, payload: dict,
     user: dict = Depends(get_current_user),

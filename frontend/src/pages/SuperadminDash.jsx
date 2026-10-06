@@ -96,6 +96,14 @@ export default function SuperadminDash() {
             <Inbox size={16} /> Cron Runs
           </Link>
           <Link
+            to="/admin/entitlements"
+            data-testid="nav-admin-entitlements"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            title="Plan gating — who would be blocked if enforcement were on"
+          >
+            Plan Gating
+          </Link>
+          <Link
             to="/admin/stripe-webhooks"
             data-testid="nav-stripe-webhooks"
             className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"

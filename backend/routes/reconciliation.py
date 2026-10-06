@@ -18,6 +18,7 @@ from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db, now_iso, coerce
+from entitlements import require_feature
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -887,7 +888,7 @@ async def list_reviews(cid: str, user: dict = Depends(get_current_user)):
     return {"reviews": [coerce(d) for d in docs]}
 
 
-@router.post("/companies/{cid}/book-reviews")
+@router.post("/companies/{cid}/book-reviews", dependencies=[Depends(require_feature("bookkeeper_review"))])
 async def create_review(cid: str, payload: dict, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     rid = str(uuid.uuid4()); now = now_iso()

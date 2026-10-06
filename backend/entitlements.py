@@ -25,6 +25,13 @@ PLAN_RANK = {"simple_start": 1, "essentials": 2, "assistant": 2, "plus": 3, "boo
 PLAN_LABELS = {"simple_start": "Core", "assistant": "AI Assistant", "bookkeeper": "AI Bookkeeper", "advanced": "Advanced"}
 PLAN_PRICE = {"simple_start": 38, "assistant": 79, "bookkeeper": 99, "advanced": 149}
 RANK_TO_PLAN = {1: "simple_start", 2: "assistant", 3: "bookkeeper", 4: "advanced"}
+# Seat / connected-account quotas per tier (pricing page). Informational for now — not enforced.
+PLAN_QUOTAS = {
+    "simple_start": {"companies": 1, "users": 1, "accountant": True, "connected_accounts": 3},
+    "assistant": {"companies": 1, "users": 3, "accountant": True, "connected_accounts": 6},
+    "bookkeeper": {"companies": 1, "users": 5, "accountant": True, "connected_accounts": None},
+    "advanced": {"companies": 1, "users": 5, "accountant": True, "connected_accounts": None},
+}
 
 FEATURE_MIN_PLAN = {
     # AI Assistant ($79)
@@ -65,7 +72,8 @@ async def company_entitlements(cid: str, user: dict, override: Optional[str] = N
     sub = (company.get("sub_status") or company.get("billing_state") or "").lower()
     base = {"company_id": cid, "plan": plan, "plan_label": PLAN_LABELS.get(plan, plan), "sub_status": sub or None,
             "payer": payer, "enforce": _flag("ENTITLEMENTS_ENFORCE"), "preview": override,
-            "min_plan": FEATURE_MIN_PLAN, "labels": PLAN_LABELS, "prices": PLAN_PRICE}
+            "min_plan": FEATURE_MIN_PLAN, "labels": PLAN_LABELS, "prices": PLAN_PRICE,
+            "quotas": PLAN_QUOTAS.get(override or plan)}
 
     def full(source: str) -> dict:
         return {**base, "all_access": True, "source": source, "features": ALL_FEATURES, "grace": False}

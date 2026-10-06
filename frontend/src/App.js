@@ -81,6 +81,7 @@ import AdminLeads from "@/pages/AdminLeads";
 import AdminAffiliates from "@/pages/AdminAffiliates";
 import ProAffiliates from "@/pages/ProAffiliates";
 import AdminCronRuns from "@/pages/AdminCronRuns";
+import AdminEntitlements from "@/pages/AdminEntitlements";
 import MyFeedback from "@/pages/MyFeedback";
 import { BillingSuccess, BillingCancel } from "@/pages/BillingReturn";
 import Invoices from "@/pages/Invoices";
@@ -270,6 +271,7 @@ function App() {
               <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/admin/affiliates" element={<AdminAffiliates />} />
               <Route path="/admin/cron-runs" element={<AdminCronRuns />} />
+              <Route path="/admin/entitlements" element={<AdminEntitlements />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
               <Route path="/invoices" element={<Invoices />} />

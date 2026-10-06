@@ -67,6 +67,7 @@ from pydantic import BaseModel
 
 from db import db, now_iso
 from auth import get_current_user
+from entitlements import require_feature
 from deps import require_company
 
 
@@ -1350,7 +1351,7 @@ async def submit_checkin_item(
 # sparkle-fills the fields; user reviews + submits.
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.post("/companies/{cid}/checkin/voice-extract")
+@router.post("/companies/{cid}/checkin/voice-extract", dependencies=[Depends(require_feature("checkins"))])
 async def voice_extract_checkin(
     cid: str,
     audio: UploadFile = File(...),
@@ -2125,7 +2126,7 @@ async def get_followup_schedule(
     }
 
 
-@router.post("/companies/{cid}/invoices/{iid}/followup-schedule")
+@router.post("/companies/{cid}/invoices/{iid}/followup-schedule", dependencies=[Depends(require_feature("auto_emails"))])
 async def set_followup_schedule(
     cid: str, iid: str, inp: FollowupScheduleIn, user: dict = Depends(get_current_user),
 ):
