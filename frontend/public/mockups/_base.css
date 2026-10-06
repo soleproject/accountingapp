@@ -33,8 +33,8 @@ body{zoom:.82;font-family:"IBM Plex Sans",system-ui,sans-serif;background:#0f172
 .composer .mic{width:40px;height:40px;border-radius:12px;background:#4f46e5;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px}
 .composer .in{flex:1;color:#94a3b8;font-size:14px}
 .hint{font-size:11px;color:#94a3b8;text-align:center}
-.label{position:absolute;left:0;right:0;top:-30px;text-align:center;color:#fff;font-size:13px;font-weight:600}
-.wrap{position:relative;margin-top:36px}
+.label{position:absolute;left:0;right:0;top:-38px;text-align:center;color:#fff;font-size:13px;font-weight:600}
+.wrap{position:relative;margin-top:44px}
 .chip{display:inline-flex;align-items:center;padding:6px 12px;border-radius:999px;border:1px solid #cbd5e1;background:#fff;font-size:12px;margin:3px 3px 0 0}
 .bubble{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:12px 14px;font-size:13px;line-height:1.4}
 .bubble.me{background:#0f172a;color:#fff;align-self:flex-end;max-width:85%}
