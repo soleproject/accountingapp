@@ -364,7 +364,7 @@ sit adjacent right after.
 - **P1** Contact Identity Spec Phase 2 (cross-source AR/AP matching)
 - **P1** Marketing site migration (`www.smartbookssoftware.ai` vs `app.smartbookssoftware.ai`)
 - **P2** Sidebar Settings "Navigation Style" broken navigation
-- **P1** Plan gating Phase 3: enforce seat/connected-account quotas (PLAN_QUOTAS) with 'Add seat' upsell; then flip ENTITLEMENTS_ENFORCE after reviewing /admin/entitlements
+- **P1** Flip ENTITLEMENTS_ENFORCE=true after reviewing /admin/entitlements (features + quotas both ready)
 - **P2** Multi-pod stale cache / Redis disconnect handling
 - **P2** Multi-company mirror booking
 - **P2** Directory approval workflow
@@ -1087,3 +1087,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Nav lock glyphs: Sidebar.jsx `Item` + Todo2CardList.jsx AccountingAccordion (`feature` key on items → `nav-lock-<feature>`, click opens UpgradeModal, no navigation). MobileShell bottom nav: Check-in tab (checkins) + Chat button (chat) → `mobile-nav-lock-<feature>`. Invisible unless enforce/preview active.
 - NEW superadmin page `/admin/entitlements` (pages/AdminEntitlements.jsx; link `nav-admin-entitlements` on /admin) backed by `GET /api/admin/entitlements/events?days=` (routes/admin_entitlements.py): mode banner, would-block / companies / preview-hits / all-events stats, by-feature + by-plan bars, per company×feature table. Use it to decide when to flip ENTITLEMENTS_ENFORCE=true.
 - Tests: backend/tests/test_entitlements_phase2.py (testing agent).
+
+## 2026-10-06 — Seat & connected-account quotas (Phase 3, SHADOW MODE) ✅ testing agent iteration_106 (6/6 backend + UI)
+- Decisions: users cap = client-side memberships (owner/editor/reviewer/viewer, non-archived) + pending company invites with those roles; pro/accountant seats free. Connected accounts = mapped Plaid accounts (`plaid_items.account_mappings`); statement uploads don't count. Cap hit → upsell to next plan that fits (`next_plan_for`), no per-seat Stripe price. Grandfathered: only NEW invites/connections blocked. Follows ENTITLEMENTS_ENFORCE / X-Plan-Preview like features.
+- entitlements.py: `quota_usage`, `next_plan_for`, `quota_payload` (code `quota_exceeded`, feature `quota_<kind>`, used/limit/min_plan/next_limit), `check_quota`, `require_quota`. `company_entitlements` returns `usage` + `quotas` (null = unlimited for superadmin/sponsored/own_books/no_plan; Advanced keeps users=5). Gated: POST /companies/{cid}/invites (users), POST /companies/{cid}/plaid/connect-account (connected_accounts). Events carry min_plan/used/limit → /admin/entitlements shows "(1/1)".
+- Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
+- Tests: backend/tests/test_entitlements_quotas.py.

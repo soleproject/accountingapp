@@ -174,7 +174,7 @@ async def check_quota(cid: str, kind: str, user: dict, request: Optional[Request
     """Blocks NEW seats/connections once at the plan cap (existing ones are grandfathered)."""
     ent = await company_entitlements(cid, user, preview_override(request, user))
     limit = (ent.get("quotas") or {}).get(kind)
-    if ent["all_access"] or limit is None or ent["usage"][kind] < limit:
+    if limit is None or ent["usage"][kind] < limit:
         return ent
     payload = quota_payload(kind, ent)
     try:

@@ -106,7 +106,7 @@ export function useEntitlements() {
 export function useQuota(kind) {
   const { ent, active, openQuotaUpgrade, reload } = useEntitlements();
   const used = ent?.usage?.[kind] ?? 0;
-  const limit = active && !ent?.all_access ? (ent?.quotas?.[kind] ?? null) : null;
+  const limit = active ? (ent?.quotas?.[kind] ?? null) : null;
   return { used, limit, active: active && limit != null, atCap: limit != null && used >= limit, over: limit != null && used > limit,
            openUpgrade: () => openQuotaUpgrade(kind), reload };
 }

@@ -1,0 +1,33 @@
+{
+  "summary": "Quota enforcement (seats + connected_accounts) end-to-end validation on Bright Beans Coffee Co. (cid 1829a9eb-7df2-4a31-afcf-7e50a514da7e). Backend pytest (6/6 PASS, /app/backend/tests/test_entitlements_quotas.py): (1) GET /api/companies/{cid}/entitlements with pro@axiom.ai + X-Plan-Preview: simple_start returns usage {users:0, connected_accounts:0} and quotas {users:1, connected_accounts:3}; (2) same endpoint for admin@axiom.ai with NO preview returns quotas=null (all_access superadmin); (3) POST /api/companies/{cid}/invites quota flow — 1st invite under simple_start 200 (usage.users→1); 2nd invite under simple_start → 402 with detail exactly {code:'quota_exceeded', feature:'quota_users', kind:'users', used:1, limit:1, min_plan:'assistant', min_plan_label:'AI Assistant', min_plan_price:79, next_limit:3}; same POST under X-Plan-Preview: assistant → NOT 402; same POST shadow (no header) → NOT 402; (4) POST /api/companies/{cid}/plaid/connect-account under simple_start preview with {} body returns 400 'plaid_account_id required' (quota passes 0<3, dependency ordering correct); (5) GET /api/admin/entitlements/events?days=7 as admin: 200, rows include feature='quota_users' for Bright Beans with min_plan='assistant', limit=1, enforced>=1; by_feature contains 'quota_users'; (6) same endpoint as pro → 403. Frontend desktop 1920x900: login pro@axiom.ai/pro123, sessionStorage.plan_preview='simple_start', /company-team → quota-notice-users shows 'quota-usage-users'='0 of 1', button 'Need more?'. team-invite-btn-company opens team-invite-form-company; filled qa-ui-quota@example.com + Send → toast 'Invite sent'; notice becomes '1 of 1' with data-at-cap='true', button label 'Add a seat'. Re-click invite button → NO form rendered; upgrade-modal opens with title 'Add a seat' and body 'Bright Beans Coffee Co. is using 1 of 1 team members included in Core. Upgrade to AI Assistant ($79/mo) for 3 team members.'. upgrade-modal-close dismisses; quota-upgrade-users link re-opens same modal. plan_preview='advanced' + reload → quota-notice-users NOT rendered (backend returns all_access=true for advanced preview → useQuota limit=null → notice hidden); invite button opens form (not modal). Clear preview (real) + reload → quota-notice-users not rendered (shadow). Cleanup: qa-ui-quota invite revoked. /connections (pro, simple_start): quota-notice-connected_accounts visible '0 of 3 connected bank accounts on Core', with 'real' not rendered, Connect Accounts tab loads normally. Admin /admin/entitlements (admin@axiom.ai): row for Bright Beans with feature 'Team seats (1/1)' Core→AI Assistant, 0(+7 preview), users=1; by-feature shows 'Team seats · needs AI Assistant' (no 'needs undefined'). Regression: pro no-preview sales-tax 402 preserved; final usage returned to {users:0, connected_accounts:0}; final pending_invites empty.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/company-team (advanced preview)", "issues": ["Review request spec said quota-notice-users should show '1 of 5' under advanced preview, but backend returns all_access=true for advanced → useQuota() short-circuits limit to null → notice intentionally hidden. Behavior matches code (useQuota: 'const limit = active && !ent?.all_access ? ...') but contradicts spec. Clarify intent: either (a) stop setting all_access=true for 'advanced' preview, or (b) update spec. Not a blocker."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_entitlements_quotas.py",
+    "/app/test_reports/pytest/entitlements_quotas.xml"
+  ],
+  "action_items": [
+    "Decision needed on advanced-preview QuotaNotice visibility (all_access=true vs. show '1 of 5'). Minor UX inconsistency with spec but code is self-consistent."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/entitlements.py:33 — 'advanced' plan quotas have users=5 (not None), yet get_company_entitlements under advanced preview also returns all_access=true. The frontend useQuota() hides the notice whenever all_access is truthy, so the users=5 cap is never surfaced. If 'advanced' is meant to be a strict cap, consider removing all_access for advanced or adjusting the useQuota short-circuit.",
+    "Admin events endpoint aggregates per (company_id, feature), so historical used-count snapshots are not preserved — only the latest state (used, limit, min_plan) is visible. Fine for 'should I upgrade?' decisions but makes reproducing earlier states for QA harder.",
+    "Invite flow is correctly idempotent on email collision when switching preview mid-flow (verified in test_quota_402_invites_flow)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_entitlements_quotas.py"
+  ],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "100% (all desktop quota flows pass; connections + admin pages correct)"},
+  "test_credentials": "pro@axiom.ai/pro123, admin@axiom.ai/admin123; Bright Beans cid 1829a9eb-7df2-4a31-afcf-7e50a514da7e",
+  "seed_data_creation": "Test created transient invites qa-quota-1/2/3@example.com, qa-quota-admin1/2@example.com, qa-ui-quota@example.com — all deleted by autouse cleanup fixture and manual UI revoke. Verified final usage.users=0 and pending_invites=[]. Entitlement-event rows for quota_users remain in audit log (expected, used for admin page).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Quota enforcement works end-to-end. Reusable regression file: /app/backend/tests/test_entitlements_quotas.py (6 tests, ~3s). It auto-cleans qa-quota-* and qa-ui-quota invites before and after. Known spec↔code divergence: 'advanced' preview sets all_access=true and hides seat QuotaNotice (users=5 cap never surfaces in UI). Previous Phase 2 gating still intact (sales-tax under simple_start preview still 402).",
+  "rca of the issue": "N/A — no bugs. The one spec-vs-code divergence is advanced-preview all_access short-circuit; documented for main agent decision."
+}
