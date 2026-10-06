@@ -1036,3 +1036,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-06 — Reminder preview before send ✅ self-tested
 - `GET /companies/{cid}/communications/dunning/preview?invoice_id=` → {to, subject, html, days_late, last_reminder_sent_at}. `_build_dunning` shared with POST; both now use `get_current_user`+`require_company` (owners can send, not just pros). Contact greeting falls back to `name`.
 - OverdueInvoicesModal: Send reminder → `ReminderPreview` step (editable To, subject, iframe srcDoc body, last-sent notice, Cancel/Send). testids `reminder-preview-*`.
+
+## 2026-10-06 — Money tab "Keep collections moving" uses reminder preview ✅ self-tested
+- `ReminderPreview` exported from OverdueInvoicesModal; MoneyTab Send reminder opens it in a modal (testid `money-reminder-modal`), row flips to Sent. Expected-date input now shown for every overdue row without an expected date (was >60 days only).

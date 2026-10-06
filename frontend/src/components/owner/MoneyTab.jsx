@@ -2,23 +2,18 @@ import React, { useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Card, Pill, Big, Button, fmtDay, fmtWhole } from "./ui";
+import { ReminderPreview } from "./OverdueInvoicesModal";
+import { X, Check } from "lucide-react";
 
 const SOURCE = { bill: "bill due", payroll: "payroll", sales_tax: "sales tax", loan: "loan payment", custom: "recurring", pattern: "recurring" };
 
 export default function MoneyTab({ data, fmt, companyId, reload }) {
   const { money, cash } = data;
-  const [sending, setSending] = useState(null);
+  const [previewing, setPreviewing] = useState(null);
+  const [sent, setSent] = useState({});
   const [dates, setDates] = useState({});
 
-  const remind = async (inv) => {
-    setSending(inv.id);
-    try {
-      await api.post(`/companies/${companyId}/communications/dunning`, { invoice_id: inv.id });
-      toast.success(`Reminder sent for ${inv.number}.`);
-    } catch (e) {
-      toast.error(e?.response?.data?.detail || "Could not send reminder.");
-    } finally { setSending(null); }
-  };
+  const remind = (inv) => setPreviewing(inv);
   const expect = async (inv) => {
     const d = dates[inv.id];
     if (!d) return;
@@ -94,14 +89,14 @@ export default function MoneyTab({ data, fmt, companyId, reload }) {
                     </td>
                     <td className="py-3 text-right font-mono-num">{fmtWhole(fmt, inv.balance)}</td>
                     <td className="py-3 text-right whitespace-nowrap">
-                      {inv.days_overdue > 60 && !inv.expected_payment_date && (
+                      {inv.days_overdue > 0 && !inv.expected_payment_date && (
                         <span className="inline-flex items-center gap-1 mr-2">
                           <input type="date" className="border rounded px-1.5 py-1 text-xs" value={dates[inv.id] || ""} onChange={e => setDates(p => ({ ...p, [inv.id]: e.target.value }))} data-testid={`owner-invoice-expect-date-${inv.id}`} />
                           <Button onClick={() => expect(inv)} disabled={!dates[inv.id]} data-testid={`owner-invoice-expect-save-${inv.id}`}>Expect</Button>
                         </span>
                       )}
                       {inv.days_overdue > 0
-                        ? <Button primary={inv.days_overdue > 30} disabled={sending === inv.id} onClick={() => remind(inv)} data-testid={`owner-invoice-remind-${inv.id}`}>{sending === inv.id ? "Sending…" : "Send reminder"}</Button>
+                        ? <Button primary={inv.days_overdue > 30} disabled={sent[inv.id]} onClick={() => remind(inv)} data-testid={`owner-invoice-remind-${inv.id}`}>{sent[inv.id] ? <span className="inline-flex items-center gap-1"><Check size={12} /> Sent</span> : "Send reminder"}</Button>
                         : <Button onClick={() => window.open(`/invoices/${inv.id}/edit`, "_self")} data-testid={`owner-invoice-view-${inv.id}`}>View</Button>}
                     </td>
                   </tr>
@@ -111,6 +106,21 @@ export default function MoneyTab({ data, fmt, companyId, reload }) {
           </div>
         )}
       </Card>
+      {previewing && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setPreviewing(null); }} data-testid="money-reminder-modal">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl p-5 max-h-[calc(100dvh-2rem)] overflow-y-auto">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-slate-500 font-semibold">{previewing.contact || "Customer"} · {previewing.number} · {fmtWhole(fmt, previewing.balance)}</div>
+                <h2 className="font-heading text-xl">Review the reminder before it goes out</h2>
+              </div>
+              <button onClick={() => setPreviewing(null)} className="text-slate-500 hover:text-slate-900" data-testid="money-reminder-close"><X size={16} /></button>
+            </div>
+            <ReminderPreview companyId={companyId} inv={previewing} onBack={() => setPreviewing(null)}
+              onSent={(inv) => { setSent((p) => ({ ...p, [inv.id]: true })); setPreviewing(null); }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

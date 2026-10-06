@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Button, Pill, fmtDay, fmtWhole } from "./ui";
 
-function ReminderPreview({ companyId, inv, onBack, onSent }) {
+export function ReminderPreview({ companyId, inv, onBack, onSent }) {
   const [preview, setPreview] = useState(null);
   const [to, setTo] = useState("");
   const [sending, setSending] = useState(false);
