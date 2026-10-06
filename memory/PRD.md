@@ -1032,3 +1032,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Owner "Upload" (statement needed) → inline upload popup ✅ self-tested
 - Attention `stmt-*` items now carry `account_id`, `account_name`, `period_label`. New `components/owner/StatementUploadModal.jsx` (testid `statement-upload-modal`) wraps `StatementsTab bare` with new `defaultAccountId` prop (preselects the bank account → drops skip the confirm modal). OwnerDashboard `onAttention` kind=statement opens it; closing reloads dashboard.
+
+## 2026-10-06 — Reminder preview before send ✅ self-tested
+- `GET /companies/{cid}/communications/dunning/preview?invoice_id=` → {to, subject, html, days_late, last_reminder_sent_at}. `_build_dunning` shared with POST; both now use `get_current_user`+`require_company` (owners can send, not just pros). Contact greeting falls back to `name`.
+- OverdueInvoicesModal: Send reminder → `ReminderPreview` step (editable To, subject, iframe srcDoc body, last-sent notice, Cancel/Send). testids `reminder-preview-*`.

@@ -23,6 +23,7 @@ from pydantic import BaseModel, EmailStr
 
 from db import db, now_iso, coerce
 from auth import get_current_user, require_role
+from deps import require_company
 
 from email_dispatcher import (
     dispatch, get_prefs, set_prefs, public_base_url, DEFAULT_PREFS,
@@ -1222,17 +1223,14 @@ class DunningIn(BaseModel):
     to: Optional[EmailStr] = None
 
 
-@router.post("/companies/{cid}/communications/dunning")
-async def send_dunning(cid: str, inp: DunningIn, user: dict = Depends(require_role("pro", "superadmin"))):
-    inv = await db.invoices.find_one({"id": inp.invoice_id, "company_id": cid})
+async def _build_dunning(cid: str, invoice_id: str, to: Optional[str]) -> dict:
+    inv = await db.invoices.find_one({"id": invoice_id, "company_id": cid})
     if not inv:
         raise HTTPException(404, "Invoice not found.")
     contact = None
     if inv.get("contact_id"):
         contact = await db.contacts.find_one({"id": inv["contact_id"], "company_id": cid})
-    to_email = str(inp.to) if inp.to else (contact or {}).get("email")
-    if not to_email:
-        raise HTTPException(400, "No email on the customer contact — pass `to` explicitly.")
+    to_email = to or (contact or {}).get("email")
     company = await db.companies.find_one({"id": cid})
     due = inv.get("due_date") or ""
     try:
@@ -1241,12 +1239,35 @@ async def send_dunning(cid: str, inp: DunningIn, user: dict = Depends(require_ro
         d_due = datetime.now(timezone.utc).date()
     days_late = max(0, (datetime.now(timezone.utc).date() - d_due).days)
     subject, html = tmpl.dunning(
-        contact_name=(contact or {}).get("display_name") or "there",
+        contact_name=(contact or {}).get("display_name") or (contact or {}).get("name") or "there",
         company_name=(company or {}).get("name") or "",
         invoice=inv, days_late=days_late, app_url=public_base_url(),
     )
+    return {"invoice": inv, "contact": contact, "to": to_email, "subject": subject, "html": html, "days_late": days_late}
+
+
+@router.get("/companies/{cid}/communications/dunning/preview")
+async def preview_dunning(cid: str, invoice_id: str = Query(...), user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    b = await _build_dunning(cid, invoice_id, None)
+    inv = b["invoice"]
+    return {
+        "to": b["to"], "contact_name": (b["contact"] or {}).get("display_name") or (b["contact"] or {}).get("name"),
+        "subject": b["subject"], "html": b["html"], "days_late": b["days_late"],
+        "invoice_number": inv.get("number"),
+        "last_reminder_sent_at": inv.get("last_reminder_sent_at"), "last_reminder_to": inv.get("last_reminder_to"),
+    }
+
+
+@router.post("/companies/{cid}/communications/dunning")
+async def send_dunning(cid: str, inp: DunningIn, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    b = await _build_dunning(cid, inp.invoice_id, str(inp.to) if inp.to else None)
+    to_email, contact, days_late = b["to"], b["contact"], b["days_late"]
+    if not to_email:
+        raise HTTPException(400, "No email on the customer contact — pass `to` explicitly.")
     result = await dispatch(
-        kind="dunning", to=to_email, subject=subject, html=html,
+        kind="dunning", to=to_email, subject=b["subject"], html=b["html"],
         initiating_user_id=user["id"], company_id=cid,
         contact_id=(contact or {}).get("id"),
         related={"invoice_id": inp.invoice_id, "days_late": days_late},
