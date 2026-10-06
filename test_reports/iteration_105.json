@@ -1,0 +1,26 @@
+{
+  "summary": "Full-matrix Phase-2 entitlement gating validation (backend + desktop + mobile + admin + regression). Backend pytest: 36/36 PASS covering (a) 10 gated endpoints returning 402 with detail.code=upgrade_required and exact min_plan under X-Plan-Preview: simple_start, (b) same 10 endpoints NOT returning 402 under X-Plan-Preview: advanced, (c) same 10 endpoints NOT returning 402 in shadow mode (no header), (d) GET /api/companies/{cid}/entitlements quotas match PLAN_QUOTAS for assistant/simple_start/bookkeeper previews, (e) GET /api/admin/entitlements/events returns 200 with required keys for admin / 403 for pro / 422 for days=0. Frontend: desktop 1920x1080 pro@axiom.ai + simple_start preview → sidebar accounting accordion shows all 5 lock glyphs (nav-lock-month_close/bookkeeper_review/outlook/inventory/sales_tax); clicking locked Month Close does NOT navigate and opens upgrade-modal containing 'AI Month-End Close', upgrade-modal-close closes it; advanced preview → 0 locks and Month Close navigates to /accounting/month-close; real preview → 0 locks (shadow). Mobile 390x844 /owner + simple_start → mobile-nav-lock-checkins/chat visible, tapping mobile-nav-chat opens upgrade-modal 'AI Review Chat', tapping mobile-nav-check-in opens upgrade-modal 'AI Proactive Check-Ins' and does NOT navigate to /checkin; bookkeeper preview → 0 mobile locks and check-in tab navigates to /checkin. Admin: nav-admin-entitlements link on /admin navigates to /admin/entitlements; page renders admin-entitlements-page, admin-entitlements-mode banner starts with 'Shadow mode', 4 stat cards (WOULD-BLOCK/COMPANIES/PREVIEW-ENFORCED/ALL EVENTS = 0/0/14/14), By-feature + By-plan breakdowns, 10 admin-entitlements-row-* rows with Bright Beans Coffee Co. preview-generated events; admin-entitlements-days selector changes to 7 (verified input_value) and reloads; refresh button works. Regression (pro, NO preview): sidebar Month Close navigates to /accounting/month-close; mobile Check-in navigates to /checkin; mobile Chat tap does NOT open upgrade-modal (opens chat sheet as expected).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_entitlements_phase2.py",
+    "/app/test_reports/pytest/entitlements_phase2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Login endpoint response key is 'token' (not 'access_token'); fine but worth documenting for test author consistency across new test files.",
+    "/api/admin/entitlements/events?days=0 correctly returns 422 (Pydantic validation). Good practice."
+  ],
+  "updated_files": ["/app/backend/tests/test_entitlements_phase2.py"],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "100% (desktop + mobile + admin + regression all pass)"},
+  "test_credentials": "pro@axiom.ai/pro123 (first company Bright Beans Coffee Co.); admin@axiom.ai/admin123",
+  "seed_data_creation": "The 10 backend 402-generating preview calls created entitlement-event rows for Bright Beans Coffee Co. visible on /admin/entitlements (PREVIEW/ENFORCED HITS = 14).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All Phase 2 gating + nav lock glyphs + admin review page working end-to-end. Shadow mode is active (ENTITLEMENTS_ENFORCE=false) — real-plan calls never 402. The 'Viewing as' pill persists via sessionStorage.plan_preview and is sent as X-Plan-Preview header via lib/api.js. Test file /app/backend/tests/test_entitlements_phase2.py is reusable for regression.",
+  "rca of the issue": "N/A — no bugs found."
+}
