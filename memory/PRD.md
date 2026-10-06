@@ -1029,3 +1029,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Owner "Send reminder" → overdue invoices popup ✅ self-tested
 - New `components/owner/OverdueInvoicesModal.jsx` (testids `overdue-invoices-modal`, `overdue-invoice-expect-date-{id}`, `overdue-invoice-remind-{id}`): lists `money.invoices` with days_overdue>0; date input saves via `/projections/invoices/{id}/expected-date` on change (reloads dashboard), Send reminder posts `/communications/dunning` and flips to "Sent". OwnerDashboard `onAttention` id=overdue opens it.
+
+## 2026-10-06 — Owner "Upload" (statement needed) → inline upload popup ✅ self-tested
+- Attention `stmt-*` items now carry `account_id`, `account_name`, `period_label`. New `components/owner/StatementUploadModal.jsx` (testid `statement-upload-modal`) wraps `StatementsTab bare` with new `defaultAccountId` prop (preselects the bank account → drops skip the confirm modal). OwnerDashboard `onAttention` kind=statement opens it; closing reloads dashboard.

@@ -295,6 +295,7 @@ async def _attention(cid: str, today: date, books: dict, batch: Optional[dict], 
                 "title": f"{a['name']} statement needed",
                 "subtitle": f"{books['period_label']} · to finish reconciling",
                 "action_label": "Upload", "href": "/owner/documents", "count": 1,
+                "account_id": a["id"], "account_name": a["name"], "period_label": books["period_label"],
             })
     return items
 
