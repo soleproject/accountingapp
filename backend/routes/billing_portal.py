@@ -22,6 +22,32 @@ router = APIRouter(prefix="/api")
 
 _PLANS = ("simple_start", "assistant", "bookkeeper", "advanced")
 _CFG_TAG = "smartbooks_plan_portal_v1"
+_CFG_VERSION = 2  # bump when _portal_features() changes → existing config gets modified in place
+
+
+def _portal_features(products: dict[str, list[str]]) -> dict:
+    return {
+        # always_invoice → the prorated difference is charged immediately on upgrade
+        "subscription_update": {"enabled": True, "default_allowed_updates": ["price"],
+                                "proration_behavior": "always_invoice",
+                                "products": [{"product": p, "prices": prices} for p, prices in products.items()]},
+        "payment_method_update": {"enabled": True},
+        "invoice_history": {"enabled": True},
+        "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
+    }
+
+
+def _plan_products() -> dict[str, list[str]]:
+    products: dict[str, list[str]] = {}
+    for plan in _PLANS:
+        for cad in ("monthly", "annual"):
+            pid = _price_id(plan, False, cad)
+            if not pid:
+                continue
+            price = stripe.Price.retrieve(pid)
+            prod = price["product"] if isinstance(price["product"], str) else price["product"]["id"]
+            products.setdefault(prod, []).append(pid)
+    return products
 
 
 class PortalIn(BaseModel):
@@ -34,44 +60,33 @@ class PortalIn(BaseModel):
 async def _portal_configuration_id() -> Optional[str]:
     """Managed portal config that allows switching between our 4 plans. Cached per Stripe key."""
     key_tag = (os.environ.get("STRIPE_SECRET_KEY") or "")[-8:]
-    cached = await db.app_settings.find_one({"key": "stripe_portal_config", "stripe_key_tag": key_tag})
-    if cached and cached.get("configuration_id"):
+    q = {"key": "stripe_portal_config", "stripe_key_tag": key_tag}
+    cached = await db.app_settings.find_one(q)
+    if cached and cached.get("configuration_id") and cached.get("version") == _CFG_VERSION:
         return cached["configuration_id"]
     try:
-        for cfg in stripe.billing_portal.Configuration.list(limit=20, active=True).auto_paging_iter():
-            if (cfg.get("metadata") or {}).get("managed_by") == _CFG_TAG:
-                await db.app_settings.update_one({"key": "stripe_portal_config", "stripe_key_tag": key_tag},
-                                                 {"$set": {"configuration_id": cfg["id"], "updated_at": now_iso()}}, upsert=True)
-                return cfg["id"]
-        products: dict[str, list[str]] = {}
-        for plan in _PLANS:
-            for cad in ("monthly", "annual"):
-                pid = _price_id(plan, False, cad)
-                if not pid:
-                    continue
-                price = stripe.Price.retrieve(pid)
-                prod = price["product"] if isinstance(price["product"], str) else price["product"]["id"]
-                products.setdefault(prod, []).append(pid)
+        cfg_id = (cached or {}).get("configuration_id")
+        if not cfg_id:
+            for cfg in stripe.billing_portal.Configuration.list(limit=20, active=True).auto_paging_iter():
+                if (cfg.get("metadata") or {}).get("managed_by") == _CFG_TAG:
+                    cfg_id = cfg["id"]
+                    break
+        products = _plan_products()
         if not products:
             return None
-        cfg = stripe.billing_portal.Configuration.create(
-            business_profile={"headline": "Manage your plan"},
-            features={
-                "subscription_update": {"enabled": True, "default_allowed_updates": ["price"],
-                                        "proration_behavior": "create_prorations",
-                                        "products": [{"product": p, "prices": prices} for p, prices in products.items()]},
-                "payment_method_update": {"enabled": True},
-                "invoice_history": {"enabled": True},
-                "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
-            },
-            metadata={"managed_by": _CFG_TAG},
-        )
-        await db.app_settings.update_one({"key": "stripe_portal_config", "stripe_key_tag": key_tag},
-                                         {"$set": {"configuration_id": cfg["id"], "updated_at": now_iso()}}, upsert=True)
-        return cfg["id"]
+        if cfg_id:
+            stripe.billing_portal.Configuration.modify(cfg_id, features=_portal_features(products))
+        else:
+            cfg_id = stripe.billing_portal.Configuration.create(
+                business_profile={"headline": "Manage your plan"},
+                features=_portal_features(products),
+                metadata={"managed_by": _CFG_TAG},
+            )["id"]
+        await db.app_settings.update_one(q, {"$set": {"configuration_id": cfg_id, "version": _CFG_VERSION, "updated_at": now_iso()}}, upsert=True)
+        return cfg_id
     except Exception as e:  # noqa: BLE001
         log.warning("portal configuration unavailable, falling back to Stripe default: %s", e)
-        return None
+        return (cached or {}).get("configuration_id")
 
 
 @router.post("/companies/{cid}/billing/portal-session")
@@ -93,7 +108,9 @@ async def create_portal_session(cid: str, inp: PortalIn, user: dict = Depends(ge
         raise HTTPException(409, {"code": "no_subscription", "message": "No active subscription to manage — start one from the pricing page."})
 
     base = (inp.origin_url or os.environ.get("PUBLIC_APP_URL") or "").rstrip("/")
-    return_url = f"{base}{inp.return_path or '/accounting/transactions'}" if base else None
+    path = inp.return_path or "/accounting/transactions"
+    path += ("&" if "?" in path else "?") + "billing=updated"
+    return_url = f"{base}{path}" if base else None
     params: dict = {"customer": customer}
     if return_url:
         params["return_url"] = return_url
@@ -142,6 +159,25 @@ async def create_portal_session(cid: str, inp: PortalIn, user: dict = Depends(ge
 def _ts_iso(ts) -> Optional[str]:
     from datetime import datetime, timezone
     return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat() if ts else None
+
+
+@router.post("/companies/{cid}/billing/sync-subscription")
+async def sync_subscription(cid: str, user: dict = Depends(get_current_user)):
+    """Pull the live subscription from Stripe and apply it now (don't wait for the webhook)."""
+    from routes.stripe_billing import _sub_snapshot, _sub_status_to_billing_state
+    if user.get("role") != "superadmin" and not await db.memberships.find_one({"user_id": user["id"], "company_id": cid}):
+        raise HTTPException(404, "Company not found")
+    c = await db.companies.find_one({"id": cid}, {"_id": 0, "stripe_subscription_id": 1, "billing_product": 1})
+    if not c or not c.get("stripe_subscription_id") or not os.environ.get("STRIPE_SECRET_KEY"):
+        return {"synced": False}
+    try:
+        sub = stripe.Subscription.retrieve(c["stripe_subscription_id"], expand=["default_payment_method", "customer.invoice_settings.default_payment_method"])
+    except stripe.error.StripeError as e:
+        raise HTTPException(502, f"Stripe error: {getattr(e, 'user_message', None) or str(e)}")
+    snap = _sub_snapshot(sub.to_dict() if hasattr(sub, "to_dict") else dict(sub))
+    await db.companies.update_one({"id": cid}, {"$set": {**snap, "billing_state": _sub_status_to_billing_state(sub.get("status")), "updated_at": now_iso()}})
+    return {"synced": True, "billing_product": snap.get("billing_product"), "previous_product": c.get("billing_product"),
+            "changed": bool(snap.get("billing_product")) and snap.get("billing_product") != c.get("billing_product"), "sub_status": sub.get("status")}
 
 
 @router.get("/companies/{cid}/billing/plan-summary")
