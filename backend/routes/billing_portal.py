@@ -137,3 +137,54 @@ async def create_portal_session(cid: str, inp: PortalIn, user: dict = Depends(ge
     await db.billing_portal_sessions.insert_one({"company_id": cid, "user_id": user.get("id"), "session_id": session["id"],
                                                  "target_product": deep_link, "created_at": now_iso()})
     return {"portal_url": session["url"], "deep_link": deep_link}
+
+
+def _ts_iso(ts) -> Optional[str]:
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat() if ts else None
+
+
+@router.get("/companies/{cid}/billing/plan-summary")
+async def plan_summary(cid: str, user: dict = Depends(get_current_user)):
+    """Current plan, next invoice, card, seats — one call for the Billing page."""
+    from entitlements import company_entitlements, PLAN_LABELS, PLAN_PRICE, PLAN_QUOTAS, preview_override
+    if user.get("role") != "superadmin" and not await db.memberships.find_one({"user_id": user["id"], "company_id": cid}):
+        raise HTTPException(404, "Company not found")
+    c = await db.companies.find_one({"id": cid}, {"_id": 0})
+    if not c:
+        raise HTTPException(404, "Company not found")
+    ent = await company_entitlements(cid, user, None)
+    plan = c.get("billing_product")
+    sub_status = (c.get("sub_status") or c.get("billing_state") or None)
+    sub_id, customer = c.get("stripe_subscription_id"), c.get("stripe_customer_id")
+    has_sub = bool(sub_id) and (sub_status or "") not in ("canceled", "unpaid", "incomplete_expired")
+    cadence = c.get("billing_cadence") or ("annual" if c.get("sub_interval") == "year" else "monthly")
+    amount_cents = (c.get("sub_amount_cents") if has_sub else None) or (PLAN_PRICE.get(plan, 0) * 100 if plan in PLAN_PRICE and cadence == "monthly" else None)
+
+    next_invoice = None
+    if has_sub and os.environ.get("STRIPE_SECRET_KEY"):
+        try:
+            inv = stripe.Invoice.create_preview(subscription=sub_id)
+            next_invoice = {"amount_cents": inv.get("amount_due"), "date": _ts_iso(inv.get("next_payment_attempt") or inv.get("period_end")),
+                            "currency": inv.get("currency")}
+        except Exception as e:  # noqa: BLE001
+            log.info("invoice preview unavailable (%s); using snapshot", e)
+    if not next_invoice and has_sub and c.get("sub_current_period_end"):
+        next_invoice = {"amount_cents": amount_cents, "date": c.get("sub_current_period_end"), "currency": "usd", "estimated": True}
+    if c.get("sub_cancel_at_period_end"):
+        next_invoice = None
+
+    return {
+        "company_id": cid, "company_name": c.get("name"),
+        "plan": plan, "plan_label": PLAN_LABELS.get(plan, plan) if plan else None,
+        "effective_plan_label": ent.get("plan_label"), "all_access": ent.get("all_access"), "access_source": ent.get("source"),
+        "payer": c.get("billing_payer"), "sub_status": sub_status,
+        "trialing": sub_status == "trialing", "trial_end": c.get("sub_trial_end"),
+        "cancel_at_period_end": bool(c.get("sub_cancel_at_period_end")), "current_period_end": c.get("sub_current_period_end"),
+        "cadence": cadence, "amount_cents": amount_cents,
+        "card": (f"{(c.get('sub_card_brand') or '').title()} •••• {c.get('sub_card_last4')}" if c.get("sub_card_last4") else None),
+        "next_invoice": next_invoice,
+        "has_subscription": has_sub, "can_open_portal": has_sub and bool(customer or c.get("owner_user_id")),
+        "usage": ent.get("usage"), "quotas": ent.get("quotas") or PLAN_QUOTAS.get(plan),
+        "stripe_configured": bool(os.environ.get("STRIPE_SECRET_KEY")),
+    }
