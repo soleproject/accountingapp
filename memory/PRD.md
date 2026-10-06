@@ -1094,6 +1094,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
+## 2026-10-06 — UpgradeModal plan picker ✅ (desktop + mobile verified)
+- Clients now see every plan above their current one as selectable rows (label, PLAN_PITCH blurb, $/mo; recommended = min_plan highlighted "Includes <feature>", higher tiers "Also includes it"; quota modals append the tier's limit). Clicking a row → portal deep-link to that plan (active sub) or /welcome/pricing?plan=<p> (no sub). Pros keep the single "Manage plan" CTA.
+
 ## 2026-10-06 — Portal: immediate prorated charge + instant unlock on return ✅ (E2E: Core→AI Assistant, Stripe showed "Amount due today $41.00", Confirm → auto-redirect /billing → plan AI Assistant, chat unlocked)
 - Portal config `proration_behavior` → `always_invoice` (prorated difference charged at Confirm). `_CFG_VERSION=2`: cached config is modified in place via `Configuration.modify` when version differs (prod live config upgrades itself on first use).
 - `POST /api/companies/{cid}/billing/sync-subscription`: retrieves sub (expand default_payment_method + customer.invoice_settings.default_payment_method) → `_sub_snapshot` + billing_state applied immediately. Portal return_url now carries `?billing=updated`; EntitlementsProvider detects it, calls sync, reloads entitlements, toasts "Plan updated to X — new features are unlocked" (or "Billing details refreshed"), strips the param. Webhook remains the fallback/source of truth.
