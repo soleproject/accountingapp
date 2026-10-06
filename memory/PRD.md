@@ -1094,6 +1094,10 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
+## 2026-10-06 — In-page pre-flight on /admin/entitlements ✅ (self-tested API + screenshot)
+- `GET /api/admin/entitlements/preflight` (superadmin): every company with billing_product set → plan, payer, sub_status, has_stripe_sub ("manual" badge if none), usage vs quotas, over[] flags, outcome (gated / core_fallback / trial / all_access) mirroring company_entitlements logic; totals gated/over_quota/no_plan.
+- `components/admin/PreflightPanel.jsx` rendered at top of AdminEntitlements. Replaces the need to SSH into Railway to run scripts/entitlements_preflight.py.
+
 ## 2026-10-06 — Daily plan-block digest email ✅ (self-tested: 401 bad bearer, accepted+sent, duplicate run_id skipped, admin button)
 - `routes/cron_entitlement_digest.py`: POST /api/cron/entitlement-digest (Bearer WEBHOOK_CRON_SECRET, X-Webhook-Id idempotent, backgrounds `run_digest`), POST /api/cron/entitlement-digest/trigger?force= (superadmin), GET /api/cron/entitlement-digest/preview. Aggregates `entitlement_events` last 24h where enforced=true AND preview!=true, grouped by company → per-company card (plan, users affected, features + needed plan, owner_email mailto) + link to PUBLIC_APP_URL/admin/entitlements. Quiet when 0 blocks (unless force). Recipients: all superadmin users, or `ENTITLEMENT_DIGEST_TO` (comma list) env override. Logged to cron_runs/cron_run_history as `entitlement_digest`.
 - Events now carry `preview: bool` (pill-driven blocks excluded from digest). `.emergent/crons.yml`: `plan-block-digest` daily 13:00 UTC. Admin page: "Send digest now" button + banner note.

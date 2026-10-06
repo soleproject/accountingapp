@@ -4,6 +4,7 @@ import { ChevronLeft, Lock, RefreshCw, Loader2, ShieldCheck, ShieldAlert, Mail }
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { FEATURE_COPY } from "@/lib/entitlements";
+import { PreflightPanel } from "@/components/admin/PreflightPanel";
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -87,6 +88,8 @@ export default function AdminEntitlements() {
           </div>
         </div>
       )}
+
+      <PreflightPanel />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Would-block events" value={t.shadow ?? "—"} testid="admin-entitlements-stat-shadow" />
