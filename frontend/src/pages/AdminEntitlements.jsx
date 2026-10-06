@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronLeft, Lock, RefreshCw, Loader2, ShieldCheck, ShieldAlert } from "lucide-react";
+import { ChevronLeft, Lock, RefreshCw, Loader2, ShieldCheck, ShieldAlert, Mail } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { FEATURE_COPY } from "@/lib/entitlements";
+import { PreflightPanel } from "@/components/admin/PreflightPanel";
 
 const fmt = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
 
@@ -37,6 +39,17 @@ export default function AdminEntitlements() {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+
+  const sendDigest = async () => {
+    setSending(true);
+    try {
+      const r = (await api.post("/cron/entitlement-digest/trigger?force=true")).data;
+      if (r.sent) toast.success(`Digest sent to ${r.recipients} recipient${r.recipients === 1 ? "" : "s"} · ${r.blocks} block${r.blocks === 1 ? "" : "s"} in the last 24h`);
+      else toast.error(`Digest not sent: ${r.error || r.skipped || "unknown"}`);
+    } catch (e) { toast.error(e.response?.data?.detail || "Couldn't send digest"); }
+    finally { setSending(false); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -58,6 +71,9 @@ export default function AdminEntitlements() {
         <button onClick={load} className="h-9 px-3 rounded-lg border border-slate-300 text-sm inline-flex items-center gap-1.5" data-testid="admin-entitlements-refresh">
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
         </button>
+        <button onClick={sendDigest} disabled={sending} className="h-9 px-3 rounded-lg bg-slate-900 text-white text-sm inline-flex items-center gap-1.5 disabled:opacity-60" data-testid="admin-entitlements-send-digest" title="Email the last-24h block digest to superadmins now">
+          {sending ? <Loader2 size={14} className="animate-spin" /> : <Mail size={14} />} Send digest now
+        </button>
       </div>
 
       {data && (
@@ -68,14 +84,17 @@ export default function AdminEntitlements() {
               ? "feature gates return 402 and block users on lower plans."
               : "gates are evaluated and logged only; nobody is blocked. Review the rows below before flipping ENTITLEMENTS_ENFORCE=true."}
             {data.preview_switcher && <span className="ml-2 text-xs text-slate-600">(Preview switcher is on — rows with “enforced” count come from the Viewing-as pill.)</span>}
+            <div className="text-xs text-slate-600 mt-1">A daily digest of real blocks (preview-pill tests excluded) is emailed to superadmins at 13:00 UTC — only when there is something to report.</div>
           </div>
         </div>
       )}
 
+      <PreflightPanel />
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Would-block events" value={t.shadow ?? "—"} testid="admin-entitlements-stat-shadow" />
         <Stat label="Companies affected" value={t.companies ?? "—"} testid="admin-entitlements-stat-companies" />
-        <Stat label="Preview / enforced hits" value={t.enforced ?? "—"} testid="admin-entitlements-stat-enforced" />
+        <Stat label={data?.enforce ? "Blocked (enforced)" : "Preview / enforced hits"} value={t.enforced ?? "—"} testid="admin-entitlements-stat-enforced" />
         <Stat label="All events" value={t.events ?? "—"} testid="admin-entitlements-stat-events" />
       </div>
 

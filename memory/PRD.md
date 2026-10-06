@@ -364,7 +364,7 @@ sit adjacent right after.
 - **P1** Contact Identity Spec Phase 2 (cross-source AR/AP matching)
 - **P1** Marketing site migration (`www.smartbookssoftware.ai` vs `app.smartbookssoftware.ai`)
 - **P2** Sidebar Settings "Navigation Style" broken navigation
-- **P1** Flip ENTITLEMENTS_ENFORCE=true after reviewing /admin/entitlements (features + quotas both ready)
+- **P1** Watch /admin/entitlements (prod) for unexpected blocks after Railway flip; rollback = set ENTITLEMENTS_ENFORCE=false
 - **P2** Multi-pod stale cache / Redis disconnect handling
 - **P2** Multi-company mirror booking
 - **P2** Directory approval workflow
@@ -1094,7 +1094,16 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
-## 2026-10-06 — Trial = full access + enforcement runbook (still SHADOW by user choice)
+## 2026-10-06 — In-page pre-flight on /admin/entitlements ✅ (self-tested API + screenshot)
+- `GET /api/admin/entitlements/preflight` (superadmin): every company with billing_product set → plan, payer, sub_status, has_stripe_sub ("manual" badge if none), usage vs quotas, over[] flags, outcome (gated / core_fallback / trial / all_access) mirroring company_entitlements logic; totals gated/over_quota/no_plan.
+- `components/admin/PreflightPanel.jsx` rendered at top of AdminEntitlements. Replaces the need to SSH into Railway to run scripts/entitlements_preflight.py.
+
+## 2026-10-06 — Daily plan-block digest email ✅ (self-tested: 401 bad bearer, accepted+sent, duplicate run_id skipped, admin button)
+- `routes/cron_entitlement_digest.py`: POST /api/cron/entitlement-digest (Bearer WEBHOOK_CRON_SECRET, X-Webhook-Id idempotent, backgrounds `run_digest`), POST /api/cron/entitlement-digest/trigger?force= (superadmin), GET /api/cron/entitlement-digest/preview. Aggregates `entitlement_events` last 24h where enforced=true AND preview!=true, grouped by company → per-company card (plan, users affected, features + needed plan, owner_email mailto) + link to PUBLIC_APP_URL/admin/entitlements. Quiet when 0 blocks (unless force). Recipients: all superadmin users, or `ENTITLEMENT_DIGEST_TO` (comma list) env override. Logged to cron_runs/cron_run_history as `entitlement_digest`.
+- Events now carry `preview: bool` (pill-driven blocks excluded from digest). `.emergent/crons.yml`: `plan-block-digest` daily 13:00 UTC. Admin page: "Send digest now" button + banner note.
+- PROD NOTE: Emergent crons do NOT fire on Railway. Schedule a Railway cron service / cron-job.org POST to https://api.smartbookssoftware.ai/api/cron/entitlement-digest with `Authorization: Bearer <WEBHOOK_CRON_SECRET>` daily (same applies to auto-finalize-reconciliations). Optional Railway var ENTITLEMENT_DIGEST_TO.
+
+## 2026-10-06 — Trial = full access + enforcement runbook — PREVIEW NOW ENFORCING (ENTITLEMENTS_ENFORCE=true in backend/.env since 2026-10-06; prod flip = user sets Railway var)
 - `company_entitlements`: `sub_status == "trialing"` → `full("trial")` (all features, no quotas). Verified matrix: trialing→trial/all-access, active→plan, past_due→plan+grace, canceled→Core.
 - Pre-flight script `backend/scripts/entitlements_preflight.py` (shadow events per company/feature, paid-plan companies with usage vs quota, over-limit flags). Preview result: 0 shadow blocks; 3 plan companies all free_spot; 44/47 no plan.
 - PROD FLIP RUNBOOK (Railway): backend Variables → add `ENTITLEMENTS_ENFORCE=true`; ensure `PLAN_PREVIEW_SWITCHER` absent/false; frontend `REACT_APP_PLAN_PREVIEW` absent/false; redeploy. First confirm Would-block = 0 on live `/admin/entitlements`. Preview flip = set ENTITLEMENTS_ENFORCE=true in backend/.env + restart.

@@ -1467,6 +1467,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "superadmin" && (
           <Item item={{ to: "/cockpit/payments-apps", label: "Payments Applications", icon: CreditCard }} />
         )}
+        {user?.role === "superadmin" && (
+          <Item item={{ to: "/admin/entitlements", label: "Plan Gating", icon: Lock }} />
+        )}
         {/* Partner top link — their own scoped dashboard with the
             "My Clients" section (Clients | Enterprises toggle). Sits
             in the same slot Superadmin uses so the top-of-nav pattern

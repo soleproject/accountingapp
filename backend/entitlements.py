@@ -141,7 +141,7 @@ async def check_feature(cid: str, feature: str, user: dict, request: Optional[Re
     payload = upgrade_payload(feature, ent)
     try:
         await db.entitlement_events.insert_one({"company_id": cid, "user_id": user.get("id"), "feature": feature,
-                                                "plan": ent.get("plan"), "source": ent.get("source"),
+                                                "plan": ent.get("plan"), "source": ent.get("source"), "preview": bool(ent["preview"]),
                                                 "enforced": bool(ent["enforce"] or ent["preview"]), "at": now_iso()})
     except Exception:
         pass
@@ -182,7 +182,7 @@ async def check_quota(cid: str, kind: str, user: dict, request: Optional[Request
     try:
         await db.entitlement_events.insert_one({"company_id": cid, "user_id": user.get("id"), "feature": payload["feature"],
                                                 "plan": ent.get("plan"), "source": ent.get("source"), "min_plan": payload["min_plan"],
-                                                "used": payload["used"], "limit": limit,
+                                                "used": payload["used"], "limit": limit, "preview": bool(ent["preview"]),
                                                 "enforced": bool(ent["enforce"] or ent["preview"]), "at": now_iso()})
     except Exception:
         pass
