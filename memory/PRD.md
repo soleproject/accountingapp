@@ -1039,3 +1039,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Money tab "Keep collections moving" uses reminder preview ✅ self-tested
 - `ReminderPreview` exported from OverdueInvoicesModal; MoneyTab Send reminder opens it in a modal (testid `money-reminder-modal`), row flips to Sent. Expected-date input now shown for every overdue row without an expected date (was >60 days only).
+
+## 2026-10-06 — Books card "Review" button ✅ self-tested
+- `books.period_start/period_end` added to owner-dashboard payload. BooksCard shows `Review` (testid `owner-books-review-btn`) right of "N awaiting your answers" only when awaiting_answers>0 → `/accounting/transactions?filter=unapproved&date_from=…&date_to=…` (To do tab + month date range).

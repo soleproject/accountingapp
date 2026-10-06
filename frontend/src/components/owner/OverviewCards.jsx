@@ -6,7 +6,7 @@ import { Card, Pill, Why, Big, Kpi, Button, fmtDay, fmtWhole, TONE } from "./ui"
 
 const BOOK_STATUS = { complete: ["ok", "Complete"], nearly: ["ok", "Nearly complete"], behind: ["warn", "Catching up"] };
 
-export function BooksCard({ books, fmt, onCatchup }) {
+export function BooksCard({ books, fmt, onCatchup, onReview }) {
   const [tone, label] = BOOK_STATUS[books.status] || BOOK_STATUS.behind;
   return (
     <Card eyebrow="Bookkeeping" title="Are my books up to date?" tag={<Pill tone={tone} data-testid="owner-books-status">{label}</Pill>} data-testid="owner-books-card">
@@ -15,9 +15,14 @@ export function BooksCard({ books, fmt, onCatchup }) {
         <span className="text-xs text-slate-500">Last bank sync · {books.last_sync_at ? new Date(books.last_sync_at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "—"}</span>
       </div>
       <div className="h-2 bg-slate-100 rounded-full overflow-hidden mt-3 mb-1.5"><div className="h-full bg-emerald-500 rounded-full transition-[width] duration-700" style={{ width: `${books.categorized_pct}%` }} /></div>
-      <div className="text-xs text-slate-500">
-        <b className="text-slate-900">{books.categorized_pct}%</b> of {books.period_label}'s {books.total_txns} transactions categorized
-        {books.awaiting_answers > 0 && <> · <b className="text-amber-700">{books.awaiting_answers} awaiting your answers</b></>}
+      <div className="flex items-center justify-between gap-2 text-xs text-slate-500">
+        <span>
+          <b className="text-slate-900">{books.categorized_pct}%</b> of {books.period_label}'s {books.total_txns} transactions categorized
+          {books.awaiting_answers > 0 && <> · <b className="text-amber-700">{books.awaiting_answers} awaiting your answers</b></>}
+        </span>
+        {books.awaiting_answers > 0 && onReview && (
+          <Button onClick={onReview} className="shrink-0" data-testid="owner-books-review-btn">Review</Button>
+        )}
       </div>
       <div className="mt-4 divide-y divide-dashed divide-slate-200">
         {books.accounts.map(a => (

@@ -105,6 +105,7 @@ async def _books(cid: str, period_start: date, period_end: date, cash_breakdown:
     overall = "complete" if green == len(cps) and open_items == 0 else ("nearly" if pct >= 85 else "behind")
     return {
         "period_label": period_start.strftime("%B"),
+        "period_start": ps, "period_end": pe,
         "updated_through": (sync.get("last_sync_at") or "")[:10],
         "last_sync_at": sync.get("last_sync_at"),
         "total_txns": total, "categorized_pct": pct, "awaiting_answers": unreviewed, "uncategorized": uncategorized,

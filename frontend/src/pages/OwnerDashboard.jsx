@@ -123,7 +123,8 @@ export default function OwnerDashboard() {
             {b.needs_you > 0 && b.needs_you_href && <Button primary onClick={() => navigate(b.needs_you_href)} data-testid="owner-banner-cta">Answer now →</Button>}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <BooksCard books={data.books} fmt={fmt} onCatchup={startCatchup} />
+            <BooksCard books={data.books} fmt={fmt} onCatchup={startCatchup}
+              onReview={() => navigate(`/accounting/transactions?filter=unapproved&date_from=${data.books.period_start}&date_to=${data.books.period_end}`)} />
             <ProfitCard profit={data.profit} periodLabel={data.period.label.split(" ")[0]} fmt={fmt} />
             <CashCard cash={data.cash} fmt={fmt} />
             <AttentionCard items={data.attention} onAction={onAttention} />
