@@ -1064,3 +1064,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Edit Receipt opens the compact AI review card ✅ self-tested
 - Receipts.jsx RecModal: edit mode seeds `analysis`/`lineItems` from `initial.line_items` (or one synthetic line from amount+category) and defaults mode "ai"; `compact` no longer excludes isEdit (header strip w/ pencil, Add note, grouped categories, total, Update receipt / Rescan). Rescan in edit keeps the attachment and re-runs the scan. Bank-match strip shows "linked · verified" for matched receipts (`receipt-bank-match-linked`). Save: single synthetic line → no line_items sent, category = that line's account.
+
+## 2026-10-06 — Receipts list: row click opens edit ✅ self-tested
+- Receipts.jsx `<tr data-testid="receipt-row-{id}">` onClick → setEditing(r), ignored when the click target is inside a button/a/input.

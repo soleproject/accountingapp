@@ -71,7 +71,9 @@ export default function Receipts() {
             {items.map(r => {
               const pay = accts.find(a => a.id === r.payment_account_id);
               return (
-                <tr key={r.id} className="border-b hover:bg-slate-50">
+                <tr key={r.id} className="border-b hover:bg-slate-50 cursor-pointer"
+                    onClick={(e) => { if (e.target.closest("button, a, input")) return; setEditing(r); }}
+                    data-testid={`receipt-row-${r.id}`}>
                   <td className="px-3 py-2 font-mono-num text-slate-500">{fmtDate(r.date)}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium text-slate-800">{r.merchant}</div>
