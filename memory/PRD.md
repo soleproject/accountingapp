@@ -1094,6 +1094,12 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
+## 2026-10-06 — Superadmin plan override tool (prod gating QA) ✅ self-tested API + UI
+- `GET /api/admin/entitlements/companies` (picker) and `PATCH /api/admin/entitlements/companies/{cid}/billing` {billing_product|billing_payer|sub_status|clear} (superadmin) in routes/admin_entitlements.py. Validates against PLAN_RANK / ("client_email","client_card","enterprise","free_spot") / ("active","trialing","past_due","canceled","pending"); mirrors sub_status→billing_state; stamps `billing_override {by,at,before}`; audit row in `admin_audit`; warns if the company has a live stripe_subscription_id (webhook may overwrite). `clear` unsets the fields → "no plan on file".
+- UI: `components/admin/PlanOverride.jsx` (company search, Plan/Payer/Status selects with outcome hints, Save / Clear) opened from "Set plan for testing" button or the pencil on each Pre-flight row. Sidebar: "Plan Gating" link under Payments Applications (Superadmin section, both nav modes).
+- Prod QA recipe: create a test client user+company via normal signup → superadmin sets plan via override → log in as the CLIENT (superadmins always all-access) → verify locks/402/upgrade modal/seat caps.
+- Observed in prod preflight: companies with sub_status "pending" (client_email invoice not yet paid) will be gated by plan after flip; trialing → full access.
+
 ## 2026-10-06 — In-page pre-flight on /admin/entitlements ✅ (self-tested API + screenshot)
 - `GET /api/admin/entitlements/preflight` (superadmin): every company with billing_product set → plan, payer, sub_status, has_stripe_sub ("manual" badge if none), usage vs quotas, over[] flags, outcome (gated / core_fallback / trial / all_access) mirroring company_entitlements logic; totals gated/over_quota/no_plan.
 - `components/admin/PreflightPanel.jsx` rendered at top of AdminEntitlements. Replaces the need to SSH into Railway to run scripts/entitlements_preflight.py.

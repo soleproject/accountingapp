@@ -1,11 +1,13 @@
 """Superadmin view of shadow-mode entitlement events (who WOULD be blocked)."""
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from auth import require_role
-from db import db
+from db import db, now_iso
 from entitlements import FEATURE_MIN_PLAN, PLAN_LABELS, PLAN_QUOTAS, PLAN_RANK, _flag, quota_usage
 
 router = APIRouter(prefix="/api")
@@ -85,3 +87,51 @@ async def entitlement_preflight(user: dict = Depends(require_role("superadmin"))
     return {"enforce": _flag("ENTITLEMENTS_ENFORCE"), "total_companies": total, "no_plan": total - len(out),
             "gated": sum(1 for r in out if r["outcome"] in ("gated", "core_fallback")),
             "over_quota": sum(1 for r in out if r["over"]), "rows": out}
+
+
+OVERRIDE_PAYERS = ("client_email", "client_card", "enterprise", "free_spot")
+OVERRIDE_STATUSES = ("active", "trialing", "past_due", "canceled", "pending")
+
+
+class BillingOverrideIn(BaseModel):
+    billing_product: Optional[str] = None
+    billing_payer: Optional[str] = None
+    sub_status: Optional[str] = None
+    clear: bool = False
+
+
+@router.get("/admin/entitlements/companies")
+async def entitlement_companies(user: dict = Depends(require_role("superadmin"))):
+    """Lightweight picker list for the plan-override tool."""
+    rows = await db.companies.find({}, {"_id": 0, "id": 1, "name": 1, "owner_email": 1, "billing_product": 1}).sort("name", 1).to_list(2000)
+    return {"companies": rows, "plans": list(PLAN_RANK), "payers": OVERRIDE_PAYERS, "statuses": OVERRIDE_STATUSES}
+
+
+@router.patch("/admin/entitlements/companies/{cid}/billing")
+async def override_company_billing(cid: str, inp: BillingOverrideIn, user: dict = Depends(require_role("superadmin"))):
+    """Superadmin test/correction tool: set the plan fields entitlements read. No Stripe side effects."""
+    company = await db.companies.find_one({"id": cid}, {"_id": 0, "id": 1, "billing_product": 1, "billing_payer": 1, "sub_status": 1, "stripe_subscription_id": 1})
+    if not company:
+        raise HTTPException(404, "company not found")
+    before = {k: company.get(k) for k in ("billing_product", "billing_payer", "sub_status")}
+    if inp.clear:
+        await db.companies.update_one({"id": cid}, {"$unset": {"billing_product": "", "billing_payer": "", "sub_status": "", "billing_state": ""},
+                                                    "$set": {"billing_override": None, "updated_at": now_iso()}})
+    else:
+        if inp.billing_product is not None and inp.billing_product not in PLAN_RANK:
+            raise HTTPException(400, f"billing_product must be one of {list(PLAN_RANK)}")
+        if inp.billing_payer is not None and inp.billing_payer not in OVERRIDE_PAYERS:
+            raise HTTPException(400, f"billing_payer must be one of {list(OVERRIDE_PAYERS)}")
+        if inp.sub_status is not None and inp.sub_status not in OVERRIDE_STATUSES:
+            raise HTTPException(400, f"sub_status must be one of {list(OVERRIDE_STATUSES)}")
+        sets = {k: v for k, v in (("billing_product", inp.billing_product), ("billing_payer", inp.billing_payer), ("sub_status", inp.sub_status)) if v is not None}
+        if not sets:
+            raise HTTPException(400, "nothing to change")
+        if "sub_status" in sets:
+            sets["billing_state"] = sets["sub_status"]
+        sets["billing_override"] = {"by": user.get("email"), "at": now_iso(), "before": before}
+        sets["updated_at"] = now_iso()
+        await db.companies.update_one({"id": cid}, {"$set": sets})
+    await db.admin_audit.insert_one({"kind": "billing_override", "company_id": cid, "by": user.get("email"), "at": now_iso(),
+                                     "before": before, "after": None if inp.clear else inp.model_dump(exclude_none=True)})
+    return {"ok": True, "warning": "This company has a live Stripe subscription — the next Stripe webhook may overwrite these fields." if company.get("stripe_subscription_id") else None}
