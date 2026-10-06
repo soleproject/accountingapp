@@ -127,6 +127,13 @@ async def create_portal_session(cid: str, inp: PortalIn, user: dict = Depends(ge
             _, cur_cadence = _plan_from_price_id(item["price"]["id"])
             cadence = (inp.cadence or company.get("billing_cadence") or cur_cadence or "monthly").lower()
             new_price = _price_id(target, False, cadence) or _price_id(target, False, "monthly")
+            cur_plan, _ = _plan_from_price_id(item["price"]["id"])
+            if new_price and new_price == item["price"]["id"]:
+                # App thought they were on a lower plan but Stripe says they're already here → heal the record.
+                from routes.stripe_billing import _sub_snapshot, _sub_status_to_billing_state
+                snap = _sub_snapshot(dict(sub))
+                await db.companies.update_one({"id": cid}, {"$set": {**snap, "billing_state": _sub_status_to_billing_state(sub.get("status")), "updated_at": now_iso()}})
+                return {"already_on_plan": True, "billing_product": cur_plan or target, "sub_status": sub.get("status")}
             if new_price and new_price != item["price"]["id"]:
                 params["flow_data"] = {
                     "type": "subscription_update_confirm",
