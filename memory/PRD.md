@@ -1052,3 +1052,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - ClientReviewPage cardMode: compact header (‹ All items · n of N · k done · progress), sticky 56px footer Back / Skip ▾ (defer, remind, finish later, schedule) / Next→Done, composer only when `needsComposer` (TELL type, or a user message exists, or last action clarify); all-done screen with Back to list; `advance()` on last item → onExit. Standalone `/client-review/:token` unchanged.
 - MobileShell nav: new Check-in tab (`/checkin`). Owner dashboard attention `checkin` + `next_checkin` hrefs → `/checkin`. Static mockups kept at `frontend/public/mockups/{a,b,c}.html`.
 - Known: testing agent noted ClientReviewPage.jsx is ~7.1k lines (refactor candidate); schedule modal uses native date/time inputs.
+
+## 2026-10-06 — Check-in card: chat scroll fix ✅ self-tested
+- cardMode `<main>` is now `overflow-y-auto min-h-0` (fixed overlay never scrolled the window); auto-scroll effect uses `block:end` and also fires on `sending`; form types (10/14) no longer window.scrollTo in cardMode. Overlay is `md:top-16` so the Layout header (z-1000 controls) stays above it on desktop.

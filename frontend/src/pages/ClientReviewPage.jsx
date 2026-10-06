@@ -238,12 +238,12 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     // the top of the page so the item context card is visible first.
     const it = session?.items?.[activeIdx];
     const isFormType = it && [10, 14].includes(it.item_type);
-    if (isFormType) {
+    if (isFormType && !cardMode) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messages, activeIdx, session]);
+  }, [messages, activeIdx, session, sending]);
 
   // When embedded in the pro Cockpit (iframe), tell the parent whenever
   // the batch's progress changes so its row/chips refresh live.
@@ -1236,7 +1236,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
   const cardDone = cardMode ? (session?.items || []).filter((i) => !isOpenItem(i)).length : 0;
 
   return (
-    <div className={`${cardMode ? "fixed inset-0 z-50" : embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
+    <div className={`${cardMode ? "fixed inset-0 md:top-16 z-50" : embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
       {/* Header */}
       {cardMode ? (
         <header className="bg-white border-b border-slate-200 px-3 py-2.5 sticky top-0 z-10" data-testid="checkin-card-header">
@@ -1418,7 +1418,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       )}
 
       {/* Chat */}
-      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4`}>
+      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4 ${cardMode ? "overflow-y-auto min-h-0" : ""}`}>
         <div className="space-y-3">
           {/* `visibleMessages` = the chat excluding the leading arrival
               transition bubble (rendered ABOVE the item card). Initial
