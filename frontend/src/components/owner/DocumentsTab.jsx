@@ -2,17 +2,35 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Receipt, FileText, Camera } from "lucide-react";
 import StatementsTab from "@/components/StatementsTab";
+import { api } from "@/lib/api";
+import { RecModal } from "@/pages/Receipts";
 import { Card, Pill, Button, fmtDay } from "./ui";
 
 const FILTERS = ["All", "Receipts", "Statements"];
 
-export default function DocumentsTab({ data, companyId }) {
+export default function DocumentsTab({ data, companyId, reload }) {
   const navigate = useNavigate();
   const { documents } = data;
   const [filter, setFilter] = useState("All");
+  const [snapTarget, setSnapTarget] = useState(null);
+  const [lookups, setLookups] = useState(null);
+  const openSnap = async (m) => {
+    if (!m.transaction) { if (m.href) navigate(m.href); return; }
+    let l = lookups;
+    if (!l) {
+      const [a, c] = await Promise.all([api.get(`/companies/${companyId}/accounts`), api.get(`/companies/${companyId}/contacts`)]);
+      l = { accts: a.data.accounts || [], contacts: c.data.contacts || [] };
+      setLookups(l);
+    }
+    setSnapTarget(m.transaction);
+  };
   const rows = documents.rows.filter(r => filter === "All" || (filter === "Receipts" ? r.type === "receipt" : r.type === "statement"));
   return (
     <div data-testid="owner-documents-tab">
+      {snapTarget && lookups && (
+        <RecModal currentId={companyId} accts={lookups.accts} contacts={lookups.contacts} linkTransaction={snapTarget}
+          onClose={() => { setSnapTarget(null); reload?.(); }} />
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card data-testid="owner-documents-upload">
           <h2 className="font-heading text-xl mb-1">Send documents to your team</h2>
@@ -30,7 +48,7 @@ export default function DocumentsTab({ data, companyId }) {
               <div key={m.id} className="flex items-center gap-3.5 py-3.5" data-testid={`owner-missing-receipt-${m.id}`}>
                 <span className="flex-none w-9 h-9 rounded-xl grid place-items-center bg-amber-50 text-amber-700 border border-amber-200"><Camera size={15} /></span>
                 <div className="flex-1 min-w-0"><div className="text-sm font-semibold truncate">{m.title}</div><div className="text-xs text-slate-500 truncate">{m.detail}</div></div>
-                <Button primary disabled={!m.href} onClick={() => m.href && navigate(m.href)} data-testid={`owner-missing-receipt-snap-${m.id}`}>Snap receipt</Button>
+                <Button primary disabled={!m.href && !m.transaction} onClick={() => openSnap(m)} data-testid={`owner-missing-receipt-snap-${m.id}`}>Snap receipt</Button>
               </div>
             ))}
           </div>

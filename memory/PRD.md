@@ -1021,3 +1021,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-05 — "Continue catch-up" → To Do clean-up view ✅ self-tested (screenshot)
 - OwnerDashboard `startCatchup` now navigates to `/accounting/todo?view=cleanup` (no longer mints a client-review batch).
 - ToDo.jsx reads `view=cleanup`: heading "Clean-up items for {company}", hides PendingReview/AgentInquiries cards, scrolls to panel. ResponsibilitiesPanel new props `filter="cleanup"` (keeps only `variant==="cleanup"` items, hides preamble) + `onClearFilter` ("Show all items" banner, testid `resp-panel-cleanup-filter` / `resp-panel-show-all`).
+
+## 2026-10-05 — Owner "Snap it" → missing-receipts picker → pre-linked New Receipt ✅ self-tested
+- Backend `owner_dashboard._missing_receipt_rows`: attention `receipts` item + `documents.missing_receipts` now carry `items[].transaction {transaction_id, merchant, description, amount, date, bank_account_id}`; title/count use total open findings.
+- `receipt_match.link_receipt_to_transaction` resolves open `missing_receipt` findings for the txn immediately (resolved_by=receipt_link).
+- Frontend: `RecModal` (Receipts.jsx, now named-exported) accepts `linkTransaction` → AI mode default, amber "Attaches to: …" strip (testid `receipt-link-target`), prefilled date/amount/paid-from/vendor, forces `match_transaction_id`, skips match-preview. New `components/owner/MissingReceiptsModal.jsx` (testids `missing-receipts-modal`, `missing-receipt-snap-{id}`). OwnerDashboard Snap it opens picker; DocumentsTab Snap receipt opens RecModal directly.
