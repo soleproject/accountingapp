@@ -364,7 +364,7 @@ sit adjacent right after.
 - **P1** Contact Identity Spec Phase 2 (cross-source AR/AP matching)
 - **P1** Marketing site migration (`www.smartbookssoftware.ai` vs `app.smartbookssoftware.ai`)
 - **P2** Sidebar Settings "Navigation Style" broken navigation
-- **P1** Flip ENTITLEMENTS_ENFORCE=true after reviewing /admin/entitlements (features + quotas both ready)
+- **P1** Watch /admin/entitlements (prod) for unexpected blocks after Railway flip; rollback = set ENTITLEMENTS_ENFORCE=false
 - **P2** Multi-pod stale cache / Redis disconnect handling
 - **P2** Multi-company mirror booking
 - **P2** Directory approval workflow
@@ -1094,7 +1094,7 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
-## 2026-10-06 — Trial = full access + enforcement runbook (still SHADOW by user choice)
+## 2026-10-06 — Trial = full access + enforcement runbook — PREVIEW NOW ENFORCING (ENTITLEMENTS_ENFORCE=true in backend/.env since 2026-10-06; prod flip = user sets Railway var)
 - `company_entitlements`: `sub_status == "trialing"` → `full("trial")` (all features, no quotas). Verified matrix: trialing→trial/all-access, active→plan, past_due→plan+grace, canceled→Core.
 - Pre-flight script `backend/scripts/entitlements_preflight.py` (shadow events per company/feature, paid-plan companies with usage vs quota, over-limit flags). Preview result: 0 shadow blocks; 3 plan companies all free_spot; 44/47 no plan.
 - PROD FLIP RUNBOOK (Railway): backend Variables → add `ENTITLEMENTS_ENFORCE=true`; ensure `PLAN_PREVIEW_SWITCHER` absent/false; frontend `REACT_APP_PLAN_PREVIEW` absent/false; redeploy. First confirm Would-block = 0 on live `/admin/entitlements`. Preview flip = set ENTITLEMENTS_ENFORCE=true in backend/.env + restart.

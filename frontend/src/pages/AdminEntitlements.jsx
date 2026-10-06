@@ -75,7 +75,7 @@ export default function AdminEntitlements() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Stat label="Would-block events" value={t.shadow ?? "—"} testid="admin-entitlements-stat-shadow" />
         <Stat label="Companies affected" value={t.companies ?? "—"} testid="admin-entitlements-stat-companies" />
-        <Stat label="Preview / enforced hits" value={t.enforced ?? "—"} testid="admin-entitlements-stat-enforced" />
+        <Stat label={data?.enforce ? "Blocked (enforced)" : "Preview / enforced hits"} value={t.enforced ?? "—"} testid="admin-entitlements-stat-enforced" />
         <Stat label="All events" value={t.events ?? "—"} testid="admin-entitlements-stat-events" />
       </div>
 
