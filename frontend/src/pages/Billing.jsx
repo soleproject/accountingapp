@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany, useMoneyFmt, useDateFmt } from "@/lib/company";
 import { toast } from "sonner";
+import { PlanCard } from "@/components/billing/PlanCard";
 import {
   CreditCard, DollarSign, TrendingUp, Users, ExternalLink, Loader2,
   CheckCircle2, XCircle, Clock, Award, ArrowUpRight, Wallet,
@@ -24,9 +25,11 @@ const centsFmt = (fmtMoney) => (c) => fmtMoney((Number(c || 0) / 100));
 // `/app/backend/enterprises.py` PRODUCTS. Falls back to "—" when the
 // legacy row has no product tier stamped.
 const PRODUCT_LABELS = {
-  simple_start: "Simple Start",
+  simple_start: "Core",
   essentials:   "Essentials",
+  assistant:    "AI Assistant",
   plus:         "Plus",
+  bookkeeper:   "AI Bookkeeper",
   advanced:     "Advanced",
 };
 function productLabel(prod, discount) {
@@ -46,6 +49,7 @@ export default function Billing() {
         Billing &amp; subscription
       </h1>
 
+      <PlanCard />
       <MyBillingSection />
 
       {user?.role === "pro" && <ProClientBillingSection />}
