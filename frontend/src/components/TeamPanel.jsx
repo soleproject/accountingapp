@@ -13,6 +13,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { UserPlus, Loader2, X, Trash2, Users, MailCheck, ShieldCheck, ChevronDown, ChevronRight, Save, Archive, ArchiveRestore } from "lucide-react";
+import { useQuota } from "@/lib/entitlements";
+import { QuotaNotice } from "@/components/Entitlements";
 
 const COMPANY_ROLE_OPTIONS = [
   { value: "editor",   label: "Editor",   hint: "Post JEs, categorize, reconcile" },
@@ -29,6 +31,7 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
   const [team, setTeam] = useState({ members: [], archived_members: [], pending_invites: [] });
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const seatQuota = useQuota("users");
   const listUrl = useMemo(() => {
     if (mode === "company") return `/companies/${companyId}/team`;
     if (mode === "pro") {
@@ -75,8 +78,9 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
         </h2>
         {!showForm && (
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => (mode === "company" && seatQuota.atCap ? seatQuota.openUpgrade() : setShowForm(true))}
             data-testid={`team-invite-btn-${mode}`}
+            data-at-cap={(mode === "company" && seatQuota.atCap) || undefined}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-slate-900 text-white hover:bg-slate-800"
           >
             <UserPlus size={13} /> Invite someone
@@ -84,13 +88,15 @@ export default function TeamPanel({ mode, companyId, availableCompanies = [] }) 
         )}
       </div>
 
+      {mode === "company" && <QuotaNotice kind="users" />}
+
       {showForm && (
         <InviteForm
           mode={mode}
           companyId={companyId}
           availableCompanies={availableCompanies}
           onClose={() => setShowForm(false)}
-          onCreated={() => { setShowForm(false); load(); }}
+          onCreated={() => { setShowForm(false); load(); seatQuota.reload(); }}
         />
       )}
 
@@ -457,6 +463,7 @@ function InviteForm({ mode, companyId, availableCompanies, onClose, onCreated })
       toast.success(`Invite sent to ${email}.`);
       onCreated();
     } catch (e) {
+      if (e.response?.status === 402) return;
       toast.error(e.response?.data?.detail || "Couldn't send invite");
     } finally { setBusy(false); }
   };

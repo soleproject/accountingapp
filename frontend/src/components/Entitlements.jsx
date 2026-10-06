@@ -1,9 +1,23 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Lock, Sparkles, X, ChevronDown } from "lucide-react";
+import { Lock, Sparkles, X, ChevronDown, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
-import { useEntitlements, FEATURE_COPY, PLAN_LABELS } from "@/lib/entitlements";
+import { useEntitlements, useQuota, FEATURE_COPY, PLAN_LABELS, QUOTA_COPY } from "@/lib/entitlements";
+
+function QuotaBody({ upgrade, isPro, companyName }) {
+  const [noun] = QUOTA_COPY[upgrade.kind] || ["items"];
+  const nextLimit = upgrade.next_limit == null ? "unlimited" : upgrade.next_limit;
+  const who = isPro ? <b>{companyName || "This company"}</b> : "You're";
+  return (
+    <>
+      {who}{isPro ? " is" : ""} using <b>{upgrade.used} of {upgrade.limit}</b> {noun} included in <b>{upgrade.current_plan_label || "Core"}</b>.
+      {upgrade.min_plan
+        ? <> Upgrade to <b>{upgrade.min_plan_label}</b> (${upgrade.min_plan_price}/mo) for <b>{nextLimit}</b> {noun}.</>
+        : <> Contact us to add more {noun} to this plan.</>}
+    </>
+  );
+}
 
 export function UpgradeModal() {
   const { upgrade, closeUpgrade } = useEntitlements();
@@ -11,19 +25,20 @@ export function UpgradeModal() {
   const { current } = useCompany();
   const navigate = useNavigate();
   if (!upgrade) return null;
-  const [title, blurb] = FEATURE_COPY[upgrade.feature] || ["This feature", ""];
+  const isQuota = upgrade.code === "quota_exceeded";
+  const [title, blurb] = isQuota ? [QUOTA_COPY[upgrade.kind]?.[1] || "Add more", FEATURE_COPY[upgrade.feature]?.[1] || ""] : (FEATURE_COPY[upgrade.feature] || ["This feature", ""]);
   const isPro = ["pro", "partner", "enterprise", "superadmin"].includes(user?.role);
   const planLabel = upgrade.min_plan_label || PLAN_LABELS[upgrade.min_plan];
   return (
     <div className="fixed inset-0 z-[1100] bg-black/50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeUpgrade(); }} data-testid="upgrade-modal">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
         <button onClick={closeUpgrade} className="absolute top-3 right-3 text-slate-400 hover:text-slate-700" data-testid="upgrade-modal-close"><X size={16} /></button>
-        <div className="w-11 h-11 rounded-xl bg-slate-900 text-white grid place-items-center mb-4"><Lock size={18} /></div>
-        <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500">Included in {planLabel}</div>
+        <div className="w-11 h-11 rounded-xl bg-slate-900 text-white grid place-items-center mb-4">{isQuota ? <Users size={18} /> : <Lock size={18} />}</div>
+        <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500">{isQuota ? `${upgrade.current_plan_label || "Core"} plan limit reached` : `Included in ${planLabel}`}</div>
         <h2 className="font-heading text-xl mt-1" data-testid="upgrade-modal-title">{title}</h2>
         <p className="text-sm text-slate-600 mt-2">{blurb}</p>
-        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
-          {isPro ? (
+        <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm" data-testid="upgrade-modal-body">
+          {isQuota ? <QuotaBody upgrade={upgrade} isPro={isPro} companyName={current?.name} /> : isPro ? (
             <><b>{current?.name || "This company"}</b> is on <b>{upgrade.current_plan_label || "Core"}</b>. Upgrade them to <b>{planLabel}</b> (${upgrade.min_plan_price}/mo) or sponsor a seat to unlock this.</>
           ) : (
             <>Your plan is <b>{upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo, 7-day free trial.</>
@@ -33,10 +48,35 @@ export function UpgradeModal() {
           <button onClick={closeUpgrade} className="h-10 px-4 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700" data-testid="upgrade-modal-later">Not now</button>
           <button onClick={() => { closeUpgrade(); navigate(isPro ? "/admin/client-payments" : "/pricing"); }}
                   className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5" data-testid="upgrade-modal-cta">
-            <Sparkles size={14} /> {isPro ? "Manage plan" : `Upgrade to ${planLabel}`}
+            <Sparkles size={14} /> {isPro ? "Manage plan" : planLabel ? `Upgrade to ${planLabel}` : "See plans"}
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Seat / connected-account meter. Renders nothing in shadow mode (quota not active).
+export function QuotaNotice({ kind, className = "" }) {
+  const { used, limit, active, atCap, over, openUpgrade } = useQuota(kind);
+  const { ent } = useEntitlements();
+  if (!active) return null;
+  const [noun, cta] = QUOTA_COPY[kind] || ["items", "Add more"];
+  const pct = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const tone = over ? "border-rose-200 bg-rose-50" : atCap ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white";
+  const bar = over ? "bg-rose-500" : atCap ? "bg-amber-500" : "bg-slate-900";
+  return (
+    <div className={`rounded-xl border p-3 ${tone} ${className}`} data-testid={`quota-notice-${kind}`} data-at-cap={atCap || undefined}>
+      <div className="flex items-center gap-3 text-sm">
+        <Users size={15} className="text-slate-500 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <span className="font-semibold" data-testid={`quota-usage-${kind}`}>{used} of {limit}</span> {noun} on <b>{ent?.plan_label || "Core"}</b>
+          {over && <span className="ml-2 text-rose-700 text-xs font-semibold">over the limit — existing ones keep working</span>}
+          {atCap && !over && <span className="ml-2 text-amber-700 text-xs font-semibold">limit reached</span>}
+        </div>
+        <button onClick={openUpgrade} className="shrink-0 text-xs font-semibold text-slate-900 underline-offset-2 hover:underline" data-testid={`quota-upgrade-${kind}`}>{atCap ? cta : "Need more?"}</button>
+      </div>
+      <div className="h-1.5 rounded bg-slate-200/70 mt-2"><div className={`h-1.5 rounded ${bar}`} style={{ width: `${pct}%` }} /></div>
     </div>
   );
 }

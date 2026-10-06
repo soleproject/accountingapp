@@ -80,7 +80,7 @@ export default function AdminEntitlements() {
       </div>
 
       <div className="grid md:grid-cols-2 gap-3">
-        <Breakdown title="By feature" items={data?.by_feature || []} labelOf={(i) => `${FEATURE_COPY[i.feature]?.[0] || i.feature} · needs ${data?.labels?.[i.min_plan] || i.min_plan}`} testid="admin-entitlements-by-feature" />
+        <Breakdown title="By feature" items={data?.by_feature || []} labelOf={(i) => `${FEATURE_COPY[i.feature]?.[0] || i.feature}${i.min_plan ? ` · needs ${data?.labels?.[i.min_plan] || i.min_plan}` : ""}`} testid="admin-entitlements-by-feature" />
         <Breakdown title="By current plan" items={data?.by_plan || []} labelOf={(i) => i.label} testid="admin-entitlements-by-plan" />
       </div>
 
@@ -104,9 +104,9 @@ export default function AdminEntitlements() {
                   <div className="font-medium truncate max-w-[220px]">{r.company_name}</div>
                   <div className="text-[11px] text-slate-500">{r.payer || "self-pay"}{r.sub_status ? ` · ${r.sub_status}` : ""}</div>
                 </td>
-                <td className="px-3 py-2"><span className="inline-flex items-center gap-1"><Lock size={11} /> {FEATURE_COPY[r.feature]?.[0] || r.feature}</span></td>
+                <td className="px-3 py-2"><span className="inline-flex items-center gap-1"><Lock size={11} /> {FEATURE_COPY[r.feature]?.[0] || r.feature}</span>{r.limit != null && <span className="ml-1 text-[11px] text-slate-500">({r.used}/{r.limit})</span>}</td>
                 <td className="px-3 py-2">{r.plan_label}</td>
-                <td className="px-3 py-2">{data?.labels?.[r.min_plan] || r.min_plan}</td>
+                <td className="px-3 py-2">{r.min_plan ? (data?.labels?.[r.min_plan] || r.min_plan) : "—"}</td>
                 <td className="px-3 py-2 text-right font-mono-num">{r.shadow}{r.enforced ? <span className="text-slate-400"> (+{r.enforced} preview)</span> : null}</td>
                 <td className="px-3 py-2 text-right font-mono-num">{r.users}</td>
                 <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{fmt(r.last_at)}</td>
