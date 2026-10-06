@@ -10,6 +10,7 @@ import MoneyTab from "@/components/owner/MoneyTab";
 import DocumentsTab from "@/components/owner/DocumentsTab";
 import TeamTab from "@/components/owner/TeamTab";
 import { MissingReceiptsModal } from "@/components/owner/MissingReceiptsModal";
+import { OverdueInvoicesModal } from "@/components/owner/OverdueInvoicesModal";
 import { Button } from "@/components/owner/ui";
 
 const TABS = [
@@ -63,9 +64,11 @@ export default function OwnerDashboard() {
   useEffect(() => { load(); }, [load]);
 
   const [receiptsOpen, setReceiptsOpen] = useState(false);
+  const [overdueOpen, setOverdueOpen] = useState(false);
 
   const onAttention = (it) => {
     if (it.id === "receipts" && (it.items || []).some((m) => m.transaction)) { setReceiptsOpen(true); return; }
+    if (it.id === "overdue") { setOverdueOpen(true); return; }
     if (it.href) navigate(it.href);
   };
   const startCatchup = () => navigate("/accounting/todo?view=cleanup");
@@ -132,6 +135,15 @@ export default function OwnerDashboard() {
       {tab === "money" && <MoneyTab data={data} fmt={fmt} companyId={currentId} reload={load} />}
       {tab === "documents" && <DocumentsTab data={data} companyId={currentId} reload={load} />}
       {tab === "team" && <TeamTab data={data} />}
+      {overdueOpen && (
+        <OverdueInvoicesModal
+          companyId={currentId}
+          invoices={data.money.invoices.filter((i) => i.days_overdue > 0)}
+          fmt={fmt}
+          onClose={() => setOverdueOpen(false)}
+          onChanged={load}
+        />
+      )}
       {receiptsOpen && (
         <MissingReceiptsModal
           companyId={currentId}
