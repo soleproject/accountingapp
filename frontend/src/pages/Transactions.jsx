@@ -5557,6 +5557,20 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose, token, ite
   );
   const remaining = +(txnAmt - totalApplied).toFixed(2);
 
+  // Zeroing out auto-unchecks; otherwise clamp to open balance + room left.
+  const setAppAmount = (d, value) => {
+    const wanted = Math.max(0, Number(value || 0));
+    if (wanted <= 0.005) {
+      setApps(prev => { const n = { ...prev }; delete n[d.id]; return n; });
+      return;
+    }
+    setApps(prev => {
+      const otherUsed = Object.entries(prev).filter(([k]) => k !== d.id).reduce((s, [, v]) => s + Number(v || 0), 0);
+      const roomLeft = Math.max(0, txnAmt - otherUsed);
+      return { ...prev, [d.id]: +Math.min(Number(d.balance_due || 0), roomLeft, wanted).toFixed(2) };
+    });
+  };
+
   const toggleDoc = (d, checked) => {
     setApps(prev => {
       const next = { ...prev };
@@ -5668,7 +5682,52 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose, token, ite
           )}
         </div>
         <div className="border rounded-md overflow-hidden max-h-80 overflow-y-auto">
-          <table className="w-full text-sm">
+          {/* Mobile: stacked cards — no horizontal scroll, amount box full-width */}
+          <div className="md:hidden divide-y" data-testid="link-modal-cards">
+            {filtered.length === 0 && (
+              <div className="px-3 py-6 text-center text-slate-400 text-xs italic">
+                {search || contactFilter ? "No matches." : `No open ${kind}s to apply this deposit against.`}
+              </div>
+            )}
+            {filtered.map(d => {
+              const checked = d.id in apps;
+              const fullyConsumed = remaining <= 0.005 && !checked;
+              return (
+                <div key={d.id} className={`px-3 py-3 ${checked ? "bg-emerald-50" : fullyConsumed ? "opacity-40" : ""}`} data-testid={`link-modal-card-${d.id}`}>
+                  <label className="flex items-start gap-3">
+                    <input type="checkbox" checked={checked} disabled={fullyConsumed}
+                           onChange={(e) => toggleDoc(d, e.target.checked)}
+                           className="mt-1 w-5 h-5" data-testid={`link-modal-check-m-${d.id}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-semibold text-sm">{d.number}</span>
+                        <span className="text-xs text-slate-500 tabular-nums">{d.issue_date || "—"}</span>
+                      </div>
+                      <div className="text-sm text-slate-700 truncate">{d.contact_name || "—"}</div>
+                      <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5 tabular-nums">
+                        <span>Original <b className="text-slate-700 font-mono">{fmtMoney(d.total)}</b></span>
+                        <span>Open <b className="text-slate-700 font-mono">{fmtMoney(d.balance_due)}</b></span>
+                      </div>
+                    </div>
+                  </label>
+                  {checked && (
+                    <div className="mt-2 pl-8 flex items-center gap-2">
+                      <label className="text-[11px] uppercase tracking-wide text-slate-500 shrink-0">Apply</label>
+                      <input type="number" step="0.01" min="0" max={d.balance_due} inputMode="decimal"
+                             value={apps[d.id]}
+                             onChange={(e) => setAppAmount(d, e.target.value)}
+                             className="flex-1 min-w-0 h-11 border rounded-lg px-3 text-right font-mono tabular-nums text-base"
+                             data-testid={`link-modal-amt-m-${d.id}`} />
+                      <button type="button" onClick={() => setAppAmount(d, d.balance_due)}
+                              className="h-11 px-3 rounded-lg border text-xs font-semibold text-slate-700 shrink-0"
+                              data-testid={`link-modal-full-m-${d.id}`}>Full</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <table className="w-full text-sm hidden md:table">
             <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wide sticky top-0">
               <tr>
                 <th className="text-left px-2 py-1.5 w-8"></th>
@@ -5712,24 +5771,7 @@ export function LinkModal({ txn, invoices, bills, currentId, onClose, token, ite
                       <input type="number" step="0.01" min="0" max={d.balance_due}
                               value={checked ? apps[d.id] : ""}
                               disabled={!checked}
-                              onChange={(e) => {
-                                // Zeroing out auto-unchecks — a $0
-                                // slice shouldn't count as an
-                                // application. Also cap-clamp.
-                                const wanted = Math.max(0, Number(e.target.value || 0));
-                                if (wanted <= 0.005) {
-                                  setApps(prev => { const n = { ...prev }; delete n[d.id]; return n; });
-                                  return;
-                                }
-                                setApps(prev => {
-                                  const otherUsed = Object.entries(prev)
-                                    .filter(([k]) => k !== d.id)
-                                    .reduce((s, [, v]) => s + Number(v || 0), 0);
-                                  const roomLeft = Math.max(0, txnAmt - otherUsed);
-                                  const clamped = Math.min(Number(d.balance_due || 0), roomLeft, wanted);
-                                  return { ...prev, [d.id]: +clamped.toFixed(2) };
-                                });
-                              }}
+                              onChange={(e) => setAppAmount(d, e.target.value)}
                               className="w-24 border rounded px-1.5 py-0.5 text-right font-mono tabular-nums disabled:bg-slate-50 disabled:text-slate-400"
                               data-testid={`link-modal-amt-${d.id}`} />
                     </td>

@@ -1055,3 +1055,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Check-in card: chat scroll fix ✅ self-tested
 - cardMode `<main>` is now `overflow-y-auto min-h-0` (fixed overlay never scrolled the window); auto-scroll effect uses `block:end` and also fires on `sending`; form types (10/14) no longer window.scrollTo in cardMode. Overlay is `md:top-16` so the Layout header (z-1000 controls) stays above it on desktop.
+
+## 2026-10-06 — Link-to-invoice modal: mobile stacked cards ✅ self-tested (390px, no overflow)
+- Transactions.jsx link modal: `<md` renders `link-modal-cards` (per-doc card: checkbox · number · date / customer / Original · Open; when checked → full-width Apply input `link-modal-amt-m-{id}` + `Full` button `link-modal-full-m-{id}`); table is `hidden md:table`. Shared `setAppAmount(d, value)` clamp logic used by both.
