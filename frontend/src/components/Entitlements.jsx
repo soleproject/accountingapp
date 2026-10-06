@@ -38,7 +38,7 @@ export function UpgradeModal() {
   // No subscription yet → pricing page (new Checkout, trial if eligible).
   const onUpgrade = async () => {
     if (isPro) { closeUpgrade(); navigate("/admin/client-payments"); return; }
-    if (!hasSub || !current?.id) { closeUpgrade(); navigate("/pricing"); return; }
+    if (!hasSub || !current?.id) { closeUpgrade(); navigate("/welcome/pricing"); return; }
     setBusy(true);
     try {
       const r = await api.post(`/companies/${current.id}/billing/portal-session`, {
@@ -48,7 +48,7 @@ export function UpgradeModal() {
       throw new Error("No portal URL");
     } catch (e) {
       const code = e.response?.data?.detail?.code;
-      if (code === "no_subscription") { closeUpgrade(); navigate("/pricing"); return; }
+      if (code === "no_subscription") { closeUpgrade(); navigate("/welcome/pricing"); return; }
       toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Couldn't open billing — please try again");
       setBusy(false);
     }

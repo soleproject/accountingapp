@@ -41,7 +41,7 @@ export function PlanCard() {
       if (r.data?.portal_url) { window.location.href = r.data.portal_url; return; }
       throw new Error("No portal URL");
     } catch (e) {
-      if (e.response?.data?.detail?.code === "no_subscription") { nav("/pricing"); return; }
+      if (e.response?.data?.detail?.code === "no_subscription") { nav("/welcome/pricing"); return; }
       toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Couldn't open billing");
       setBusy(null);
     }
@@ -91,7 +91,7 @@ export function PlanCard() {
             </>
           )}
           {!d.can_open_portal && !sponsored && isClient && (
-            <button onClick={() => nav("/pricing")} className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5" data-testid="plan-card-choose">
+            <button onClick={() => nav("/welcome/pricing")} className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5" data-testid="plan-card-choose">
               <ArrowUpRight size={14} /> {d.sub_status === "canceled" ? "Restart a plan" : "Choose a plan"}
             </button>
           )}
