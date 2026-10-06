@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
+import { toast } from "sonner";
 
 const Ctx = createContext(null);
 const PREVIEW_KEY = "plan_preview";
@@ -51,6 +52,8 @@ export function EntitlementsProvider({ children }) {
   const { user } = useAuth();
   const { currentId } = useCompany();
   const [ent, setEnt] = useState(null);
+  const entRef = React.useRef(null);
+  entRef.current = ent;
   const [upgrade, setUpgrade] = useState(null); // {feature, ...payload}
   const [preview, setPreviewState] = useState(getPlanPreview());
 
@@ -60,6 +63,23 @@ export function EntitlementsProvider({ children }) {
     catch { setEnt(null); }
   }, [user, currentId]);
   useEffect(() => { load(); }, [load, preview]);
+
+  // Back from the Stripe portal (?billing=updated): pull the live subscription now so
+  // newly unlocked features appear immediately instead of waiting for the webhook.
+  useEffect(() => {
+    if (!user || !currentId) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("billing") !== "updated") return;
+    url.searchParams.delete("billing");
+    window.history.replaceState({}, "", url.pathname + (url.search || "") + url.hash);
+    const prevPlan = entRef.current?.plan;
+    api.post(`/companies/${currentId}/billing/sync-subscription`).then(async (r) => {
+      await load();
+      const newPlan = r.data?.billing_product;
+      if (r.data?.synced && newPlan && newPlan !== prevPlan) toast.success(`Plan updated to ${PLAN_LABELS[newPlan] || newPlan} — new features are unlocked.`);
+      else if (r.data?.synced) toast.success("Billing details refreshed.");
+    }).catch(() => load());
+  }, [user, currentId, load]);
 
   const setPreview = (v) => {
     if (!v || v === "real") sessionStorage.removeItem(PREVIEW_KEY); else sessionStorage.setItem(PREVIEW_KEY, v);

@@ -5,7 +5,13 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
-import { useEntitlements, useQuota, FEATURE_COPY, PLAN_LABELS, QUOTA_COPY } from "@/lib/entitlements";
+import { useEntitlements, useQuota, FEATURE_COPY, PLAN_LABELS, QUOTA_COPY, PLAN_ORDER, PLAN_PRICE, PLAN_QUOTAS } from "@/lib/entitlements";
+
+const PLAN_PITCH = {
+  assistant: "AI chat, receipt & statement AI, projections · 3 users",
+  bookkeeper: "+ check-ins, month-end close, book review, AI rules · 5 users",
+  advanced: "+ budgets, classes, inventory, sales tax, forecasting · 5 users",
+};
 
 function QuotaBody({ upgrade, isPro, companyName }) {
   const [noun] = QUOTA_COPY[upgrade.kind] || ["items"];
@@ -36,23 +42,27 @@ export function UpgradeModal() {
 
   // Existing subscriber → Stripe Customer Portal deep-linked to the plan change (prorated).
   // No subscription yet → pricing page (new Checkout, trial if eligible).
-  const onUpgrade = async () => {
+  const onUpgrade = async (plan) => {
+    const target = plan || upgrade.min_plan;
     if (isPro) { closeUpgrade(); navigate("/admin/client-payments"); return; }
-    if (!hasSub || !current?.id) { closeUpgrade(); navigate("/pricing"); return; }
-    setBusy(true);
+    if (!hasSub || !current?.id) { closeUpgrade(); navigate(`/welcome/pricing${target ? `?plan=${target}` : ""}`); return; }
+    setBusy(target || "portal");
     try {
       const r = await api.post(`/companies/${current.id}/billing/portal-session`, {
-        origin_url: window.location.origin, return_path: window.location.pathname, target_product: upgrade.min_plan || undefined,
+        origin_url: window.location.origin, return_path: window.location.pathname, target_product: target || undefined,
       });
       if (r.data?.portal_url) { window.location.href = r.data.portal_url; return; }
       throw new Error("No portal URL");
     } catch (e) {
       const code = e.response?.data?.detail?.code;
-      if (code === "no_subscription") { closeUpgrade(); navigate("/pricing"); return; }
+      if (code === "no_subscription") { closeUpgrade(); navigate("/welcome/pricing"); return; }
       toast.error(e.response?.data?.detail?.message || e.response?.data?.detail || "Couldn't open billing — please try again");
       setBusy(false);
     }
   };
+  const curRank = PLAN_ORDER.indexOf(upgrade.current_plan || "simple_start");
+  const minRank = PLAN_ORDER.indexOf(upgrade.min_plan);
+  const options = isPro ? [] : PLAN_ORDER.filter((_, i) => i > curRank);
   return (
     <div className="fixed inset-0 z-[1100] bg-black/50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) closeUpgrade(); }} data-testid="upgrade-modal">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
@@ -68,12 +78,41 @@ export function UpgradeModal() {
             <>Your plan is <b>{upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo{hasSub ? ", prorated from today" : ", 7-day free trial"}.</>
           )}
         </div>
+        {options.length > 0 && (
+          <div className="mt-4 space-y-2" data-testid="upgrade-modal-options">
+            {options.map((p, i) => {
+              const includes = minRank >= 0 && PLAN_ORDER.indexOf(p) >= minRank;
+              const recommended = p === upgrade.min_plan;
+              return (
+                <button key={p} onClick={() => onUpgrade(p)} disabled={!!busy}
+                        className={`w-full text-left rounded-xl border p-3 flex items-center gap-3 transition-colors disabled:opacity-60 ${recommended ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 hover:border-slate-400 bg-white"}`}
+                        data-testid={`upgrade-option-${p}`}>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{PLAN_LABELS[p]}</span>
+                      {recommended && <span className="text-[10px] font-bold uppercase tracking-widest rounded-full bg-white/20 px-1.5 py-0.5">Includes {title}</span>}
+                      {!recommended && includes && <span className={`text-[10px] font-bold uppercase tracking-widest rounded-full px-1.5 py-0.5 bg-emerald-100 text-emerald-800`}>Also includes it</span>}
+                    </div>
+                    <div className={`text-xs mt-0.5 ${recommended ? "text-white/80" : "text-slate-500"}`}>{PLAN_PITCH[p]}{isQuota && upgrade.kind ? ` · ${PLAN_QUOTAS[p][upgrade.kind] == null ? "unlimited" : PLAN_QUOTAS[p][upgrade.kind]} ${QUOTA_COPY[upgrade.kind][0]}` : ""}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-sm font-semibold">${PLAN_PRICE[p]}<span className={`text-xs font-normal ${recommended ? "text-white/70" : "text-slate-500"}`}>/mo</span></div>
+                    {busy === p ? <Loader2 size={14} className="animate-spin inline" /> : <ChevronDown size={14} className="-rotate-90 inline opacity-70" />}
+                  </div>
+                </button>
+              );
+            })}
+            <div className="text-[11px] text-slate-500 px-1">{hasSub ? "Prorated — you only pay the difference today." : "7-day free trial on your first plan."}</div>
+          </div>
+        )}
         <div className="flex items-center justify-end gap-2 mt-5">
           <button onClick={closeUpgrade} className="h-10 px-4 rounded-xl border border-slate-300 text-sm font-semibold text-slate-700" data-testid="upgrade-modal-later">Not now</button>
-          <button onClick={onUpgrade} disabled={busy}
-                  className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-60" data-testid="upgrade-modal-cta">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {isPro ? "Manage plan" : planLabel ? `Upgrade to ${planLabel}` : "See plans"}
-          </button>
+          {(isPro || options.length === 0) && (
+            <button onClick={() => onUpgrade()} disabled={!!busy}
+                    className="h-10 px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold inline-flex items-center gap-1.5 disabled:opacity-60" data-testid="upgrade-modal-cta">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} {isPro ? "Manage plan" : "See plans"}
+            </button>
+          )}
         </div>
       </div>
     </div>

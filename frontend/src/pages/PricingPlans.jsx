@@ -256,14 +256,19 @@ export default function PricingPlans() {
         // A canceled/past-due sub still carries its old stripe_subscription_id,
         // so only a live state counts as paid (otherwise we'd bounce back to
         // the ledger, where the lock modal sends us here again — strobe loop).
-        const alreadyPaid = state === "active"
-          || (!!r.data?.stripe_subscription_id && !["canceled", "past_due", "unpaid", "pending"].includes(state));
+        // Only a LIVE Stripe subscription counts as "already paid". A company
+        // marked active without a subscription (manual override, comped) still
+        // needs Checkout, so it must see the plans. Active subscribers who land
+        // here go to Billing, where the Stripe portal handles plan changes.
+        const alreadyPaid = !!r.data?.stripe_subscription_id
+          && (state === "active" || !["canceled", "past_due", "unpaid", "pending"].includes(state));
         if (r.data?.trial_eligible === false) {
-          setReturning({ previous_product: r.data.previous_product, previous_plan_label: r.data.previous_plan_label, canceled_at: r.data.canceled_at });
+          setReturning({ previous_product: r.data.previous_product, previous_plan_label: r.data.previous_plan_label, canceled_at: r.data.canceled_at,
+                         canceled: state === "canceled" || !!r.data.canceled_at });
         }
         setSponsored(isSponsored || alreadyPaid);
         if (isSponsored) nav(NEXT_AFTER_PRICING, { replace: true });
-        else if (alreadyPaid) nav("/accounting/transactions", { replace: true });
+        else if (alreadyPaid) nav("/billing", { replace: true });
       })
       .catch(() => { if (!cancelled) setSponsored(false); });
     return () => { cancelled = true; };
@@ -410,12 +415,13 @@ export default function PricingPlans() {
             <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight" data-testid="pricing-headline">
-            {returning ? "Welcome back — pick up where you left off." : "Select a plan to start your 7-day free trial"}
+            {returning ? (returning.canceled ? "Welcome back — pick up where you left off." : "Choose your plan") : "Select a plan to start your 7-day free trial"}
           </h1>
           {returning && (
             <p className="mt-2 text-sm text-slate-600 max-w-xl" data-testid="pricing-returning-sub">
-              {returning.previous_plan_label ? <>Your <b>{returning.previous_plan_label}</b> plan was canceled{returning.canceled_at ? ` on ${new Date(returning.canceled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. </> : null}
-              Reactivate it or choose a different plan — billing starts today.
+              {returning.previous_plan_label && returning.canceled ? <>Your <b>{returning.previous_plan_label}</b> plan was canceled{returning.canceled_at ? ` on ${new Date(returning.canceled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. Reactivate it or choose a different plan — billing starts today.</>
+                : returning.previous_plan_label ? <>You're currently on <b>{returning.previous_plan_label}</b>. Pick the plan that fits — billing starts today.</>
+                : <>Choose a plan — billing starts today.</>}
             </p>
           )}
 
@@ -593,7 +599,7 @@ function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect, re
             before the dollar amount does. */}
         {isPrevious && (
           <div className={`mt-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest ${popular ? "bg-white/15 text-white border border-white/30" : "bg-slate-100 text-slate-700 border border-slate-200"}`} data-testid={`pricing-previous-${plan.id}`}>
-            Your previous plan
+            {returning.canceled ? "Your previous plan" : "Your current plan"}
           </div>
         )}
         {hasTrial && (
@@ -651,7 +657,7 @@ function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect, re
               <Loader2 size={13} className="animate-spin" /> Redirecting to Stripe…
             </>
           ) : wired && returning ? (
-            <>{isPrevious ? `Reactivate ${plan.name}` : `Switch to ${plan.name}`} <ArrowRight size={13} /></>
+            <>{isPrevious ? (returning.canceled ? `Reactivate ${plan.name}` : `Keep ${plan.name}`) : `Switch to ${plan.name}`} <ArrowRight size={13} /></>
           ) : wired ? (
             <>Start {plan.trialDays}-day free trial <ArrowRight size={13} /></>
           ) : (
