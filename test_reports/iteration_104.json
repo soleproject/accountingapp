@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only verification of the new in-app Quick Check-in feature on /checkin (Mockup B list + Mockup A card). Logged in pro@axiom.ai, switched company to 'Michael Co 2, LLC' (company-switcher-option-aae4ab61…fdec). All 9 spec criteria pass: landing page testids present (checkin-page, checkin-progress '1 of 12 done', title 'Quick Check-in · October', groups checkin-group-tap/-photo/-tell with rows, Done rows show green check + strikethrough + Done pill). Tapping the $12,400 deposit tap-row (item type 12) opens the full-screen card: checkin-card-header shows 'All items  3 of 12 · 1 done', footer buttons checkin-card-prev / checkin-card-skip / checkin-card-next are visible and 56px tall (bounding-box heights measured 56), review-input NOT present on tap item, hint text 'Tap an option above — or use Skip ▾' shown. Tapping a checkin-group-tell row renders the card WITH review-input (composer shown). Skip ▾ opens checkin-skip-menu with all 4 options (defer/remind/later/schedule); clicking checkin-skip-schedule opens the schedule modal (data-testid='schedule-modal') with Pick-a-time, Tomorrow 9 AM / In 3 days / Next Monday chips + native date/time inputs + Cancel/Set reminder. checkin-card-next advanced header '3 of 12' → '4 of 12'; checkin-card-prev reverted; checkin-card-back-to-list returned to checkin-page and reloaded. Answered one tap item end-to-end: Customer payment → Link to customer sub-modal → picked '7-Eleven' → review-completed-gate appeared with review-continue-btn → clicking Continue advanced the card to the next item (header '4 of 12 · 2 done') and after Back to list the $12,400 row shows Done and progress became '2 of 12 done'. Mobile viewport 390x844: mobile-nav-check-in tab exists in mobile-nav-strip; opening a card produces footer at y+height=832 (viewport 844) — the card is a fixed full-screen overlay so bottom nav is hidden beneath it; no overlap. Regression: GET /api/client-review/latest-for-company/<companyId> with Bearer returned token; opening /client-review/<token> renders the OLD standalone page — review-prev-btn + review-next-btn + review-input all present, checkin-card-header / checkin-card-footer NOT present. Regression: /owner → owner-attention-action-checkin button present and navigates to /checkin (checkin-page visible after click).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Schedule modal (checkin-skip-schedule)", "issues": ["Uses browser-native <input type='date'> and <input type='time'> instead of shadcn calendar/time picker — guideline flags native pickers as design concern. UI/UX still works and the testids are present."]},
+      {"screen": "Deposit card — Customer payment flow", "issues": ["Spec says tapping 'Customer payment' should directly show the review-completed-gate, but the real flow has TWO intermediate dialogs (first 'How do you want to link it?' with Link-to-invoice/Link-to-customer, then a 'Who paid $12,400?' customer picker). End result is still correct (gate + Continue advances) but the spec wording understates the sub-flow — informational only."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "/app/frontend/src/pages/ClientReviewPage.jsx is 7118 lines — far above the 700-line split threshold. Strongly recommend splitting into card-mode header/footer, composer, completed-gate, schedule-modal and item-type renderers.",
+    "/app/frontend/src/pages/CheckIn.jsx fetches /latest-for-company then axios.get(API/<token>) without an auth header; standalone token endpoint is public so this works, but the double round-trip could be collapsed server-side.",
+    "Customer-picker sub-dialog in cardMode has no [role='dialog'] and no data-testid — makes it fragile for e2e tests (automation falls back to text selectors)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run)", "frontend": "100% (9/9 spec criteria met)"},
+  "test_credentials": "pro@axiom.ai / pro123; company Michael Co 2, LLC id aae4ab61-5b14-4529-a38c-fef8b747fdec",
+  "seed_data_creation": "Answered ONE check-in item on Michael Co 2, LLC (the $12,400 deposit tap-item was tagged as Customer payment → 7-Eleven) per the 'ONE item only' instruction. Progress on that company went 1 of 12 → 2 of 12 done.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "After this run the $12,400 deposit on Michael Co 2 is Done. If re-running the answer flow pick a different open tap row (e.g. the Owner's draw row). The schedule modal doesn't close on Escape — use the Cancel button or click the X icon.",
+  "rca of the issue": "N/A — no bugs."
+}

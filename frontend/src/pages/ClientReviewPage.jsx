@@ -72,10 +72,11 @@ function emphasizePrompt(text) {
 //  14 — IRS Travel (lodging receipt required at any amount per §274)
 const UPLOAD_ITEM_TYPES = new Set([1, 2, 3, 4, 8, 9, 10, 11, 14]);
 
-export default function ClientReviewPage({ embedded = false, token: tokenProp = null, itemTypes = null, embeddedTitle = null }) {
+export default function ClientReviewPage({ embedded = false, token: tokenProp = null, itemTypes = null, embeddedTitle = null, cardMode = false, startItemId = null, onExit = null }) {
   const { token: tokenParam } = useParams();
   const token = tokenProp || tokenParam;
   const [searchParams, setSearchParams] = useSearchParams();
+  const [skipMenuOpen, setSkipMenuOpen] = useState(false);
   // Embedded (in-shell) mode only shows the item types the host page asked for.
   const scopeItems = (data) => {
     if (!itemTypes || !data) return data;
@@ -212,7 +213,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
         setSession(r.data);
         // Pick the first not-yet-finalized item
         // ?item=<id> (pro jumping in from the Cockpit) wins, even if parked.
-        const wanted = searchParams.get("item");
+        const wanted = startItemId || searchParams.get("item");
         const wantedIdx = wanted ? (r.data.items || []).findIndex((i) => i.item_id === wanted) : -1;
         const idx = wantedIdx !== -1 ? wantedIdx : (r.data.items || []).findIndex(isOpenItem);
         setActiveIdx(idx === -1 ? (r.data.items || []).length : idx);
@@ -237,12 +238,12 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     // the top of the page so the item context card is visible first.
     const it = session?.items?.[activeIdx];
     const isFormType = it && [10, 14].includes(it.item_type);
-    if (isFormType) {
+    if (isFormType && !cardMode) {
       window.scrollTo({ top: 0, behavior: "smooth" });
     } else {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [messages, activeIdx, session]);
+  }, [messages, activeIdx, session, sending]);
 
   // When embedded in the pro Cockpit (iframe), tell the parent whenever
   // the batch's progress changes so its row/chips refresh live.
@@ -662,6 +663,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     // On the wrap-up screen there's no next question to introduce, so
     // skip the transition entirely.
     if (wasLast) {
+      if (cardMode && onExit) { onExit(); return; }
       setMessages([]);
       setActiveIdx(totalCount);
       return;
@@ -1193,6 +1195,16 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     return <FullPageStatus icon={<HelpCircle size={22} />} text={error} />;
   }
   if (session?.status === "completed" || allDone || (embedded && totalCount === 0)) {
+    if (cardMode) {
+      return (
+        <div className="fixed inset-0 z-50 bg-[#F5F7FA] flex flex-col items-center justify-center p-6 text-center" data-testid="checkin-card-all-done">
+          <CheckCircle2 size={40} className="text-emerald-600 mb-3" />
+          <div className="text-lg font-semibold text-slate-900">All caught up</div>
+          <div className="text-sm text-slate-500 mt-1">Every item in this check-in is answered.</div>
+          <button onClick={() => onExit?.()} className="mt-6 h-14 px-8 rounded-2xl bg-slate-900 text-white font-bold" data-testid="checkin-card-all-done-back">Back to list</button>
+        </div>
+      );
+    }
     if (embedded) {
       return (
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 px-6 py-10 text-center" data-testid="embedded-review-all-done">
@@ -1213,9 +1225,30 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
   const firmInitials = (session?.firm_name || "NG")
     .split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
 
+  // Card mode (in-app Quick Check-in): item types that genuinely need words.
+  // Everything else is tap/upload-first and only reveals the composer once
+  // the conversation has branched (user already said something).
+  const TELL_TYPES = new Set([1, 8, 10, 13, 14]);
+  const needsComposer = !cardMode
+    || TELL_TYPES.has(currentItem?.item_type)
+    || messages.some((m) => m.role === "user")
+    || messages[messages.length - 1]?.action?.type === "clarify";
+  const cardDone = cardMode ? (session?.items || []).filter((i) => !isOpenItem(i)).length : 0;
+
   return (
-    <div className={`${embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
+    <div className={`${cardMode ? "fixed inset-0 md:top-16 z-50" : embedded ? "-m-4 md:-m-8 min-h-full md:h-[calc(100%+4rem)] md:overflow-auto" : "min-h-screen"} bg-[#F5F7FA] flex flex-col`} data-testid="client-review-page">
       {/* Header */}
+      {cardMode ? (
+        <header className="bg-white border-b border-slate-200 px-3 py-2.5 sticky top-0 z-10" data-testid="checkin-card-header">
+          <div className="flex items-center justify-between gap-2">
+            <button onClick={() => onExit?.()} className="inline-flex items-center gap-1 h-11 px-2 -ml-1 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100" data-testid="checkin-card-back-to-list">
+              <ChevronLeft size={18} /> All items
+            </button>
+            <div className="text-xs text-slate-500 font-medium">{Math.min(activeIdx + 1, totalCount)} of {totalCount} · {cardDone} done</div>
+          </div>
+          <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-2"><div className="h-full bg-emerald-500 rounded-full transition-[width] duration-500" style={{ width: `${totalCount ? Math.round(100 * cardDone / totalCount) : 0}%` }} /></div>
+        </header>
+      ) : (
       <header className="bg-white border-b border-slate-200 px-4 py-3 sticky top-0 z-10">
         <div className={`${colW} mx-auto flex items-center gap-3`}>
           <button
@@ -1330,6 +1363,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
           </div>
         )}
       </header>
+      )}
 
       {/* Arrival transition bubble — the AI's "ok, here's the next
           one" line that opens a fresh question. Rendered ABOVE the
@@ -1384,7 +1418,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       )}
 
       {/* Chat */}
-      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4`}>
+      <main className={`flex-1 ${colW} mx-auto w-full px-4 py-4 ${cardMode ? "overflow-y-auto min-h-0" : ""}`}>
         <div className="space-y-3">
           {/* `visibleMessages` = the chat excluding the leading arrival
               transition bubble (rendered ABOVE the item card). Initial
@@ -1720,7 +1754,9 @@ ${companyName}`;
           )}
           {messages.filter((m) => !m.isTransition).length === 0 && currentItem && ![1, 3, 4, 8, 9, 11, 13].includes(currentItem.item_type) && (
             <div className="text-center text-xs text-slate-500 py-4">
-              {currentItem.item_type === 15
+              {cardMode && !needsComposer
+                ? "Tap an option above — or use Skip ▾ if you're not sure."
+                : currentItem.item_type === 15
                 ? "Tap Yes / No below, or type an explanation."
                 : "Type your answer below, or tap \"not sure\" to send this to your bookkeeper."}
             </div>
@@ -1931,7 +1967,7 @@ ${companyName}`;
       </main>
 
       {/* Composer */}
-      <footer className="bg-white border-t px-4 py-3 sticky bottom-0">
+      <footer className={`bg-white border-t px-4 py-3 sticky bottom-0 ${cardMode ? "pb-[max(0.75rem,env(safe-area-inset-bottom))]" : ""}`}>
         <div className={`${colW} mx-auto`}>
           {justCompleted ? (
             <div className="flex items-center gap-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 px-4 py-3" data-testid="review-completed-gate">
@@ -1960,6 +1996,7 @@ ${companyName}`;
             </div>
           ) : (
           <>
+          {needsComposer && (
           <div className="flex items-end gap-2">
             {UPLOAD_ITEM_TYPES.has(currentItem?.item_type) && (
               <>
@@ -2023,6 +2060,33 @@ ${companyName}`;
               <Send size={16} />
             </button>
           </div>
+          )}
+          {cardMode ? (
+            <div className="relative flex items-center gap-2 mt-2" data-testid="checkin-card-footer">
+              <button onClick={() => jumpTo(activeIdx - 1)} disabled={!canPrev}
+                className="h-14 flex-1 rounded-2xl border-[1.5px] border-slate-300 bg-white text-[15px] font-bold text-slate-800 inline-flex items-center justify-center gap-1 disabled:opacity-40"
+                data-testid="checkin-card-prev"><ChevronLeft size={18} /> Back</button>
+              <button onClick={() => setSkipMenuOpen((v) => !v)} disabled={busy || !currentItem}
+                className="h-14 w-24 rounded-2xl border-[1.5px] border-slate-300 bg-white text-[14px] font-bold text-slate-500 disabled:opacity-40"
+                data-testid="checkin-card-skip">Skip ▾</button>
+              <button onClick={() => (canNext ? jumpTo(activeIdx + 1) : onExit?.())}
+                className="h-14 flex-1 rounded-2xl bg-slate-900 text-white text-[15px] font-bold inline-flex items-center justify-center gap-1"
+                data-testid="checkin-card-next">{canNext ? "Next" : "Done"} <ChevronRight size={18} /></button>
+              {skipMenuOpen && (
+                <div className="absolute bottom-16 left-1/2 -translate-x-1/2 w-72 rounded-2xl border border-slate-200 bg-white shadow-2xl p-2 z-20" data-testid="checkin-skip-menu">
+                  {[
+                    ["Not sure — send to my bookkeeper", () => deferItem(), "checkin-skip-defer"],
+                    ["Don't have it now — remind me", () => setReminderMode("item"), "checkin-skip-remind"],
+                    ["I'll finish later", () => setReminderMode("follow_up"), "checkin-skip-later"],
+                    ["Schedule for later", () => setShowSchedule(true), "checkin-skip-schedule"],
+                  ].map(([label, fn, tid]) => (
+                    <button key={tid} onClick={() => { setSkipMenuOpen(false); fn(); }}
+                      className="w-full text-left h-12 px-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-50" data-testid={tid}>{label}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
           <div className="mt-2 flex items-center justify-between gap-2">
             <div className="flex items-center gap-x-3 gap-y-1 flex-wrap">
               <button
@@ -2073,6 +2137,7 @@ ${companyName}`;
               </span>
             )}
           </div>
+          )}
           </>
           )}
         </div>
