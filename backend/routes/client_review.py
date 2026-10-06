@@ -285,6 +285,78 @@ async def post_answer(token: str, item_id: str, body: AnswerRequest):
     return {"ok": True, **result}
 
 
+# --------------------------------------------------------------------------
+# Category engine (same resolver the Transactions focus chat uses) — only
+# for item types whose answer IS a category: Uncategorized, Owner's Draw
+# reclassify, Deposit. Triggered by the client's free-text answer.
+# --------------------------------------------------------------------------
+CATEGORY_ENGINE_TYPES = {cr.ITEM_UNCATEGORIZED, cr.ITEM_OWNER_DRAW, cr.ITEM_DEPOSIT}
+
+
+class ResolveCategoryBody(BaseModel):
+    message: str
+
+
+class ApplyCategoryBody(BaseModel):
+    txn_ids: list[str]
+    account_id: Optional[str] = None
+    new_account: Optional[dict] = None
+    create_rule: bool = False
+    contact_id: Optional[str] = None
+    answer_text: str = ""
+
+
+async def _engine_item(token: str, item_id: str) -> tuple[dict, dict]:
+    batch = await _resolve_batch(token)
+    item = next((i for i in (batch.get("items") or []) if i["item_id"] == item_id), None)
+    if not item:
+        raise HTTPException(404, "Item not in this batch")
+    if item.get("item_type") not in CATEGORY_ENGINE_TYPES:
+        raise HTTPException(400, "Category engine not available for this item type")
+    if item.get("answered_at") or item.get("deferred"):
+        raise HTTPException(409, "Item already finalized")
+    return batch, item
+
+
+@router.post("/{token}/items/{item_id}/resolve-category")
+async def post_resolve_category(token: str, item_id: str, body: ResolveCategoryBody):
+    batch, item = await _engine_item(token, item_id)
+    txn_id = await handlers._resolve_txn_id_for_item(item)
+    if not txn_id:
+        return {"unavailable": True}
+    from ai_category_resolver import resolve_category
+    res = await resolve_category(batch["company_id"], body.message, txn_id)
+    return {**res, "txn_id": txn_id}
+
+
+@router.post("/{token}/items/{item_id}/resolve-category/apply")
+async def post_resolve_category_apply(token: str, item_id: str, body: ApplyCategoryBody):
+    batch, item = await _engine_item(token, item_id)
+    from routes.ai_ops import ApplyCategoryIn, apply_category_resolution
+    inp = ApplyCategoryIn(txn_ids=body.txn_ids, account_id=body.account_id, new_account=body.new_account,
+                          create_rule=body.create_rule, contact_id=body.contact_id)
+    result = await apply_category_resolution(batch["company_id"], inp, created_via="client_review_engine")
+    acct = result["account"]
+    label = f"{acct.get('code') or ''} · {acct.get('name')}".strip(" ·")
+    detail = f"Booked to {label}"
+    if result.get("updated", 0) > 1:
+        detail += f" · {result['updated']} transactions"
+    if result.get("rule_id"):
+        detail += " · rule saved for future imports"
+    answer = body.answer_text or detail
+    await handlers._handle_generic_finding(
+        item, batch, answer=answer,
+        payload={"category_account_id": acct["id"], "category_account_name": acct.get("name"),
+                 "txn_ids": body.txn_ids, "rule_id": result.get("rule_id"), "resolved_via": "category_engine"})
+    await db.client_review_batches.update_one(
+        {"id": batch["id"], "items.item_id": item_id},
+        {"$set": {"items.$.answered_at": _now_iso(), "items.$.answer": answer,
+                  "items.$.action_taken": "categorized", "items.$.action_detail": detail,
+                  "updated_at": _now_iso()},
+         "$inc": {"answer_count": 1}})
+    return {"ok": True, **result, "detail": detail}
+
+
 @router.post("/{token}/items/{item_id}/not-liability")
 async def post_not_liability(token: str, item_id: str):
     """Client says this payment is NOT a loan / credit-card / mortgage

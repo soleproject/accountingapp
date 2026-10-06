@@ -196,6 +196,10 @@ async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict =
     """Confirm step: create the proposed account if needed (all fields), then
     categorize + mark reviewed the given transactions. Optional contact rule."""
     await require_company(user, cid)
+    return await apply_category_resolution(cid, inp)
+
+
+async def apply_category_resolution(cid: str, inp: ApplyCategoryIn, created_via: str = "ai_panel_resolver") -> dict:
     from ai_category_resolver import create_account_from_proposal
     company = await db.companies.find_one({"id": cid}, {"_id": 0, "industry_template": 1})
     template = (company or {}).get("industry_template") or "generic"
@@ -216,7 +220,7 @@ async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict =
     contact = None
     if inp.set_contact_name and inp.set_contact_name.strip():
         from contact_resolver import get_or_create_contact
-        contact = await get_or_create_contact(cid, inp.set_contact_name.strip(), source="ai_panel_resolver")
+        contact = await get_or_create_contact(cid, inp.set_contact_name.strip(), source=created_via)
     if ids:
         fields = {"category_account_id": acct["id"], "category_account_code": acct.get("code"),
                   "category_account_name": acct.get("name"), "human_reviewed": True, "needs_review": False,
@@ -237,7 +241,7 @@ async def ai_resolve_category_apply(cid: str, inp: ApplyCategoryIn, user: dict =
             rule_id = str(uuid.uuid4())
             await db.rules.insert_one({"id": rule_id, "company_id": cid, "match_type": "contact_id",
                                        "match_value": inp.contact_id, "category_account_id": acct["id"],
-                                       "created_via": "ai_panel_resolver", "created_at": now_iso(), "updated_at": now_iso()})
+                                       "created_via": created_via, "created_at": now_iso(), "updated_at": now_iso()})
     return {"ok": True, "updated": updated, "skipped_closed": len(docs) - len(ids), "created_account": created,
             "account": {"id": acct["id"], "code": acct.get("code"), "name": acct.get("name"), "type": acct.get("type")},
             "rule_id": rule_id, "contact": ({"id": contact["id"], "name": contact.get("name")} if contact else None)}

@@ -319,7 +319,88 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
     && finishedCount + parkedItems.length === totalCount;
 
   // ------- interactions -------
-  const sendTurn = async (text) => {
+  // Item types whose answer IS a category → route free-text answers through
+  // the same resolver the Transactions focus chat uses (names the account,
+  // explains why, covers similar rows, asks to confirm) instead of booking blind.
+  const CATEGORY_ENGINE_TYPES = [1, 11, 12];
+  const fmtAmt = (n) => `$${Math.abs(Number(n || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const acctLabel = (a) => [a?.code, a?.name].filter(Boolean).join(" · ");
+
+  const runCategoryEngine = async (text, fallbackPayload) => {
+    try {
+      const r = await axios.post(`${API}/${token}/items/${currentItem.item_id}/resolve-category`, { message: text });
+      const d = r.data || {};
+      if (d.unavailable) { await applyAnswer(fallbackPayload, text); return; }
+      const rec = d.recommendation;
+      if (!rec) {
+        setMessages((m) => [...m, {
+          role: "assistant",
+          content: d.ask || "I couldn't pin down the right account from that — can you tell me a little more about what this was for?",
+          quickReplies: (d.alternatives || []).slice(0, 4).map((a) => acctLabel(a)),
+          _categoryRec: { ...d, recommendation: null },
+        }]);
+        return;
+      }
+      const amt = fmtAmt(d.txn?.amount);
+      const isNew = rec.kind === "new";
+      let content = `I'd book this ${amt} to **${acctLabel(rec.account)}**${isNew ? " — a new account I'll add to your chart" : ""}. ${rec.why || ""}`.trim();
+      const n = d.similar_count || 0;
+      if (n > 0) content += ` There ${n === 1 ? "is 1 similar transaction" : `are ${n} similar transactions`}${d.similar_label ? ` from ${d.similar_label}` : ""} I can book the same way.`;
+      content += " Want me to go ahead?";
+      const quickReplies = ["Use this"];
+      if (n > 0) quickReplies.push(`Use this for all ${n + 1}`);
+      if ((d.alternatives || []).length) quickReplies.push("Pick another");
+      quickReplies.push("Something else");
+      setMessages((m) => [...m, { role: "assistant", content, quickReplies, _categoryRec: d }]);
+    } catch (e) {
+      await applyAnswer(fallbackPayload, text);
+    }
+  };
+
+  const applyCategoryRec = async (d, { account, withSimilar }) => {
+    if (!currentItem || busy) return;
+    setBusy(true);
+    const rec = d.recommendation;
+    const acct = account || rec?.account;
+    const isNew = !account && rec?.kind === "new";
+    const ids = withSimilar ? [d.txn_id, ...(d.similar_ids || [])] : [d.txn_id];
+    try {
+      const r = await axios.post(`${API}/${token}/items/${currentItem.item_id}/resolve-category/apply`, {
+        txn_ids: ids, account_id: isNew ? null : acct.id, new_account: isNew ? acct : null,
+        create_rule: !!withSimilar && !!d.txn?.contact_id, contact_id: d.txn?.contact_id || null,
+        answer_text: `Booked to ${acctLabel(acct)}`,
+      });
+      const a = r.data.account;
+      setMessages((m) => m.map((mm) => (mm._categoryRec ? { ...mm, quickReplies: [] } : mm)).concat([{ role: "assistant", content: `${r.data.created_account ? "Created" : "Used"} **${acctLabel(a)}** and booked ${r.data.updated} transaction${r.data.updated === 1 ? "" : "s"}${r.data.rule_id ? " · rule saved for future imports" : ""}.` }]));
+      markCompleted({ label: "Booked", detail: r.data.detail || `Booked to ${acctLabel(a)}` });
+    } catch (e) {
+      if (e?.response?.status === 409) { markCompleted({ label: "Answer sent" }); return; }
+      setMessages((m) => [...m, { role: "assistant", content: "Sorry — I couldn't book that. Please try again, or tap 'send to my bookkeeper'." }]);
+    } finally { setBusy(false); }
+  };
+
+  const handleCategoryChip = (t, m) => {
+    const d = m._categoryRec;
+    if (!d) return false;
+    if (t === "Use this" && d.recommendation) { applyCategoryRec(d, {}); return true; }
+    if (/^Use this for all \d+$/.test(t) && d.recommendation) { applyCategoryRec(d, { withSimilar: true }); return true; }
+    if (t === "Pick another") {
+      setMessages((prev) => [...prev, { role: "user", content: t }, {
+        role: "assistant", content: "Here are the closest other accounts — tap one, or tell me what it was for.",
+        quickReplies: (d.alternatives || []).slice(0, 6).map((a) => acctLabel(a)), _categoryRec: { ...d, recommendation: null },
+      }]);
+      return true;
+    }
+    if (t === "Something else") {
+      setMessages((prev) => [...prev, { role: "user", content: t }, { role: "assistant", content: "No problem — tell me what it was for and I'll find the right account." }]);
+      return true;
+    }
+    const alt = (d.alternatives || []).find((a) => acctLabel(a) === t);
+    if (alt) { setMessages((prev) => [...prev, { role: "user", content: t }]); applyCategoryRec(d, { account: alt }); return true; }
+    return false;
+  };
+
+  const sendTurn = async (text, { fromChip = false } = {}) => {
     if (!currentItem || sending || !text.trim()) return;
     setSending(true);
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -330,6 +411,19 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
         message: text,
       });
       const a = r.data;
+      const trimmed = (text || "").trim();
+      const looksLikeQuestion =
+        /\?\s*$/.test(trimmed) ||
+        /^(should|can|could|do|does|did|is|are|was|were|will|would|what|how|why|when|where|which|who)\b/i
+          .test(trimmed);
+      const isAnswer = a.action?.type === "answer" && !looksLikeQuestion;
+      const useEngine = isAnswer && !fromChip && !a.analysis
+        && CATEGORY_ENGINE_TYPES.includes(currentItem.item_type)
+        && a.action?.payload?.confirmed !== true;
+      if (useEngine) {
+        await runCategoryEngine(text, a.action.payload || {});
+        return;
+      }
       // If the backend re-ran the vision analysis (Q8 refresh), render
       // the updated breakdown card instead of a plain text bubble.
       if (a.analysis) {
@@ -358,12 +452,7 @@ export default function ClientReviewPage({ embedded = false, token: tokenProp = 
       // asking us for info; auto-finalizing here would look like the
       // app dismissed their question. Belt-and-suspenders on top of
       // the engine's own `clarify` rule.
-      const trimmed = (text || "").trim();
-      const looksLikeQuestion =
-        /\?\s*$/.test(trimmed) ||
-        /^(should|can|could|do|does|did|is|are|was|were|will|would|what|how|why|when|where|which|who)\b/i
-          .test(trimmed);
-      if (a.action?.type === "answer" && !looksLikeQuestion) {
+      if (isAnswer) {
         await applyAnswer(a.action.payload || {}, text);
       } else if (a.action?.type === "defer") {
         await deferItem(a.action.payload?.note);
@@ -1573,8 +1662,8 @@ ${companyName}`;
               hideHelper={messages.length > 0}
               yesLabel="Yes — it's an Owner's Draw"
               noLabel="No — it's something else"
-              onYes={() => sendTurn("Yes — this is an Owner's Draw.")}
-              onNo={() => sendTurn("No — this is not an Owner's Draw.")}
+              onYes={() => sendTurn("Yes — this is an Owner's Draw.", { fromChip: true })}
+              onNo={() => sendTurn("No — this is not an Owner's Draw.", { fromChip: true })}
               onEdited={(res) => {
                 if (res?.context) {
                   setSession((s) => {
@@ -1827,7 +1916,8 @@ ${companyName}`;
                   fileRef.current?.click();
                   return;
                 }
-                sendTurn(t);
+                if (handleCategoryChip(t, m)) return;
+                sendTurn(t, { fromChip: true });
               }}
             />
             )
@@ -5835,7 +5925,9 @@ function ChatBubble({ message, onQuickReply, onBreakdownChange, onRemoveAttachme
         } ${isAttachment ? "pr-8 relative" : ""}`}
         style={{ whiteSpace: "pre-wrap" }}
       >
-        {message.content}
+        {typeof message.content === "string" && message.content.includes("**")
+          ? message.content.split(/\*\*(.+?)\*\*/g).map((part, k) => (k % 2 ? <b key={k}>{part}</b> : part))
+          : message.content}
         {isAttachment && !message._readOnly && (
           <button
             onClick={() => onRemoveAttachment?.(message._attachmentId, message._itemId)}

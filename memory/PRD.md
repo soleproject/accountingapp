@@ -1032,3 +1032,17 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-10-06 — Owner "Upload" (statement needed) → inline upload popup ✅ self-tested
 - Attention `stmt-*` items now carry `account_id`, `account_name`, `period_label`. New `components/owner/StatementUploadModal.jsx` (testid `statement-upload-modal`) wraps `StatementsTab bare` with new `defaultAccountId` prop (preselects the bank account → drops skip the confirm modal). OwnerDashboard `onAttention` kind=statement opens it; closing reloads dashboard.
+
+## 2026-10-06 — Reminder preview before send ✅ self-tested
+- `GET /companies/{cid}/communications/dunning/preview?invoice_id=` → {to, subject, html, days_late, last_reminder_sent_at}. `_build_dunning` shared with POST; both now use `get_current_user`+`require_company` (owners can send, not just pros). Contact greeting falls back to `name`.
+- OverdueInvoicesModal: Send reminder → `ReminderPreview` step (editable To, subject, iframe srcDoc body, last-sent notice, Cancel/Send). testids `reminder-preview-*`.
+
+## 2026-10-06 — Money tab "Keep collections moving" uses reminder preview ✅ self-tested
+- `ReminderPreview` exported from OverdueInvoicesModal; MoneyTab Send reminder opens it in a modal (testid `money-reminder-modal`), row flips to Sent. Expected-date input now shown for every overdue row without an expected date (was >60 days only).
+
+## 2026-10-06 — Books card "Review" button ✅ self-tested
+- `books.period_start/period_end` added to owner-dashboard payload. BooksCard shows `Review` (testid `owner-books-review-btn`) right of "N awaiting your answers" only when awaiting_answers>0 → `/accounting/transactions?filter=unapproved&date_from=…&date_to=…` (To do tab + month date range).
+
+## 2026-10-06 — Quick Check-in category engine (types 1/11/12) ✅ self-tested (type 1 e2e in browser)
+- Backend: `routes/ai_ops.apply_category_resolution(cid, inp, created_via)` extracted from the AiPanel apply route. New token endpoints in `routes/client_review.py`: `POST /{token}/items/{id}/resolve-category {message}` → `ai_category_resolver.resolve_category` on the item's txn (400 for other item types; `{unavailable:true}` if no txn); `POST …/resolve-category/apply {txn_ids, account_id|new_account, create_rule, contact_id, answer_text}` → applies, closes finding, stamps item `action_taken=categorized`, `action_detail="Booked to CODE · Name"`.
+- Frontend ClientReviewPage: `sendTurn(text,{fromChip})`; when Haiku returns `answer` for item types 1/11/12 from FREE TEXT (not a chip) and `payload.confirmed!==true` → `runCategoryEngine` renders a recommendation bubble ("I'd book this $X to **CODE · Name** … N similar … Want me to go ahead?") with chips Use this / Use this for all N / Pick another / Something else; `handleCategoryChip` applies via the token apply endpoint. Chip answers (Yes/No owner's draw, deposit buckets, Payroll…) keep their deterministic handlers. ChatBubble now renders **bold**.
