@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany, useDateFmt, useMoneyFmt } from "@/lib/company";
-import { PLAN_ORDER, PLAN_LABELS, PLAN_PRICE } from "@/lib/entitlements";
+import { PLAN_ORDER, PLAN_LABELS, PLAN_PRICE, useEntitlements } from "@/lib/entitlements";
 
 const q = (v) => (v == null ? "unlimited" : v);
 
@@ -28,11 +28,12 @@ export function PlanCard() {
   const [d, setD] = useState(null);
   const [busy, setBusy] = useState(null);
 
+  const { ent } = useEntitlements();
   useEffect(() => {
     setD(null);
     if (!currentId) return;
     api.get(`/companies/${currentId}/billing/plan-summary`).then((r) => setD(r.data)).catch(() => setD({ error: true }));
-  }, [currentId]);
+  }, [currentId, ent?.plan, ent?.source]);
 
   const openPortal = async (target) => {
     setBusy(target || "portal");

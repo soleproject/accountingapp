@@ -28,11 +28,23 @@ function QuotaBody({ upgrade, isPro, companyName }) {
 }
 
 export function UpgradeModal() {
-  const { upgrade, closeUpgrade } = useEntitlements();
+  const { upgrade, closeUpgrade, reload, ent, can } = useEntitlements();
   const { user } = useAuth();
   const { current } = useCompany();
   const navigate = useNavigate();
   const [busy, setBusy] = React.useState(false);
+  const hasSubLive = !!current?.stripe_subscription_id && !["canceled", "unpaid", "incomplete_expired"].includes((current?.sub_status || current?.billing_state || "").toLowerCase());
+  // On open, reconcile with Stripe so the options reflect the plan they're really on.
+  React.useEffect(() => {
+    if (!upgrade || !hasSubLive || !current?.id) return;
+    api.post(`/companies/${current.id}/billing/sync-subscription`).then((r) => {
+      if (r.data?.changed) { reload(); toast.info(`Your plan is ${PLAN_LABELS[r.data.billing_product] || r.data.billing_product} — options updated.`); }
+    }).catch(() => {});
+  }, [upgrade?.feature]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Plan caught up and now covers the feature → nothing left to upsell.
+  React.useEffect(() => {
+    if (upgrade && !upgrade.code && upgrade.feature && can(upgrade.feature)) closeUpgrade();
+  }, [ent]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!upgrade) return null;
   const isQuota = upgrade.code === "quota_exceeded";
   const [title, blurb] = isQuota ? [QUOTA_COPY[upgrade.kind]?.[1] || "Add more", FEATURE_COPY[upgrade.feature]?.[1] || ""] : (FEATURE_COPY[upgrade.feature] || ["This feature", ""]);
@@ -51,6 +63,10 @@ export function UpgradeModal() {
       const r = await api.post(`/companies/${current.id}/billing/portal-session`, {
         origin_url: window.location.origin, return_path: window.location.pathname, target_product: target || undefined,
       });
+      if (r.data?.already_on_plan) {
+        toast.success(`You're already on ${PLAN_LABELS[r.data.billing_product] || r.data.billing_product} — your plan has been refreshed.`);
+        closeUpgrade(); reload(); return;
+      }
       if (r.data?.portal_url) { window.location.href = r.data.portal_url; return; }
       throw new Error("No portal URL");
     } catch (e) {
@@ -60,7 +76,8 @@ export function UpgradeModal() {
       setBusy(false);
     }
   };
-  const curRank = PLAN_ORDER.indexOf(upgrade.current_plan || "simple_start");
+  const curPlan = ent?.plan || upgrade.current_plan || "simple_start";
+  const curRank = PLAN_ORDER.indexOf(curPlan);
   const minRank = PLAN_ORDER.indexOf(upgrade.min_plan);
   const options = isPro ? [] : PLAN_ORDER.filter((_, i) => i > curRank);
   return (
@@ -75,7 +92,7 @@ export function UpgradeModal() {
           {isQuota ? <QuotaBody upgrade={upgrade} isPro={isPro} companyName={current?.name} /> : isPro ? (
             <><b>{current?.name || "This company"}</b> is on <b>{upgrade.current_plan_label || "Core"}</b>. Upgrade them to <b>{planLabel}</b> (${upgrade.min_plan_price}/mo) or sponsor a seat to unlock this.</>
           ) : (
-            <>Your plan is <b>{upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo{hasSub ? ", prorated from today" : ", 7-day free trial"}.</>
+            <>Your plan is <b>{ent?.plan_label || upgrade.current_plan_label || "Core"}</b>. {title} is part of <b>{planLabel}</b> — ${upgrade.min_plan_price}/mo{hasSub ? ", prorated from today" : ", 7-day free trial"}.</>
           )}
         </div>
         {options.length > 0 && (

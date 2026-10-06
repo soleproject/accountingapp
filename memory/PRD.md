@@ -1094,6 +1094,11 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Frontend: `useQuota(kind)` + `openQuotaUpgrade` in lib/entitlements.js (PLAN_QUOTAS, nextPlanFor, QUOTA_COPY); 402 interceptor handles quota_exceeded. `QuotaNotice` meter (Entitlements.jsx) on TeamPanel (company mode) and Connections; UpgradeModal quota variant ("Add a seat" / "Connect another account"). TeamPanel invite button and Connections connectOne pre-block at cap; 402 toasts suppressed. Notice hidden in shadow mode.
 - Tests: backend/tests/test_entitlements_quotas.py.
 
+## 2026-10-06 — Plan mismatch self-heal (app plan ≠ Stripe plan) ✅ (verified: app Core/active vs Stripe Bookkeeper/trialing → modal auto-synced, closed, chat unlocked; portal target==current → already_on_plan + heal)
+- portal-session: if target price == subscription's current price → apply `_sub_snapshot` to the company and return `{already_on_plan, billing_product, sub_status}` (no portal). Frontend toasts "You're already on X — plan refreshed", closes modal, reloads entitlements.
+- UpgradeModal: on open (client w/ live sub) calls sync-subscription; if plan changed → reload + toast "Your plan is X — options updated"; options/body use live `ent.plan`; modal auto-closes once `can(feature)` is true. PlanCard reloads when ent.plan/source changes.
+- Cause in prod: Pre-flight override had set Core while the Stripe sub was Bookkeeper (trial). Stripe is the source of truth for companies with a live subscription.
+
 ## 2026-10-06 — UpgradeModal plan picker ✅ (desktop + mobile verified)
 - Clients now see every plan above their current one as selectable rows (label, PLAN_PITCH blurb, $/mo; recommended = min_plan highlighted "Includes <feature>", higher tiers "Also includes it"; quota modals append the tier's limit). Clicking a row → portal deep-link to that plan (active sub) or /welcome/pricing?plan=<p> (no sub). Pros keep the single "Manage plan" CTA.
 
