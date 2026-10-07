@@ -11,16 +11,16 @@ export function TodayTab({ center, toolkit, onChanged, onGoto }) {
   if (!center) return <div className="text-sm text-slate-400 p-6">Loading…</div>;
   const s = center.stats || {};
   const stats = [
-    ["Clicks · 30d", s.clicks_30d || 0, s.clicks_delta ? `${s.clicks_delta > 0 ? "▲" : "▼"} ${Math.abs(s.clicks_delta)} vs prior 30d` : "—"],
-    ["Leads", s.leads || 0, s.clicks_30d ? `${Math.round(100 * (s.leads || 0) / s.clicks_30d)}% of clicks` : "—"],
-    ["Signed up", s.signed_up || 0, `${s.trialing || 0} in trial`],
-    ["Paying", s.paying || 0, `${fmtUsd(s.recurring_cents || 0)}/mo to you`],
+    ["Clicks · 30d", s.clicks_30d || 0, s.clicks_delta ? `${s.clicks_delta > 0 ? "▲" : "▼"} ${Math.abs(s.clicks_delta)} vs prior 30d` : "—", "clicks"],
+    ["Leads", s.leads || 0, s.clicks_30d ? `${Math.round(100 * (s.leads || 0) / s.clicks_30d)}% of clicks` : "—", "leads"],
+    ["Signed up", s.signed_up || 0, `${s.trialing || 0} in trial`, "signed_up"],
+    ["Paying", s.paying || 0, `${fmtUsd(s.recurring_cents || 0)}/mo to you`, "paying"],
   ];
   return (
     <div data-testid="today-tab">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {stats.map(([k, v, d]) => (
-          <div key={k} className="bg-white border border-slate-200 rounded-2xl px-4 py-3" data-testid={`today-stat-${k.split(" ")[0].toLowerCase()}`}>
+        {stats.map(([k, v, d, id]) => (
+          <div key={id} className="bg-white border border-slate-200 rounded-2xl px-4 py-3" data-testid={`today-stat-${id}`}>
             <div className="text-[11px] uppercase tracking-[.1em] text-slate-500 font-semibold">{k}</div>
             <div className="font-mono text-2xl font-semibold mt-1">{v}</div>
             <div className="text-[11px] text-slate-500 mt-0.5">{d}</div>
