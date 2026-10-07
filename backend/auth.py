@@ -28,11 +28,12 @@ def verify_password(p: str, hashed: str) -> bool:
         return False
 
 
-def create_token(user_id: str, role: str, ttl_seconds: int | None = None) -> str:
+def create_token(user_id: str, role: str, ttl_seconds: int | None = None, impersonated_by: str | None = None) -> str:
     """Mint a JWT for a user. `ttl_seconds` overrides the default
     `JWT_EXPIRY_HOURS` window — used by the public UK demo endpoint
     to issue short-lived (30-minute) tokens so a leaked demo token
-    can't be reused for a persistent unauthorised session."""
+    can't be reused for a persistent unauthorised session.
+    `impersonated_by` stamps the real superadmin's id on a "Viewing as" token."""
     if ttl_seconds is not None:
         exp = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
     else:
@@ -42,6 +43,8 @@ def create_token(user_id: str, role: str, ttl_seconds: int | None = None) -> str
         "role": role,
         "exp": exp,
     }
+    if impersonated_by:
+        payload["imp"] = impersonated_by
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
 
@@ -55,6 +58,8 @@ async def get_current_user(cred: Optional[HTTPAuthorizationCredentials] = Depend
     user = await db.users.find_one({"id": payload["sub"]})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if payload.get("imp"):
+        user["impersonated_by"] = payload["imp"]
     # Stash user id in the request-scoped context so downstream LLM /
     # service calls can attribute their cost rows without every route
     # having to plumb the user id through. Failure is non-fatal —

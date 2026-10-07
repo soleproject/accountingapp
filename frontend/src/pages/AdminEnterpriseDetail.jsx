@@ -32,6 +32,7 @@ const PAYER_LABELS = {
   client_card: "Client card",
   enterprise: "Enterprise pays",
   free_spot: "Free spot",
+  investor: "Investor",
 };
 
 const BILLING_STATE_STYLES = {
@@ -40,6 +41,7 @@ const BILLING_STATE_STYLES = {
   past_due:  "bg-rose-50    text-rose-700    border-rose-200",
   canceled:  "bg-slate-100  text-slate-600   border-slate-300",
   free_spot: "bg-violet-50  text-violet-700  border-violet-200",
+  investor: "bg-amber-50  text-amber-800  border-amber-200",
 };
 
 

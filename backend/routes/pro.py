@@ -251,6 +251,11 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
     if billing_product:
         if billing_product not in _entmod.BILLING_PRODUCTS:
             raise HTTPException(400, f"billing_product must be one of {list(_entmod.BILLING_PRODUCTS)}")
+    if billing_payer == "investor":
+        if user.get("role") != "superadmin" and not user.get("impersonated_by"):
+            raise HTTPException(403, "Only a superadmin (or a superadmin viewing as this firm) can create Investor companies.")
+        billing_product = "advanced"
+        billing_discount = False
     if billing_payer == "free_spot":
         if not ent_id:
             raise HTTPException(400, "Pro user is not attached to an enterprise; free spots unavailable.")
@@ -291,7 +296,8 @@ async def pro_create_client(inp: NewClientIn, user: dict = Depends(require_role(
         "billing_payer": billing_payer,
         "billing_product": billing_product,
         "billing_discount": billing_discount,
-        "billing_state": "active" if billing_payer == "free_spot" else "pending",
+        "billing_state": "active" if billing_payer in ("free_spot", "investor") else "pending",
+        **({"investor_granted_by": user.get("impersonated_by") or user["id"]} if billing_payer == "investor" else {}),
         "created_at": now, "updated_at": now,
     })
 

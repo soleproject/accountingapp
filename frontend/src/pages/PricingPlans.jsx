@@ -252,7 +252,7 @@ export default function PricingPlans() {
         if (cancelled) return;
         const payer = r.data?.billing_payer;
         const state = r.data?.billing_state;
-        const isSponsored = payer === "enterprise" || payer === "free_spot";
+        const isSponsored = ["enterprise", "free_spot", "investor"].includes(payer);
         // A canceled/past-due sub still carries its old stripe_subscription_id,
         // so only a live state counts as paid (otherwise we'd bounce back to
         // the ledger, where the lock modal sends us here again — strobe loop).

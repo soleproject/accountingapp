@@ -67,7 +67,7 @@ async def entitlement_preflight(user: dict = Depends(require_role("superadmin"))
         plan, payer = c["billing_product"], (c.get("billing_payer") or "").lower()
         sub = (c.get("sub_status") or c.get("billing_state") or "").lower()
         usage = await quota_usage(c["id"])
-        if payer in ("free_spot", "enterprise") or c.get("partner_sponsored"):
+        if payer in ("free_spot", "enterprise", "investor") or c.get("partner_sponsored"):
             outcome, quotas = "all_access", None
         elif sub == "trialing":
             outcome, quotas = "trial", None
@@ -89,7 +89,7 @@ async def entitlement_preflight(user: dict = Depends(require_role("superadmin"))
             "over_quota": sum(1 for r in out if r["over"]), "rows": out}
 
 
-OVERRIDE_PAYERS = ("client_email", "client_card", "enterprise", "free_spot")
+OVERRIDE_PAYERS = ("client_email", "client_card", "enterprise", "free_spot", "investor")
 OVERRIDE_STATUSES = ("active", "trialing", "past_due", "canceled", "pending")
 
 

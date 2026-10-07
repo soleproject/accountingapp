@@ -110,6 +110,8 @@ async def company_entitlements(cid: str, user: dict, override: Optional[str] = N
             return full("superadmin")
         if payer in ("free_spot", "enterprise") or company.get("partner_sponsored"):
             return full("sponsored")
+        if payer == "investor":
+            return {**full("investor"), "plan": "advanced", "plan_label": PLAN_LABELS["advanced"]}
         ms = await db.memberships.find_one({"company_id": cid, "user_id": user["id"]}, {"role": 1})
         if ms and ms.get("role") == "owner" and user.get("role") in ("pro", "partner", "enterprise"):
             return full("own_books")

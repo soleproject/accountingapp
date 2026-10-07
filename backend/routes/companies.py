@@ -148,6 +148,9 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
         # company the caller already belongs to (keeps additional
         # businesses under the same firm as the first one).
         mine = await db.memberships.find({"user_id": user["id"]}, {"_id": 0, "company_id": 1}).to_list(200)
+        # Investor owners get unlimited, never-billed, Advanced companies.
+        if mine and await db.companies.find_one({"id": {"$in": [m["company_id"] for m in mine]}, "owner_user_id": user["id"], "billing_payer": "investor"}, {"_id": 0, "id": 1}):
+            firm_fields.update({"billing_payer": "investor", "billing_product": "advanced", "billing_state": "active"})
         sibling = await db.companies.find_one(
             {"id": {"$in": [m["company_id"] for m in mine]}, "enterprise_id": {"$exists": True, "$ne": None}},
             {"_id": 0, "enterprise_id": 1, "signup_firm_slug": 1},

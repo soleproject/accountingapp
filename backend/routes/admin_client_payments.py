@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 _BILLABLE_Q = {"$or": [
     {"stripe_subscription_id": {"$exists": True, "$ne": None}},
-    {"billing_payer": {"$in": ["client_email", "client_card", "enterprise", "free_spot"]}},
+    {"billing_payer": {"$in": ["client_email", "client_card", "enterprise", "free_spot", "investor"]}},
     {"billing_state": {"$in": ["active", "past_due", "canceled"]}},
 ]}
 
@@ -48,6 +48,8 @@ def _status_for(c: dict) -> str:
         return "enterprise"
     if c.get("billing_payer") == "free_spot":
         return "free"
+    if c.get("billing_payer") == "investor":
+        return "investor"
     bs = c.get("billing_state")
     return bs if bs in ("active", "past_due", "canceled") else "pending"
 

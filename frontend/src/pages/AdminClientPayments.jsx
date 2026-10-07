@@ -20,6 +20,7 @@ const STATUS = {
   pending:    { label: "No subscription", cls: "bg-amber-50 text-amber-700 border-amber-200",    dot: "bg-amber-500",   Icon: Clock },
   enterprise: { label: "Enterprise pays", cls: "bg-indigo-50 text-indigo-700 border-indigo-200", dot: "bg-indigo-500",  Icon: Shield },
   free:       { label: "Free spot",      cls: "bg-violet-50 text-violet-700 border-violet-200",  dot: "bg-violet-500",  Icon: Gift },
+  investor:   { label: "Investor",       cls: "bg-amber-50 text-amber-800 border-amber-200",     dot: "bg-amber-500",   Icon: Gift },
 };
 
 function StatusPill({ status, sub }) {

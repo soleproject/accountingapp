@@ -1907,7 +1907,7 @@ async def get_company_billing_state(
     # Stripe checkout → client-side users get routed back to pricing.
     # Same for a self-serve company whose subscription was CANCELED: the
     # subscription is gone, so they pick a plan again rather than "pay".
-    self_serve = payer not in ("enterprise", "free_spot", "client_email")
+    self_serve = payer not in ("enterprise", "free_spot", "investor", "client_email")
     needs_checkout = (
         (
             (state == "pending" and not c.get("stripe_subscription_id") and bool(c.get("onboarding_complete")))
