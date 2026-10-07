@@ -147,7 +147,7 @@ export default function WelcomeSummary() {
   const [loading, setLoading] = useState(true);
   // Pricing comes AFTER this celebration page; enterprise-sponsored
   // companies ("Enterprise pays" / "Free enterprise spot") skip it.
-  const sponsored = current?.billing_payer === "enterprise" || current?.billing_payer === "free_spot";
+  const sponsored = ["enterprise", "free_spot", "investor"].includes(current?.billing_payer);
   const backHref = "/welcome/payments";
   const nextHref = sponsored ? "/accounting/transactions?from=onboarding" : "/welcome/pricing";
 

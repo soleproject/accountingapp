@@ -1549,6 +1549,12 @@ function BillingSection({ billing, form, update }) {
   const regularPrice = catItem.regular ?? 0;
   const discountPrice = catItem.discount ?? 0;
   const effectivePrice = form.billing_discount ? discountPrice : regularPrice;
+  const { user: me } = useAuth();
+  // Investor payer is a superadmin grant: real superadmin, or a superadmin "Viewing as" this firm.
+  const canGrantInvestor = (() => {
+    if (me?.role === "superadmin") return true;
+    try { return JSON.parse(localStorage.getItem("axiom_impersonate_prev_user") || "null")?.role === "superadmin"; } catch { return false; }
+  })();
 
   const payerOptions = [
     { value: "client_email", label: "Client — email bill",           hint: "We email the invoice; client pays directly" },
@@ -1560,6 +1566,8 @@ function BillingSection({ billing, form, update }) {
         : "Free enterprise spot (unavailable — no enterprise attached)",
       hint: "Comp'd — no charge posts",
       disabled: !ent || (!isUnlimitedFreeSpots && freeRemaining <= 0) },
+    ...(canGrantInvestor ? [{ value: "investor", label: "Investor Companies", wide: true,
+      hint: "Unlimited companies · never billed · always Advanced. Superadmin grant — the owner can add more companies themselves." }] : []),
   ];
 
   return (
@@ -1594,9 +1602,9 @@ function BillingSection({ billing, form, update }) {
                 onClick={() => !opt.disabled && update("billing_payer", opt.value)}
                 disabled={opt.disabled}
                 data-testid={`new-client-payer-${opt.value}`}
-                className={`text-left rounded-md border px-3 py-2 text-xs transition ${
+                className={`text-left rounded-md border px-3 py-2 text-xs transition ${opt.wide ? "sm:col-span-2" : ""} ${
                   active
-                    ? "border-indigo-500 bg-indigo-50 text-indigo-900 ring-2 ring-indigo-200"
+                    ? opt.value === "investor" ? "border-amber-500 bg-amber-50 text-amber-900 ring-2 ring-amber-200" : "border-indigo-500 bg-indigo-50 text-indigo-900 ring-2 ring-indigo-200"
                     : opt.disabled
                       ? "border-slate-200 bg-slate-50 text-slate-400 cursor-not-allowed"
                       : "border-slate-200 hover:border-slate-400 hover:bg-slate-50 text-slate-700"
@@ -1610,7 +1618,7 @@ function BillingSection({ billing, form, update }) {
         </div>
       </div>
 
-      {form.billing_payer !== "free_spot" && (
+      {form.billing_payer !== "free_spot" && form.billing_payer !== "investor" && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs text-slate-600">Product</label>
@@ -1648,7 +1656,12 @@ function BillingSection({ billing, form, update }) {
 
       {/* Effective-price summary + payer-specific copy */}
       <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-xs" data-testid="new-client-billing-summary">
-        {form.billing_payer === "free_spot" ? (
+        {form.billing_payer === "investor" ? (
+          <>
+            <b className="text-amber-800">Investor company.</b>{" "}
+            Never billed · always <b>Advanced</b> · the owner can add unlimited companies from My Businesses, all on the same terms.
+          </>
+        ) : form.billing_payer === "free_spot" ? (
           <>
             <b className="text-violet-700">Free enterprise spot.</b>{" "}
             No charge will post. This spot is permanent for the life of the company.

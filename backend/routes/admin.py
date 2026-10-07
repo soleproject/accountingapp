@@ -2163,7 +2163,7 @@ async def impersonate_user(
     # audit trail and offers no support benefit.
     if target.get("role") == "superadmin":
         raise HTTPException(400, "Cannot impersonate another superadmin.")
-    token = create_token(target["id"], target["role"])
+    token = create_token(target["id"], target["role"], impersonated_by=user["id"])
     try:
         await db.admin_audit_log.insert_one({
             "id": str(uuid.uuid4()),

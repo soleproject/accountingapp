@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { PLAN_LABELS } from "@/lib/entitlements";
 
 const LABEL = { ...PLAN_LABELS, essentials: "Essentials (legacy)", plus: "Plus (legacy)" };
-const PAYER_HELP = { client_email: "client pays (email invoice)", client_card: "client pays (card)", enterprise: "enterprise pays → full access", free_spot: "pro's free spot → full access" };
+const PAYER_HELP = { client_email: "client pays (email invoice)", client_card: "client pays (card)", enterprise: "enterprise pays → full access", free_spot: "pro's free spot → full access", investor: "investor → unlimited companies, never billed, Advanced" };
 const STATUS_HELP = { active: "paid → gated by plan", trialing: "trial → full access", past_due: "gated + grace flag", canceled: "falls back to Core", pending: "not paid yet → gated by plan" };
 
 const Sel = ({ label, value, onChange, options, help, testid }) => (

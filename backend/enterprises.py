@@ -39,7 +39,10 @@ BILLING_PRODUCTS = ("simple_start", "essentials", "plus", "advanced")
 # card is captured (email an invoice vs the accountant enters the card in
 # a form). `enterprise` = firm pays monthly consolidated on the 5th.
 # `free_spot` = comp'd, no charge, no Stripe subscription.
-BILLING_PAYERS = ("client_email", "client_card", "enterprise", "free_spot")
+# `investor` = superadmin-granted portfolio owner: unlimited companies, never
+# billed, always Advanced. Only a superadmin (incl. "Viewing as") may assign it.
+BILLING_PAYERS = ("client_email", "client_card", "enterprise", "free_spot", "investor")
+SPONSORED_PAYERS = ("enterprise", "free_spot", "investor")
 
 # Product catalog — regular and discounted USD prices per month. Phase C
 # maps each (product, tier) to a Stripe Price ID via env vars, keyed as

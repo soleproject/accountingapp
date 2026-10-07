@@ -23,6 +23,7 @@ const PAYER_LABELS = {
   client_email: "You (activation link)",
   enterprise: "Your firm (enterprise)",
   free_spot: "Your firm (included seat)",
+  investor: "Investor account (never billed)",
   pro: "Your accountant",
   firm: "Your accountant",
 };
