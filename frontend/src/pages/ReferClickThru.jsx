@@ -10,13 +10,14 @@
  * The visitor never sees this component render for more than ~200ms.
  */
 import { useEffect } from "react";
-import { useParams, Navigate } from "react-router-dom";
+import { useParams, Navigate, useLocation } from "react-router-dom";
 import axios from "axios";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
 
 export default function ReferClickThru() {
   const { slug } = useParams();
+  const { search } = useLocation();
 
   useEffect(() => {
     if (!slug) return;
@@ -27,5 +28,5 @@ export default function ReferClickThru() {
   }, [slug]);
 
   if (!slug) return <Navigate to="/refer" replace />;
-  return <Navigate to={`/refer/${slug}`} replace />;
+  return <Navigate to={`/refer/${slug}${search || ""}`} replace />;
 }

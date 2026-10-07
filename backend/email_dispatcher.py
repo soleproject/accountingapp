@@ -68,6 +68,11 @@ DEFAULT_PREFS = {
     "feedback_new_reporter_reply": True, # Reporter posted a follow-up — superadmins get notified
     "portal_invite":            True,   # Feb 2026: client portal invite (one URL for everything)
     "vendor_w9_outreach":       True,   # Feb 2026: AI emails vendor for W-9 (Milestone G)
+    "lead_confirmation":        True,   # Affiliate landing form → prospect confirmation
+    "affiliate_lead_notice":    True,   # "Your link worked" → affiliate
+    "admin_lead_notice":        True,   # Pro/enterprise lead → superadmins / firm owner
+    "prospect_drip":            True,   # Loop A nurture
+    "affiliate_drip":           True,   # Loop B activation
 }
 
 

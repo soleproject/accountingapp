@@ -271,15 +271,17 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
                 ref_u = await db.users.find_one({"id": referrer_id}, {"name": 1, "email": 1})
                 if ref_u:
                     referrer_name = ref_u.get("name") or (ref_u.get("email") or "").split("@")[0]
-            subject, html = _et.affiliate_welcome(
-                name=inp.name, share_link=link, slug=slug,
-                dashboard_url=f"{public_base_url()}/share",
-                referrer_name=referrer_name,
+            import affiliate_emails as _ae
+            subject, html = _ae.loop_b(
+                "b0_welcome", first_name=(inp.name or "").split()[0] if inp.name else "there",
+                link=link, center_url=f"{public_base_url()}/share", slug=slug, ctx={},
             )
             await dispatch(
                 kind="affiliate_welcome", to=inp.email.lower(),
                 subject=subject, html=html, initiating_user_id=uid,
             )
+            await db.drip_sends.insert_one({"id": str(uuid.uuid4()), "email": inp.email.lower(), "loop": "B",
+                                            "step": "b0_welcome", "status": "sent", "ref": uid, "at": now_iso()})
         except Exception:
             # Swallowed by design — a broken email template must NEVER
             # 500 the signup. But log it so an unexpected regression

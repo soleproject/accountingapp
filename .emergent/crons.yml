@@ -13,3 +13,10 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: affiliate-drips
+    description: "Daily 14:00 UTC affiliate drips: prospect nurture (Loop A) + affiliate activation (Loop B)"
+    cron: "0 14 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/affiliate-drips"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

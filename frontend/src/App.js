@@ -79,6 +79,8 @@ import AdminClientPayments from "@/pages/AdminClientPayments";
 import AdminFeedback from "@/pages/AdminFeedback";
 import AdminLeads from "@/pages/AdminLeads";
 import AdminAffiliates from "@/pages/AdminAffiliates";
+import AdminAffiliateToolkit from "@/pages/AdminAffiliateToolkit";
+import BecomeAffiliate from "@/pages/BecomeAffiliate";
 import ProAffiliates from "@/pages/ProAffiliates";
 import AdminCronRuns from "@/pages/AdminCronRuns";
 import AdminEntitlements from "@/pages/AdminEntitlements";
@@ -217,6 +219,7 @@ function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/signup/affiliate" element={<Signup />} />
             <Route path="/signup/enterprise" element={<Signup />} />
+            <Route path="/affiliates" element={<BecomeAffiliate />} />
             <Route path="/refer" element={<EnterReferral />} />
             <Route path="/refer/:slug" element={<EnterReferral />} />
             <Route path="/r/:slug" element={<ReferClickThru />} />
@@ -271,6 +274,7 @@ function App() {
               <Route path="/admin/feedback" element={<AdminFeedback />} />
               <Route path="/admin/leads" element={<AdminLeads />} />
               <Route path="/admin/affiliates" element={<AdminAffiliates />} />
+              <Route path="/admin/affiliate-toolkit" element={<AdminAffiliateToolkit />} />
               <Route path="/admin/cron-runs" element={<AdminCronRuns />} />
               <Route path="/admin/entitlements" element={<AdminEntitlements />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
