@@ -1,0 +1,122 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_aff.css"><title>Affiliate mockups · Landing pages</title>
+<style>
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;padding:44px 48px 36px;align-items:start}
+.hero h1{font-size:44px;line-height:1.08;margin:14px 0 14px}
+.hero p.lead{font-size:17px;color:#334155;line-height:1.55;max-width:540px}
+.form{background:#fff;border:1px solid var(--bd);border-radius:18px;padding:22px;box-shadow:0 12px 40px rgba(15,23,42,.08)}
+.form h3{font-size:18px;margin-bottom:4px}
+.vals{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:0 48px 36px}
+.proof{background:#fff;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd);padding:22px 48px;display:flex;gap:40px;align-items:center;font-size:13px;color:var(--tx2)}
+.proof b{font:600 20px "IBM Plex Mono";color:var(--tx);display:block}
+.vt{display:flex;gap:8px;margin-bottom:-14px}
+.vt div{padding:8px 16px;border-radius:999px;background:#1e293b;color:#cbd5e1;font-weight:600;font-size:14px;cursor:pointer;border:1px solid #334155}
+.vt div.on{background:#4f46e5;color:#fff;border-color:#4f46e5}
+.firm .logo i{background:#0e7490;border-radius:50%}
+.firm .btn.pri,.firm .eyebrow,.firm .step .num{background:#0e7490;border-color:#0e7490;color:#fff}
+.firm .eyebrow{background:none;color:#0e7490}
+.hide{display:none}
+</style></head><body>
+<div class="topbar">AFFILIATE SALES CENTER · MOCKUPS <span class="sp"></span><a href="index.html">Index</a><a class="on" href="landing.html">1 Landing pages</a><a href="sales-center.html">2 Sales Center</a><a href="toolkit.html">3 Toolkit</a><a href="become-affiliate.html">4 Become an affiliate</a><a href="emails.html">5 Email drips</a></div>
+
+<div class="note" style="width:1700px"><b>What this replaces:</b> today <code>/refer/:slug</code> shows a bare "Tell us who you are" tile picker → a form that drops a row in <code>leads</code> and dead-ends. The new page is a <b>real landing page</b> that (a) shows who referred you, (b) adapts headline / value props / form fields to the role, (c) on submit sends a confirmation to the prospect, a notification to the affiliate + admin, and (d) routes: business owner → signup + 7-day trial · accounting pro → book a 20-min walkthrough · enterprise → "we'll call you". Click the variant pills to swap copy.</div>
+
+<div class="vt"><div class="on" onclick="setV('owner',this)">Business owner</div><div onclick="setV('pro',this)">Accounting pro</div><div onclick="setV('ent',this)">Enterprise / multi-entity</div><div onclick="setV('firm',this)">White-label firm (owner variant)</div></div>
+
+<div class="row">
+<div class="desk" id="desk">
+  <div class="chrome"><i></i><i></i><i></i><div class="url" id="url">app.smartbookssoftware.ai/r/maria-lopez?for=owner</div></div>
+  <div class="appbar"><div class="logo" id="logo"><i></i><span id="brand">SmartBooks</span></div><span class="sp" style="flex:1"></span><span class="chip ind" id="firmchip" style="display:none">Private label · Lopez &amp; Co CPAs</span><a class="btn sm ghost">Already a customer? Sign in</a></div>
+  <div class="hero">
+    <div>
+      <div class="referrer"><span class="av">ML</span><span><b>Maria Lopez</b> invited you · <span class="muted">her referrals get the trial extended to 14 days</span></span></div>
+      <div class="eyebrow" style="margin-top:22px" id="eb">For business owners</div>
+      <h1 id="h1">Your books, done by AI — you just answer a few questions a week.</h1>
+      <p class="lead" id="lead">Connect your bank, snap receipts, and let SmartBooks categorize, reconcile and close the month. A 2-minute Quick Check-in replaces the end-of-year shoebox.</p>
+      <div style="display:flex;gap:18px;margin-top:22px;flex-wrap:wrap" id="checks">
+        <div class="check"><i>✓</i>Bank feed + receipt scanning included</div>
+        <div class="check"><i>✓</i>Month-close checklist with AI review</div>
+        <div class="check"><i>✓</i>Invite your accountant free</div>
+      </div>
+    </div>
+    <div class="form">
+      <h3 id="fh">Start your 14-day free trial</h3>
+      <div class="muted sm" id="fs">No card needed. Maria's referral is already applied.</div>
+      <div class="hr"></div>
+      <div class="grid2"><div class="field"><label>First name <b>*</b></label><div class="in v">Dan</div></div><div class="field"><label>Last name <b>*</b></label><div class="in v">Reyes</div></div></div>
+      <div class="field" style="margin-top:12px"><label>Work email <b>*</b></label><div class="in v">dan@reyesplumbing.com</div></div>
+      <div class="field" style="margin-top:12px"><label>Mobile <span class="muted">(for a quick text, optional)</span></label><div class="in">(555) 010-2244</div></div>
+      <div id="f-owner"><div class="field" style="margin-top:12px"><label>Business name <b>*</b></label><div class="in v">Reyes Plumbing LLC</div></div>
+        <div class="field" style="margin-top:12px"><label>How do you do your books today?</label><div class="in">Spreadsheet · QuickBooks · My accountant · Not really ▾</div></div></div>
+      <div id="f-pro" class="hide"><div class="field" style="margin-top:12px"><label>Firm name <b>*</b></label><div class="in v">Reyes Tax &amp; Advisory</div></div>
+        <div class="grid2" style="margin-top:12px"><div class="field"><label>Clients you serve</label><div class="in">1–10 · 11–30 · 31–100 · 100+ ▾</div></div><div class="field"><label>Current software</label><div class="in">QBO · Xero · Other ▾</div></div></div></div>
+      <div id="f-ent" class="hide"><div class="field" style="margin-top:12px"><label>Company / group name <b>*</b></label><div class="in v">Reyes Holdings</div></div>
+        <div class="grid2" style="margin-top:12px"><div class="field"><label>Number of entities</label><div class="in">2–5 · 6–20 · 20+ ▾</div></div><div class="field"><label>Best time to call</label><div class="in">Mornings ▾</div></div></div></div>
+      <a class="btn pri w" style="margin-top:16px;height:48px" id="cta">Create my account →</a>
+      <div class="muted xs" style="text-align:center;margin-top:10px" id="fine">Then: connect a bank in 60 seconds · we text you when the first review is ready</div>
+    </div>
+  </div>
+  <div class="proof"><div><b>2,100+</b>businesses on SmartBooks</div><div><b>94%</b>of transactions auto-categorized</div><div><b>&lt; 2 min</b>weekly owner check-in</div><div style="flex:1"></div><div class="quote" style="padding:12px 16px;max-width:460px;font-size:13px">“I stopped dreading my bookkeeper's email. I answer six questions on my phone and the month is closed.”<div class="who"><span class="av" style="width:24px;height:24px;font-size:10px">JK</span>Jamie K. · Owner, Coastal Landscaping</div></div></div>
+  <div class="vals" style="padding-top:28px" id="vals">
+    <div class="step"><div class="num">1</div><h4>Connect</h4><p class="sm muted" style="margin-top:6px">Link your bank &amp; cards. Historical transactions pull in automatically.</p></div>
+    <div class="step"><div class="num">2</div><h4>Answer</h4><p class="sm muted" style="margin-top:6px">AI books what it knows. The rest becomes a tap-to-answer Quick Check-in on your phone.</p></div>
+    <div class="step"><div class="num">3</div><h4>Close</h4><p class="sm muted" style="margin-top:6px">Month-end checklist, reconciliation and reports — shareable with your accountant.</p></div>
+  </div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:28px">
+<div class="phone"><div class="notch"></div><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+  <div class="pbody" style="overflow:auto">
+    <div class="logo" style="font-size:15px"><i style="width:20px;height:20px"></i><span class="pbrand">SmartBooks</span></div>
+    <div class="referrer" style="font-size:12px"><span class="av" style="width:26px;height:26px;font-size:10px">ML</span><span><b>Maria Lopez</b> invited you</span></div>
+    <div class="eyebrow peb">For business owners</div>
+    <h1 class="ph1" style="font-size:24px;line-height:1.15">Your books, done by AI — you just answer a few questions a week.</h1>
+    <div class="card" style="padding:14px">
+      <div class="h pfh" style="font-weight:700;font-size:15px">Start your 14-day free trial</div>
+      <div class="muted xs pfs" style="margin-top:2px">No card needed. Referral applied.</div>
+      <div class="field" style="margin-top:12px"><label>Full name <b>*</b></label><div class="in v">Dan Reyes</div></div>
+      <div class="field" style="margin-top:10px"><label>Work email <b>*</b></label><div class="in v">dan@reyesplumbing.com</div></div>
+      <div class="field" style="margin-top:10px"><label class="pbl">Business name <b>*</b></label><div class="in v pbv">Reyes Plumbing LLC</div></div>
+      <div class="field" style="margin-top:10px"><label>Mobile <span class="muted">(optional)</span></label><div class="in">(555) 010-2244</div></div>
+      <a class="btn pri w pcta" style="margin-top:14px;height:48px">Create my account →</a>
+    </div>
+    <div class="check sm"><i>✓</i>Bank feed + receipt scanning</div>
+    <div class="check sm"><i>✓</i>Invite your accountant free</div>
+  </div>
+</div>
+</div>
+<div class="phone" style="min-height:844px"><div class="notch"></div><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+  <div class="pbody">
+    <div class="logo" style="font-size:15px"><i style="width:20px;height:20px"></i><span class="pbrand">SmartBooks</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:14px">
+      <div style="width:64px;height:64px;border-radius:50%;background:var(--em2);color:#047857;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700">✓</div>
+      <h1 style="font-size:26px;line-height:1.15" class="pth">You're in, Dan.</h1>
+      <p class="sm muted pts">We emailed <b>dan@reyesplumbing.com</b> a link to set your password. Maria has been told you signed up (not your details — just that her link worked).</p>
+      <div class="card" style="padding:14px"><div class="eyebrow">What happens next</div>
+        <div class="check sm" style="margin-top:10px"><i>1</i><span class="pn1">Set your password &amp; connect a bank (60s)</span></div>
+        <div class="check sm" style="margin-top:8px"><i>2</i><span class="pn2">We import 90 days and auto-categorize</span></div>
+        <div class="check sm" style="margin-top:8px"><i>3</i><span class="pn3">You get a text when your first Quick Check-in is ready</span></div></div>
+      <a class="btn pri w pcta2" style="height:48px">Open my inbox</a>
+      <div class="muted xs" style="text-align:center">Didn't get it? <u>Resend</u> · wrong email? <u>Fix it</u></div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="label">Left: desktop landing with role-specific form. Middle: mobile landing. Right: <b>post-submit state</b> — confirmation + "what happens next" (this screen is the dead-end today). Pro / Enterprise variants swap the right phone to a <b>"Walkthrough booked / We'll call you"</b> state.</div>
+
+<script>
+const V={
+ owner:{url:'app.smartbookssoftware.ai/r/maria-lopez?for=owner',eb:'For business owners',h1:'Your books, done by AI — you just answer a few questions a week.',lead:'Connect your bank, snap receipts, and let SmartBooks categorize, reconcile and close the month. A 2-minute Quick Check-in replaces the end-of-year shoebox.',fh:'Start your 14-day free trial',fs:"No card needed. Maria's referral is already applied.",cta:'Create my account →',fine:'Then: connect a bank in 60 seconds · we text you when the first review is ready',bl:'Business name',bv:'Reyes Plumbing LLC',th:"You're in, Dan.",ts:'We emailed <b>dan@reyesplumbing.com</b> a link to set your password. Maria has been told you signed up (not your details — just that her link worked).',n:['Set your password & connect a bank (60s)','We import 90 days and auto-categorize','You get a text when your first Quick Check-in is ready'],cta2:'Open my inbox',checks:['Bank feed + receipt scanning included','Month-close checklist with AI review','Invite your accountant free']},
+ pro:{url:'app.smartbookssoftware.ai/r/maria-lopez?for=pro',eb:'For accounting & bookkeeping firms',h1:'Flat $349/mo for your whole practice. $15 per client. White-label included.',lead:'Stop paying QuickBooks per tier per client. SmartBooks gives your firm one dashboard, AI categorization that learns each client, and a client-facing Quick Check-in so you stop chasing answers by email.',fh:'Book a 20-minute walkthrough',fs:'Maria will join if you want — she uses it for her own clients.',cta:'Pick a time →',fine:'Prefer to poke around first? <u>Start a sandbox firm instead</u>',bl:'Firm name',bv:'Reyes Tax & Advisory',th:'Walkthrough booked.',ts:'<b>Thu, Oct 9 · 10:30am</b> with Sam from SmartBooks. Calendar invite + Zoom link sent to dan@reyestax.com. Maria was cc’d.',n:['We pre-load a sandbox firm with 2 sample clients','30s: see the per-client AI review queue','Leave with a migration plan from QBO'],cta2:'Add to calendar',checks:['Multi-client review queue with AI findings','Your logo, your domain, your colours','Flat pricing — no per-tier surprises']},
+ ent:{url:'app.smartbookssoftware.ai/r/maria-lopez?for=enterprise',eb:'For groups, franchises & multi-entity owners',h1:'Every entity in one portfolio. One bill. One login.',lead:'Run 3 or 30 companies with a consolidated cash / P&L view, shared chart of accounts, and investor-grade reporting — with AI doing the first pass on every entity.',fh:'Talk to us about your group',fs:'A SmartBooks specialist calls within one business day.',cta:'Request a call →',fine:'We’ll ask about entities, banks and who closes the books today.',bl:'Company / group name',bv:'Reyes Holdings',th:'Got it — we’ll call you.',ts:'<b>Sam</b> will call <b>(555) 010-2244</b> tomorrow morning. If that doesn’t work, reply to the confirmation email with a better time.',n:['15-min discovery call about your entities','We map your structure to a portfolio','Pilot on 2 entities, free for 30 days'],cta2:'Done',checks:['Portfolio view across all entities','Shared chart of accounts & rules','Enterprise billing, one invoice']},
+ firm:{url:'lopezcpa.smartbookssoftware.ai/r/maria-lopez',eb:'Lopez & Co CPAs · client portal',h1:'Work with Lopez & Co and never send us a shoebox again.',lead:'Our client portal connects to your bank, reads your receipts and asks you only what we can’t figure out — in a 2-minute weekly check-in on your phone. Maria handles the rest.',fh:'Become a Lopez & Co client',fs:'Maria will set up your books and reach out within a day.',cta:'Send to Maria →',fine:'No charge until Maria confirms your engagement.',bl:'Business name',bv:'Reyes Plumbing LLC',th:'Sent to Maria.',ts:'Maria Lopez will email <b>dan@reyesplumbing.com</b> within one business day to set up your books. You can connect your bank now so she has something to look at.',n:['Maria reviews your request','You connect a bank (optional, 60s)','Your first check-in arrives on your phone'],cta2:'Connect my bank now',checks:['Your CPA sees everything, you tap answers','Receipts: snap and forget','Branded portal from Lopez & Co']}
+};
+function setV(k,el){document.querySelectorAll('.vt div').forEach(d=>d.classList.remove('on'));el.classList.add('on');const v=V[k];
+ const $=id=>document.getElementById(id);$('url').textContent=v.url;$('eb').textContent=v.eb;$('h1').textContent=v.h1;$('lead').textContent=v.lead;$('fh').textContent=v.fh;$('fs').textContent=v.fs;$('cta').textContent=v.cta;$('fine').innerHTML=v.fine;
+ ['owner','pro','ent'].forEach(x=>$('f-'+x).classList.toggle('hide',x!==(k==='firm'?'owner':k)));
+ $('checks').innerHTML=v.checks.map(c=>`<div class="check"><i>✓</i>${c}</div>`).join('');
+ const firm=k==='firm';$('desk').classList.toggle('firm',firm);$('firmchip').style.display=firm?'':'none';$('brand').textContent=firm?'Lopez & Co CPAs':'SmartBooks';
+ document.querySelectorAll('.pbrand').forEach(e=>e.textContent=firm?'Lopez & Co CPAs':'SmartBooks');document.querySelectorAll('.phone .logo').forEach(e=>e.classList.toggle('firm',firm));
+ const q=c=>document.querySelector(c);q('.peb').textContent=v.eb;q('.ph1').textContent=v.h1;q('.pfh').textContent=v.fh;q('.pfs').textContent=v.fs;q('.pbl').innerHTML=v.bl+' <b>*</b>';q('.pbv').textContent=v.bv;q('.pcta').textContent=v.cta;q('.pth').textContent=v.th;q('.pts').innerHTML=v.ts;q('.pn1').textContent=v.n[0];q('.pn2').textContent=v.n[1];q('.pn3').textContent=v.n[2];q('.pcta2').textContent=v.cta2;
+ document.querySelectorAll('.phone .btn.pri').forEach(b=>{b.style.background=firm?'#0e7490':'';b.style.borderColor=firm?'#0e7490':''});document.querySelectorAll('.phone .eyebrow').forEach(b=>b.style.color=firm?'#0e7490':'');}
+</script>
+</body></html>
