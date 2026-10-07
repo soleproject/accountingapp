@@ -17,7 +17,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { TID } from "@/constants/testIds";
-import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus, Users } from "lucide-react";
+import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus, Users, LayoutGrid } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { AiFocusProvider } from "@/lib/aiFocus";
 import { useActionListener } from "@/lib/createBus";
@@ -200,6 +200,17 @@ export function CompanySwitcher() {
                  client without hunting through the Clients page.
                  Navigates to /clients?new=1 which auto-opens the
                  NewClientModal on that page. */}
+            {/* Owners of 2+ companies get the cross-company rollup */}
+            {user?.role === "client" && companies.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); navigate("/portfolio"); }}
+                className="w-full text-left px-3 py-2 text-sm text-slate-800 hover:bg-slate-50 flex items-center gap-1.5 border-t border-slate-100 font-medium"
+                data-testid="company-switcher-portfolio"
+              >
+                <LayoutGrid size={14} /> All my businesses · portfolio
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

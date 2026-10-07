@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
 import {
-  Briefcase, Plus, Pencil, Trash2, Loader2, X, ArrowRight, Search,
+  Briefcase, Plus, Pencil, Trash2, Loader2, X, ArrowRight, Search, LayoutGrid,
 } from "lucide-react";
 
 /**
@@ -63,7 +63,7 @@ export default function MyBusinesses() {
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="my-businesses-page">
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex items-start justify-between mb-6 gap-3 flex-wrap">
         <div>
           <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
             <Briefcase size={14} /> My Businesses
@@ -75,6 +75,15 @@ export default function MyBusinesses() {
             Manage the entities you own directly. Businesses where you're only staff/reviewer aren't shown here.
           </p>
         </div>
+        {rows.length >= 2 && (
+          <button
+            onClick={() => navigate("/portfolio")}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-slate-300 bg-white text-sm text-slate-800 hover:bg-slate-50"
+            data-testid="my-businesses-portfolio-btn"
+          >
+            <LayoutGrid size={14} /> Portfolio view
+          </button>
+        )}
         <button
           onClick={() => setCreateOpen(true)}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-slate-900 text-white text-sm hover:bg-slate-800"

@@ -149,6 +149,7 @@ import ToDo from "@/pages/ToDo";
 import CockpitComingSoon from "@/components/CockpitComingSoon";
 import ClientPortal from "@/pages/ClientPortal";
 import MyBusinesses from "@/pages/MyBusinesses";
+import Portfolio from "@/pages/Portfolio";
 import Billing from "@/pages/Billing";
 import Communications from "@/pages/Communications";
 import AskClientAnswer from "@/pages/AskClientAnswer";
@@ -400,6 +401,7 @@ function App() {
                 />} />
               </Route>
               <Route path="/my-businesses" element={<MyBusinesses />} />
+              <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/share" element={<Share />} />
               <Route path="/accounting/year-end" element={<ClosePeriods kind="year" />} />
