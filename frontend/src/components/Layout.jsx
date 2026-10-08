@@ -16,6 +16,8 @@ import { MobileTopBar, MobileBottomNav, MobileDrawer } from "./MobileShell";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
+import AskAccountantModal from "@/components/AskAccountantModal";
+import { canUseCockpit } from "@/lib/cockpitAccess";
 import { TID } from "@/constants/testIds";
 import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus, Users, LayoutGrid } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -613,6 +615,7 @@ export default function Layout() {
                   <MessageSquare size={13} /> Assistant
                 </button>
               )}
+              <AskAccountantHeaderButton />
               <NotificationBell />
               <GlobalTasksButton />
               {/* Profile menu also elevated so the client can Sign out
@@ -638,5 +641,27 @@ export default function Layout() {
         <Toaster position="bottom-right" />
       </div>
     </AiFocusProvider>
+  );
+}
+
+
+// "Ask my accountant" — only for client-side users whose current company
+// was set up by / is managed by an accounting professional.
+function AskAccountantHeaderButton() {
+  const { user } = useAuth();
+  const { current } = useCompany();
+  const [open, setOpen] = useState(false);
+  if (!user || canUseCockpit(user) || !current?.has_pro) return null;
+  return (
+    <>
+      <button
+        data-testid="ask-accountant-header-btn"
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 text-xs font-medium hover:bg-slate-50"
+      >
+        <MessageSquare size={13} /> Ask my accountant
+      </button>
+      <AskAccountantModal open={open} onClose={() => setOpen(false)} />
+    </>
   );
 }

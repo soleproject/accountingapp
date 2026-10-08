@@ -22,6 +22,7 @@ import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
+import { MessageThread } from "@/components/AskAccountantModal";
 import { NewClientModal } from "@/pages/ProClients";
 import PaymentsAppResumeCard from "@/components/PaymentsAppResumeCard";
 import { useCompany } from "@/lib/company";
@@ -66,6 +67,7 @@ function derive(data) {
   const clients = data.books.clients || [];
   const scheduledWeek = data.conversations.scheduled_today || [];
   const active = data.conversations.in_progress || [];
+  const clientMessages = data.conversations.client_messages || [];
   const waiting = data.conversations.waiting_on_client || [];
   const activity = data.activity;
 
@@ -153,7 +155,7 @@ function derive(data) {
   }
 
   return {
-    counts, brief, active, waiting, waitingCount, scheduleByDay,
+    counts, brief, active, clientMessages, waiting, waitingCount, scheduleByDay,
     tabs: { client: waiting.length, vendor: 4, docs: 3 }, // heuristic
     accomplishments: acc,
     assistantItems,
@@ -223,7 +225,7 @@ export default function CockpitTodayV7() {
   // the tile and inside the tabs always agree.
   const inProgressTotal = useMemo(() => {
     if (!d) return 0;
-    const msgs      = (d.active || []).length;
+    const msgs      = (d.clientMessages || []).length;
     const emailQs   = (d.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
     const sentPro   = (d.professional || []).length + (d.priorUnclosed || []).length;
     const cockpit   = (d.assistantItems || []).length;
@@ -1235,7 +1237,7 @@ const IN_PROGRESS_TABS = [
   { key: "scheduled",  label: "Scheduled QC",         tint: "indigo",  icon: "📅" },
   { key: "autorecon",  label: "Auto Reconciliations", tint: "cyan",    icon: "🔁" },
   { key: "sent_pro",   label: "Sent to Professional", tint: "rose",    icon: "👤" },
-  { key: "cockpit",    label: "Client Cockpit",       tint: "violet",  icon: "📍" },
+  { key: "cockpit",    label: "Assistant follow up",  tint: "violet",  icon: "📍" },
 ];
 
 // Small "Open QC" affordance rendered at the end of every In Progress
@@ -1453,6 +1455,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
 
   const filtered = useMemo(() => ({
     active:        byCo(d?.active),
+    clientMessages: byCo(d?.clientMessages),
     waiting:       byCo(d?.waiting),
     professional:  byCo(d?.professional),
     priorUnclosed: byCo(d?.priorUnclosed),
@@ -1472,7 +1475,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   }), [d, scheduledQc, autoRecon, emailQ, selectedCos, nameById]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
-    const messages  = filtered.active.length;
+    const messages  = filtered.clientMessages.length;
     const ai_emails = filtered.emailQ
       ? filtered.emailQ.rows.filter(r => r.outcome === "waiting").length
       : filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
@@ -1576,7 +1579,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
             backLabel={IN_PROGRESS_TABS.find(t => t.key === tab)?.label || "Back"}
           />
         ) : (<>
-        {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "messages"  && <InProgressClientMessages items={filtered.clientMessages} onNav={onNav} refetch={refetch} />}
         {tab === "ai_emails" && <InProgressAiEmails data={filtered.emailQ} onOpenQc={setOpenQc} pill={emailPill} setPill={setEmailPill} />}
         {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc}
                                    pill={qcPill} setPill={setQcPill}
@@ -1603,40 +1606,40 @@ function _EmptyTab({ text }) {
   );
 }
 
-function InProgressMessages({ items, onNav, onOpenQc }) {
-  if (!items.length) return <_EmptyTab text="No live conversations right now." />;
+// Messages clients sent to the firm ("Ask my accountant", transaction
+// questions, check-in items deferred to the bookkeeper). Reply inline.
+function InProgressClientMessages({ items, onNav, refetch }) {
+  if (!items.length) return <_EmptyTab text="No messages from clients right now. Clients reach you here via “Ask my accountant”, a transaction's “Ask my accountant about this”, or a check-in's “send to my bookkeeper”." />;
+  const reply = async (m, text, resolve) => {
+    try {
+      await api.post(`/client-messages/${m.id}/reply`, { text, resolve });
+      toast.success(resolve ? "Replied & resolved" : "Reply sent");
+      refetch?.();
+    } catch { toast.error("Couldn't send reply"); }
+  };
+  const resolve = async (m) => {
+    try { await api.patch(`/client-messages/${m.id}`, { status: "resolved" }); toast.success("Resolved"); refetch?.(); } catch { toast.error("Failed"); }
+  };
   return (
-    <ul className="divide-y divide-slate-100">
-      {items.map(b => (
-        <li key={b.id}
-            onClick={() => onNav(`/client-review/${b.client_token || b.id}?via=pro`)}
-            className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
-            data-testid={`v7-ip-msg-${b.id}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {b.company_name || b.company || "—"}
-              </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {b.client_email || "client"} · {b.item_count || b.total || (b.items?.length) || 0} question{((b.item_count || b.total) === 1) ? "" : "s"}
-                {b.started_ago ? ` · started ${b.started_ago}` : ""}
-                {b.current_type && b.current_type !== "…" ? ` · now on: ${String(b.current_type).replace(/_/g, " ")}` : ""}
-              </div>
+    <div>
+      <p className="text-[11px] text-slate-500 pb-2 border-b border-slate-100" data-testid="v7-ip-messages-intro">
+        Questions your clients sent you. Reply here — they get it by email and in their app. Resolve when it's handled.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {items.map((m, i) => (
+          <li key={m.id} data-testid={`v7-ip-msg-${i}`}>
+            <div className="flex items-center justify-between pt-3 -mb-2">
+              <button onClick={() => onNav(m.txn ? `/accounting/transactions?company=${m.company_id}&tid=${m.txn.id}` : `/company/${m.company_id}/dashboard`)} className="text-[13px] font-semibold text-slate-900 hover:underline" data-testid={`v7-ip-msg-company-${i}`}>{m.company || m.company_name || "—"}</button>
+              {m.status !== "resolved" && <button onClick={() => resolve(m)} className="text-[11px] text-slate-500 hover:text-emerald-700" data-testid={`v7-ip-msg-resolve-${i}`}>Mark resolved</button>}
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="text-[11px] text-emerald-700 font-medium">
-                {b.answered || 0}/{b.item_count || b.total || (b.items?.length) || 0} answered
-              </div>
-              <OpenQcButton token={b.client_token} testid={`v7-ip-msg-open-${b.id}`}
-                onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name || b.company,
-                                         client_email: b.client_email, meta: `${b.answered || 0}/${b.total || 0} answered` })} />
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
+            <MessageThread m={m} onReply={reply} canReply />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
+
 
 function _fmtDate(iso) {
   if (!iso) return "—";

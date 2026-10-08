@@ -852,9 +852,19 @@ async def today_v4(
             "route": f"/cockpit/requests?batch={b.get('id')}",
         })
 
+    client_messages = []
+    async for m in db.client_messages.find({
+        "company_id": {"$in": accessible},
+        "status": {"$in": ["open", "replied"]},
+    }, {"_id": 0}).sort("updated_at", -1).limit(50):
+        m["company"] = m.get("company_name") or name_by_id.get(m.get("company_id"), "")
+        m["age"] = _iso_ago(m.get("created_at"))
+        client_messages.append(m)
+
     conversations = {
         "scheduled_today": scheduled_today,
         "in_progress": in_progress,
+        "client_messages": client_messages,
         "waiting_on_client": waiting,
         "empty": len(scheduled_today) == 0 and len(in_progress) == 0 and len(waiting) == 0,
     }

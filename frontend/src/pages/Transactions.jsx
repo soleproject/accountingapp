@@ -35,6 +35,8 @@ import SearchableAccountPicker from "@/components/SearchableAccountPicker";
 import { MatchDot } from "@/components/MatchDot";
 import MonthCloseBreadcrumb from "@/components/MonthCloseBreadcrumb";
 import AskClientButton from "@/components/AskClientButton";
+import AskAccountantModal from "@/components/AskAccountantModal";
+import { canUseCockpit } from "@/lib/cockpitAccess";
 import { AccountInfoTooltip } from "@/components/AccountInfoTooltip";
 import { ProvenanceDot } from "@/components/ProvenanceDot";
 import { ContactBadge } from "@/components/ContactBadge";
@@ -800,6 +802,8 @@ function NarrowTxnCardList({
 
 
 export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDelete, onAskClient }) {
+  const { user: _menuUser } = useAuth();
+  const isFirm = canUseCockpit(_menuUser);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState(null); // {top, left, flipUp}
   const btnRef = useRef(null);
@@ -889,7 +893,7 @@ export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDele
             onClick={handle(onAskClient)}
             className={item}
           >
-            <span>Ask client about this</span>
+            <span>{isFirm ? "Ask client about this" : "Ask my accountant about this"}</span>
             <HelpCircle size={13} className="text-cyan-600" />
           </button>
           <div className="my-1 border-t border-slate-100" />
@@ -909,10 +913,14 @@ export function RowMoreMenu({ t, onEdit, onRecategorize, onSplit, onLink, onDele
 // than mounting one AskClientButton per row for large lists.
 function AskClientLauncher({ registerRef, onAsked }) {
   const [txn, setTxn] = useState(null);
+  const { user } = useAuth();
   useEffect(() => {
     registerRef.current = (t) => setTxn(t);
     return () => { registerRef.current = null; };
   }, [registerRef]);
+  if (!canUseCockpit(user)) {
+    return <AskAccountantModal open={Boolean(txn)} txn={txn} onClose={() => setTxn(null)} />;
+  }
   return (
     <AskClientButton
       txn={txn}
