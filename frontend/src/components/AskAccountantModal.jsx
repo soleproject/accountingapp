@@ -63,6 +63,7 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
   const ctx = [KIND_LABEL[m.kind] || "Message", m.txn && `${m.txn.date} · ${m.txn.merchant} · ${fmtAmt(m.txn.amount)}${m.txn.category ? ` · ${m.txn.category}` : ""}`].filter(Boolean).join(" — ");
   return (
     <div className="py-3" data-testid={`client-message-${m.id}`}>
+      {m.subject && <div className="text-[13px] font-semibold text-slate-900 text-center mb-1" data-testid={`client-message-subject-${m.id}`}>{m.subject}</div>}
       <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
         <span className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5 font-mono-num truncate max-w-full" data-testid={`client-message-context-${m.id}`}>{ctx}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${m.status === "resolved" ? "bg-emerald-50 text-emerald-700" : m.status === "replied" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"}`}>{m.status}</span>
@@ -91,13 +92,31 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
   );
 }
 
-function fmtWhen(at) {
+export function fmtWhen(at) {
   const d = new Date(at);
   if (isNaN(d)) return "";
   const today = new Date().toDateString() === d.toDateString();
   const t = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   return today ? t : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${t}`;
 }
+
+/** Short date for inbox rows: time if today, else "Oct 8". */
+export function fmtDay(at) {
+  const d = new Date(at);
+  if (isNaN(d)) return "";
+  return new Date().toDateString() === d.toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** Thread topic: explicit subject, else merchant + first line of the opening message. */
+export function topicOf(m) {
+  if (m.subject) return m.subject;
+  const first = (m.body || "").split("\n")[0].trim();
+  return m.txn?.merchant ? `${m.txn.merchant} · ${first}` : first;
+}
+
+export const KIND_TAG = { txn_question: "Transaction", checkin_deferred: "Check-in", ask_accountant: "Question" };
 
 /** One chat bubble — mine on the right in light blue, theirs on the left in gray with an avatar initial. */
 function Bubble({ mine, name, at, edited, text, editing, onEdit, onDelete, onSave, onCancel, testid }) {
@@ -123,20 +142,21 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
   const { currentId } = useCompany();
   const cid = companyId || currentId;
   const [body, setBody] = useState("");
+  const [subject, setSubject] = useState("");
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState(null);
 
   const load = () => cid && api.get(`/companies/${cid}/client-messages`).then(r => setData(r.data)).catch(() => setData({ messages: [], pro: null }));
-  useEffect(() => { if (open) { load(); setBody(""); } }, [open, cid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { load(); setBody(""); setSubject(""); } }, [open, cid]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!open) return null;
 
   const send = async () => {
     if (!body.trim()) return;
     setBusy(true);
     try {
-      await api.post(`/companies/${cid}/client-messages`, { body: body.trim(), txn_id: txn?.id || null, kind: txn ? "txn_question" : "ask_accountant" });
+      await api.post(`/companies/${cid}/client-messages`, { body: body.trim(), subject: subject.trim() || null, txn_id: txn?.id || null, kind: txn ? "txn_question" : "ask_accountant" });
       toast.success(data?.pro?.name ? `Sent to ${data.pro.name}` : "Sent to your accountant");
-      setBody("");
+      setBody(""); setSubject("");
       load();
       if (txn) onClose?.();
     } catch (e) { toast.error(e?.response?.data?.detail || "Couldn't send"); }
@@ -159,9 +179,12 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
             {txn.date} · {txn.merchant || txn.description} · {fmtAmt(txn.amount)}{txn.category_name ? ` · ${txn.category_name}` : ""}
           </div>
         )}
+        <input value={subject} onChange={e => setSubject(e.target.value)} maxLength={120}
+          placeholder="Subject (optional) — e.g. 1099 for my contractor"
+          className="mt-3 w-full h-10 rounded-xl border border-slate-300 px-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-subject" />
         <textarea value={body} onChange={e => setBody(e.target.value)} rows={3} autoFocus
           placeholder={txn ? "What's your question about this transaction?" : "What do you need help with?"}
-          className="mt-3 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-body" />
+          className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-body" />
         <div className="mt-2 flex justify-end">
           <button onClick={send} disabled={busy || body.trim().length < 2} className="h-10 px-4 rounded-full bg-slate-900 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50" data-testid="ask-accountant-send">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send

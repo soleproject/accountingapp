@@ -39,7 +39,8 @@ async def pro_for_company(cid: str) -> Optional[dict]:
 
 async def create_message(*, company_id: str, kind: str, body: str, from_user: dict | None = None,
                          from_name: str | None = None, from_email: str | None = None,
-                         txn_id: str | None = None, item: dict | None = None, notify: bool = True) -> dict:
+                         txn_id: str | None = None, item: dict | None = None, notify: bool = True,
+                         subject: str | None = None) -> dict:
     comp = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1})
     txn = None
     if txn_id:
@@ -48,7 +49,7 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
             txn = {"id": t["id"], "date": t.get("date"), "merchant": t.get("merchant") or t.get("description"), "amount": t.get("amount"), "category": t.get("category_name")}
     doc = {
         "id": str(uuid.uuid4()), "company_id": company_id, "company_name": (comp or {}).get("name"),
-        "kind": kind, "body": body.strip(),
+        "kind": kind, "body": body.strip(), "subject": (subject or "").strip()[:120] or None,
         "from_user_id": (from_user or {}).get("id"), "from_name": from_name or (from_user or {}).get("name"),
         "from_email": from_email or (from_user or {}).get("email"),
         "txn": txn, "item": item, "status": "open", "replies": [], "created_at": _now(), "updated_at": _now(),
@@ -68,7 +69,7 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
                 html = (f"<p><b>{escape(doc['from_name'] or 'Your client')}</b> ({escape(doc['company_name'] or '')}) {label}:</p>"
                         f"<blockquote style='border-left:3px solid #e2e8f0;margin:0;padding:8px 12px'>{escape(doc['body'])}</blockquote>{ctx}"
                         f"<p><a href='{public_base_url()}/cockpit?open=messages'>Reply in the Cockpit →</a></p>")
-                await dispatch(kind="client_message", to=pro["email"], subject=f"{doc['from_name'] or 'Client'} · {doc['company_name'] or ''}: {doc['body'][:60]}",
+                await dispatch(kind="client_message", to=pro["email"], subject=f"{doc['from_name'] or 'Client'} · {doc['company_name'] or ''}: {doc['subject'] or doc['body'][:60]}",
                                html=html, initiating_user_id=pro["id"], related={"client_message_id": doc["id"]})
         except Exception:
             log.exception("client_message notify failed")
@@ -77,6 +78,7 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
 
 class MessageIn(BaseModel):
     body: str = Field(..., min_length=2, max_length=4000)
+    subject: Optional[str] = Field(None, max_length=120)
     kind: str = "ask_accountant"
     txn_id: Optional[str] = None
 
@@ -85,7 +87,7 @@ class MessageIn(BaseModel):
 async def post_message(cid: str, inp: MessageIn, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     kind = "txn_question" if inp.txn_id else (inp.kind if inp.kind in KINDS else "ask_accountant")
-    doc = await create_message(company_id=cid, kind=kind, body=inp.body, from_user=user, txn_id=inp.txn_id)
+    doc = await create_message(company_id=cid, kind=kind, body=inp.body, from_user=user, txn_id=inp.txn_id, subject=inp.subject)
     return {"ok": True, "message": doc}
 
 

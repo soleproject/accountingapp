@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
-import { ArrowLeft, Maximize2 } from "lucide-react";
-import { MessageThread } from "@/components/AskAccountantModal";
+import { ArrowLeft, MessageCircle } from "lucide-react";
+import { MessageThread, fmtDay, fmtWhen, topicOf, KIND_TAG } from "@/components/AskAccountantModal";
+import { useAuth } from "@/lib/auth";
 
 /** Who spoke last on a thread — the opening message counts as the client. */
 export function lastBy(m) {
@@ -31,8 +32,8 @@ const TAB_HELP = {
 /**
  * Shared Client Messages card body — used by the pro Cockpit (perspective="pro")
  * and the client's My business → Messages tab (perspective="client").
- * Tabs: Outstanding / Answered / Resolved. "Open thread" focuses one thread with
- * every message; "All threads" returns to the list.
+ * Tabs: Outstanding / Answered / Resolved. Collapsed rows are inbox-style
+ * (date · company · sender · topic + latest preview); clicking opens the chat thread.
  */
 export function ClientMessagesCard({ messages, perspective, onReply, onResolve, onOpenCompany, onChanged, testidPrefix = "cm" }) {
   const [tab, setTab] = useState("outstanding");
@@ -44,7 +45,6 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
   }, [messages, perspective]);
   const focused = focus ? (messages || []).find(m => m.id === focus) : null;
   const onChangedWrap = () => { onChanged?.(); };
-  const canReply = (m) => m.status !== "resolved";
   const replyLabel = perspective === "pro" ? "Reply" : "Reply back";
 
   if (focused) {
@@ -54,7 +54,7 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
           <ArrowLeft size={13} /> All threads
         </button>
         <ThreadHeader m={focused} perspective={perspective} onResolve={onResolve} onOpenCompany={onOpenCompany} testid={`${testidPrefix}-focus`} />
-        <MessageThread m={focused} onReply={onReply} canReply={canReply(focused)} replyLabel={replyLabel} hideResolve onChanged={onChangedWrap} />
+        <MessageThread m={focused} onReply={onReply} canReply={focused.status !== "resolved"} replyLabel={replyLabel} hideResolve onChanged={onChangedWrap} />
       </div>
     );
   }
@@ -75,12 +75,9 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
       {list.length === 0 ? (
         <div className="text-sm text-slate-400 py-6 text-center" data-testid={`${testidPrefix}-empty`}>Nothing here.</div>
       ) : (
-        <ul className="divide-y divide-slate-100">
+        <ul className="divide-y divide-slate-100" data-testid={`${testidPrefix}-list`}>
           {list.map((m, i) => (
-            <li key={m.id} data-testid={`${testidPrefix}-row-${i}`}>
-              <ThreadHeader m={m} perspective={perspective} onResolve={onResolve} onOpenCompany={onOpenCompany} onFocus={() => setFocus(m.id)} testid={`${testidPrefix}-row-${i}`} />
-              <MessageThread m={m} onReply={onReply} canReply={canReply(m)} replyLabel={replyLabel} hideResolve maxReplies={2} onChanged={onChangedWrap} />
-            </li>
+            <InboxRow key={m.id} m={m} perspective={perspective} yourTurn={tab === "outstanding"} onOpen={() => setFocus(m.id)} testid={`${testidPrefix}-row-${i}`} />
           ))}
         </ul>
       )}
@@ -88,18 +85,59 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
   );
 }
 
-function ThreadHeader({ m, perspective, onResolve, onOpenCompany, onFocus, testid }) {
+/** One collapsed thread: date · [company ·] sender — topic, then latest-message preview. */
+function InboxRow({ m, perspective, yourTurn, onOpen, testid }) {
+  const { user } = useAuth();
+  const sender = m.from_name || m.from_email || "Client";
+  const last = (m.replies || [])[m.replies?.length - 1];
+  const lastAuthorId = last ? last.by : m.from_user_id;
+  const lastName = last ? last.by_name : sender;
+  const lastText = last ? last.text : m.body;
+  const who = user?.id && lastAuthorId === user.id ? "You" : (lastName || "").split(" ")[0];
+  const count = (m.replies || []).length;
   return (
-    <div className="flex items-center justify-between pt-3 -mb-2 gap-2">
-      {perspective === "pro"
-        ? <button onClick={() => onOpenCompany?.(m)} className="text-[13px] font-semibold text-slate-900 hover:underline truncate" data-testid={`${testid}-company`}>{m.company || m.company_name || "—"}</button>
-        : <div className="text-[13px] font-semibold text-slate-900 truncate">{m.kind === "txn_question" ? "About a transaction" : m.kind === "checkin_deferred" ? "From a check-in" : "Question for your accountant"}</div>}
-      <div className="flex items-center gap-3 shrink-0">
-        {onFocus && <button onClick={onFocus} className="text-[11px] text-slate-500 hover:text-slate-900 flex items-center gap-1" data-testid={`${testid}-open`}><Maximize2 size={11} /> Open thread</button>}
-        {perspective === "client" && m.status !== "resolved" && (
-          <button onClick={() => onResolve?.(m)} className="text-[11px] text-slate-500 hover:text-emerald-700" data-testid={`${testid}-resolve`}>Mark resolved</button>
-        )}
+    <li data-testid={testid}>
+      <button onClick={onOpen} className="w-full text-left flex items-start gap-3 py-2.5 px-1 -mx-1 rounded-lg hover:bg-slate-50 transition-colors" data-testid={`${testid}-open`}>
+        <span className="hidden sm:block w-14 shrink-0 pt-0.5 text-[11px] text-slate-500 font-mono-num" data-testid={`${testid}-date`}>{fmtDay(m.created_at)}</span>
+        <span className="h-7 w-7 shrink-0 rounded-full bg-slate-200 text-slate-700 text-[11px] font-bold flex items-center justify-center" data-testid={`${testid}-avatar`}>{sender.trim().charAt(0).toUpperCase()}</span>
+        <span className="min-w-0 flex-1">
+          <span className="sm:flex sm:items-baseline sm:gap-1.5 min-w-0">
+            <span className="flex items-baseline gap-1.5 min-w-0 sm:shrink-0 sm:max-w-[55%]">
+              {perspective === "pro" && <span className="text-[13px] font-semibold text-slate-900 min-w-0 truncate" data-testid={`${testid}-company`}>{m.company || m.company_name || "—"}</span>}
+              <span className="text-[12px] text-slate-500 shrink-0 truncate max-w-[50%]" data-testid={`${testid}-sender`}>{perspective === "pro" ? "· " : ""}{sender}</span>
+            </span>
+            <span className="block sm:inline text-[13px] text-slate-900 truncate min-w-0" data-testid={`${testid}-topic`}><span className="hidden sm:inline">— </span>{topicOf(m)}</span>
+          </span>
+          <span className="flex items-center gap-1.5 mt-0.5 min-w-0">
+            <span className="text-[10px] uppercase tracking-wide text-slate-500 bg-slate-100 rounded px-1.5 py-px shrink-0" data-testid={`${testid}-kind`}>{KIND_TAG[m.kind] || "Message"}</span>
+            <span className="text-[12px] text-slate-500 truncate" data-testid={`${testid}-preview`}><span className="font-medium text-slate-600">{who}:</span> {lastText}</span>
+          </span>
+        </span>
+        <span className="shrink-0 flex flex-col items-end gap-1 pt-0.5">
+          <span className="sm:hidden text-[11px] text-slate-500 font-mono-num">{fmtDay(m.created_at)}</span>
+          <span className="flex items-center gap-2">
+            {count > 0 && <span className="text-[11px] text-slate-500 flex items-center gap-1" data-testid={`${testid}-count`}><MessageCircle size={12} /> {count}</span>}
+            {yourTurn && <span className="h-2 w-2 rounded-full bg-sky-500" title="Your turn" data-testid={`${testid}-your-turn`} />}
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function ThreadHeader({ m, perspective, onResolve, onOpenCompany, testid }) {
+  const sender = m.from_name || m.from_email || "Client";
+  return (
+    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
+      <div className="min-w-0">
+        {perspective === "pro"
+          ? <button onClick={() => onOpenCompany?.(m)} className="text-[13px] font-semibold text-slate-900 hover:underline truncate block" data-testid={`${testid}-company`}>{m.company || m.company_name || "—"}</button>
+          : <div className="text-[13px] font-semibold text-slate-900 truncate" data-testid={`${testid}-topic`}>{topicOf(m)}</div>}
+        <div className="text-[11px] text-slate-500 truncate">Started by {sender} · {fmtWhen(m.created_at)}{perspective === "pro" ? ` — ${topicOf(m)}` : ""}</div>
       </div>
+      {perspective === "client" && m.status !== "resolved" && (
+        <button onClick={() => onResolve?.(m)} className="text-[11px] text-slate-500 hover:text-emerald-700 shrink-0" data-testid={`${testid}-resolve`}>Mark resolved</button>
+      )}
     </div>
   );
 }
