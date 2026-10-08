@@ -1639,6 +1639,7 @@ function InProgressClientMessages({ items, onNav, refetch }) {
       messages={items}
       perspective="pro"
       onReply={reply}
+      onChanged={refetch}
       onOpenCompany={(m) => onNav(m.txn ? `/accounting/transactions?company=${m.company_id}&tid=${m.txn.id}` : `/company/${m.company_id}/dashboard`)}
       testidPrefix="v7-cm"
     />

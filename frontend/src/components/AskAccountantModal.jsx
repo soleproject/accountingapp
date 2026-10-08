@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { X, Send, Loader2, MessageSquare } from "lucide-react";
+import { X, Send, Loader2, MessageSquare, Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
+import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 
 const KIND_LABEL = { txn_question: "About a transaction", checkin_deferred: "From a check-in", ask_accountant: "Message" };
@@ -13,33 +14,74 @@ function fmtAmt(a) {
   return (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", compact = false, hideResolve = false, maxReplies = null }) {
+/** Inline edit/delete controls for a message the current user authored. */
+function OwnControls({ onEdit, onDelete, testid }) {
+  return (
+    <span className="inline-flex items-center gap-1 ml-2 align-middle">
+      <button onClick={onEdit} className="p-0.5 text-slate-400 hover:text-slate-800" title="Edit" data-testid={`${testid}-edit`}><Pencil size={11} /></button>
+      <button onClick={onDelete} className="p-0.5 text-slate-400 hover:text-red-600" title="Delete" data-testid={`${testid}-delete`}><Trash2 size={11} /></button>
+    </span>
+  );
+}
+
+function InlineEditor({ initial, onSave, onCancel, testid }) {
+  const [v, setV] = useState(initial);
+  return (
+    <div className="mt-1" data-testid={`${testid}-editor`}>
+      <textarea value={v} onChange={e => setV(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-300 p-2 text-[13px] focus:border-slate-900 outline-none" data-testid={`${testid}-editor-input`} />
+      <div className="flex gap-2 mt-1">
+        <button onClick={() => v.trim() && onSave(v.trim())} className="h-7 px-3 rounded-md bg-slate-900 text-white text-[11px] font-semibold" data-testid={`${testid}-editor-save`}>Save</button>
+        <button onClick={onCancel} className="h-7 px-3 rounded-md border border-slate-300 text-[11px] font-semibold" data-testid={`${testid}-editor-cancel`}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", compact = false, hideResolve = false, maxReplies = null, onChanged }) {
+  const { user } = useAuth();
   const replies = m.replies || [];
   const hidden = maxReplies !== null && replies.length > maxReplies ? replies.length - maxReplies : 0;
   const shown = hidden ? replies.slice(replies.length - maxReplies) : replies;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(null); // "body" | reply id
   const send = async (resolve) => {
     if (!text.trim()) return;
     setBusy(true);
     try { await onReply(m, text.trim(), resolve); setText(""); } finally { setBusy(false); }
   };
+  const run = async (fn, ok) => {
+    try { await fn(); toast.success(ok); setEditing(null); onChanged?.(); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Couldn't update"); }
+  };
+  const editBody = (t) => run(() => api.patch(`/client-messages/${m.id}/body`, { text: t }), "Message updated");
+  const deleteThread = () => window.confirm("Delete this whole thread? This can't be undone.") && run(() => api.delete(`/client-messages/${m.id}`), "Thread deleted");
+  const editReply = (r, t) => run(() => api.patch(`/client-messages/${m.id}/replies/${r.id}`, { text: t }), "Reply updated");
+  const deleteReply = (r) => window.confirm("Delete this reply?") && run(() => api.delete(`/client-messages/${m.id}/replies/${r.id}`), "Reply deleted");
+  const mine = (id) => user?.id && id === user.id;
   return (
     <div className="py-3" data-testid={`client-message-${m.id}`}>
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-[11px] text-slate-500">{KIND_LABEL[m.kind] || "Message"} · {m.from_name || m.from_email || "Client"} · {m.age || new Date(m.created_at).toLocaleDateString()}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] text-slate-500">{KIND_LABEL[m.kind] || "Message"} · {m.from_name || m.from_email || "Client"} · {m.age || new Date(m.created_at).toLocaleDateString()}{m.edited_at ? " · edited" : ""}
+            {mine(m.from_user_id) && <OwnControls onEdit={() => setEditing("body")} onDelete={deleteThread} testid={`client-message-${m.id}`} />}
+          </div>
           {m.txn && <div className="text-[11px] text-slate-500 font-mono-num">{m.txn.date} · {m.txn.merchant} · {fmtAmt(m.txn.amount)}{m.txn.category ? ` · ${m.txn.category}` : ""}</div>}
           {m.item?.prompt && <div className="text-[11px] text-slate-500 italic truncate">Check-in asked: {m.item.prompt}</div>}
-          <div className="text-[13px] text-slate-900 mt-1 whitespace-pre-wrap">{m.body}</div>
+          {editing === "body"
+            ? <InlineEditor initial={m.body} onSave={editBody} onCancel={() => setEditing(null)} testid={`client-message-${m.id}`} />
+            : <div className="text-[13px] text-slate-900 mt-1 whitespace-pre-wrap">{m.body}</div>}
         </div>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${m.status === "resolved" ? "bg-emerald-50 text-emerald-700" : m.status === "replied" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"}`}>{m.status}</span>
       </div>
       {hidden > 0 && <div className="mt-2 ml-3 text-[11px] text-slate-400" data-testid={`client-message-hidden-${m.id}`}>… {hidden} earlier repl{hidden === 1 ? "y" : "ies"} — open the thread to see all</div>}
       {shown.map(r => (
         <div key={r.id} className={`mt-2 ml-3 pl-3 border-l-2 ${r.by_pro ? "border-indigo-200" : "border-slate-200"} text-[12px]`} data-testid={`client-message-reply-${r.id}`}>
-          <span className="font-semibold text-slate-700">{r.by_name}</span><span className="text-slate-400"> · {new Date(r.at).toLocaleString()}</span>
-          <div className="text-slate-800 whitespace-pre-wrap">{r.text}</div>
+          <span className="font-semibold text-slate-700">{r.by_name}</span><span className="text-slate-400"> · {new Date(r.at).toLocaleString()}{r.edited_at ? " · edited" : ""}</span>
+          {mine(r.by) && <OwnControls onEdit={() => setEditing(r.id)} onDelete={() => deleteReply(r)} testid={`client-message-reply-${r.id}`} />}
+          {editing === r.id
+            ? <InlineEditor initial={r.text} onSave={(t) => editReply(r, t)} onCancel={() => setEditing(null)} testid={`client-message-reply-${r.id}`} />
+            : <div className="text-slate-800 whitespace-pre-wrap">{r.text}</div>}
         </div>
       ))}
       {canReply && m.status !== "resolved" && (
@@ -108,7 +150,7 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
             <div className="text-[11px] font-bold tracking-[.12em] uppercase text-slate-500 mb-1">Your messages</div>
             {!data ? <div className="text-xs text-slate-400 py-3">Loading…</div>
               : data.messages.length === 0 ? <div className="text-xs text-slate-400 py-3">No messages yet.</div>
-              : <div className="divide-y divide-slate-100">{data.messages.slice(0, 5).map(m => <MessageThread key={m.id} m={m} onReply={reply} canReply={m.status !== "resolved"} replyLabel="Reply back" compact hideResolve maxReplies={1} />)}
+              : <div className="divide-y divide-slate-100">{data.messages.slice(0, 5).map(m => <MessageThread key={m.id} m={m} onReply={reply} canReply={m.status !== "resolved"} replyLabel="Reply back" compact hideResolve maxReplies={1} onChanged={load} />)}
                   {data.messages.length > 0 && <Link to="/owner/messages" onClick={onClose} className="block text-center text-xs font-medium text-slate-700 underline py-2" data-testid="ask-accountant-see-all">See all messages →</Link>}</div>}
           </div>
         )}

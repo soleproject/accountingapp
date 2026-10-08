@@ -41,7 +41,7 @@ export default function MessagesTab({ companyId }) {
       </div>
       <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
         {!data ? <div className="text-sm text-slate-400 py-6 text-center"><Loader2 size={14} className="inline animate-spin mr-1" /> Loading…</div>
-          : <ClientMessagesCard messages={data.messages} perspective="client" onReply={reply} onResolve={resolve} testidPrefix="owner-cm" />}
+          : <ClientMessagesCard messages={data.messages} perspective="client" onReply={reply} onResolve={resolve} onChanged={load} testidPrefix="owner-cm" />}
       </div>
       <AskAccountantModal open={compose} onClose={() => { setCompose(false); load(); }} companyId={companyId} />
     </div>

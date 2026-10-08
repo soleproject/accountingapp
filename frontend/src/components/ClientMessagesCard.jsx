@@ -34,7 +34,7 @@ const TAB_HELP = {
  * Tabs: Outstanding / Answered / Resolved. "Open thread" focuses one thread with
  * every message; "All threads" returns to the list.
  */
-export function ClientMessagesCard({ messages, perspective, onReply, onResolve, onOpenCompany, testidPrefix = "cm" }) {
+export function ClientMessagesCard({ messages, perspective, onReply, onResolve, onOpenCompany, onChanged, testidPrefix = "cm" }) {
   const [tab, setTab] = useState("outstanding");
   const [focus, setFocus] = useState(null);
   const buckets = useMemo(() => {
@@ -43,6 +43,7 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
     return b;
   }, [messages, perspective]);
   const focused = focus ? (messages || []).find(m => m.id === focus) : null;
+  const onChangedWrap = () => { onChanged?.(); };
   const canReply = (m) => m.status !== "resolved";
   const replyLabel = perspective === "pro" ? "Reply" : "Reply back";
 
@@ -53,7 +54,7 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
           <ArrowLeft size={13} /> All threads
         </button>
         <ThreadHeader m={focused} perspective={perspective} onResolve={onResolve} onOpenCompany={onOpenCompany} testid={`${testidPrefix}-focus`} />
-        <MessageThread m={focused} onReply={onReply} canReply={canReply(focused)} replyLabel={replyLabel} hideResolve />
+        <MessageThread m={focused} onReply={onReply} canReply={canReply(focused)} replyLabel={replyLabel} hideResolve onChanged={onChangedWrap} />
       </div>
     );
   }
@@ -78,7 +79,7 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
           {list.map((m, i) => (
             <li key={m.id} data-testid={`${testidPrefix}-row-${i}`}>
               <ThreadHeader m={m} perspective={perspective} onResolve={onResolve} onOpenCompany={onOpenCompany} onFocus={() => setFocus(m.id)} testid={`${testidPrefix}-row-${i}`} />
-              <MessageThread m={m} onReply={onReply} canReply={canReply(m)} replyLabel={replyLabel} hideResolve maxReplies={2} />
+              <MessageThread m={m} onReply={onReply} canReply={canReply(m)} replyLabel={replyLabel} hideResolve maxReplies={2} onChanged={onChangedWrap} />
             </li>
           ))}
         </ul>

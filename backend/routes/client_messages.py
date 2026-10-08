@@ -153,3 +153,67 @@ async def set_status(mid: str, inp: StatusIn, user: dict = Depends(get_current_u
         raise HTTPException(403, "Only the client marks a thread resolved")
     await db.client_messages.update_one({"id": mid}, {"$set": {"status": inp.status, "updated_at": _now()}})
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- edit / delete (author only)
+async def _owned_msg(mid: str, user: dict) -> dict:
+    msg = await db.client_messages.find_one({"id": mid}, {"_id": 0})
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    await require_company(user, msg["company_id"])
+    return msg
+
+
+def _recompute_status(msg: dict) -> str:
+    if msg.get("status") == "resolved":
+        return "resolved"
+    replies = msg.get("replies") or []
+    return "replied" if replies and replies[-1].get("by_pro") else "open"
+
+
+class EditIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=4000)
+
+
+@router.patch("/client-messages/{mid}/body")
+async def edit_body(mid: str, inp: EditIn, user: dict = Depends(get_current_user)):
+    msg = await _owned_msg(mid, user)
+    if msg.get("from_user_id") != user["id"]:
+        raise HTTPException(403, "You can only edit your own message")
+    await db.client_messages.update_one({"id": mid}, {"$set": {"body": inp.text.strip(), "edited_at": _now(), "updated_at": _now()}})
+    return {"ok": True}
+
+
+@router.delete("/client-messages/{mid}")
+async def delete_thread(mid: str, user: dict = Depends(get_current_user)):
+    msg = await _owned_msg(mid, user)
+    if msg.get("from_user_id") != user["id"]:
+        raise HTTPException(403, "Only the person who started the thread can delete it")
+    await db.client_messages.delete_one({"id": mid})
+    return {"ok": True}
+
+
+@router.patch("/client-messages/{mid}/replies/{rid}")
+async def edit_reply(mid: str, rid: str, inp: EditIn, user: dict = Depends(get_current_user)):
+    msg = await _owned_msg(mid, user)
+    r = next((x for x in msg.get("replies") or [] if x["id"] == rid), None)
+    if not r:
+        raise HTTPException(404, "Reply not found")
+    if r.get("by") != user["id"]:
+        raise HTTPException(403, "You can only edit your own reply")
+    await db.client_messages.update_one({"id": mid, "replies.id": rid},
+                                        {"$set": {"replies.$.text": inp.text.strip(), "replies.$.edited_at": _now(), "updated_at": _now()}})
+    return {"ok": True}
+
+
+@router.delete("/client-messages/{mid}/replies/{rid}")
+async def delete_reply(mid: str, rid: str, user: dict = Depends(get_current_user)):
+    msg = await _owned_msg(mid, user)
+    r = next((x for x in msg.get("replies") or [] if x["id"] == rid), None)
+    if not r:
+        raise HTTPException(404, "Reply not found")
+    if r.get("by") != user["id"]:
+        raise HTTPException(403, "You can only delete your own reply")
+    msg["replies"] = [x for x in msg["replies"] if x["id"] != rid]
+    await db.client_messages.update_one({"id": mid}, {"$set": {"replies": msg["replies"], "status": _recompute_status(msg), "updated_at": _now()}})
+    return {"ok": True, "status": _recompute_status(msg)}
