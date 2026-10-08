@@ -290,17 +290,17 @@ export default function CockpitTodayV7() {
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <ClickableStat
-                  testid="v7-stat-clients"
-                  label="Clients managed"
-                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
-                  value={d.counts.clients}
-                  tint="slate"
-                  active={clientsOpen}
-                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
-                />
-                <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
                 <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
+                <ClickableStat
+                  testid="v7-stat-closings"
+                  label="Closings"
+                  sublabel={d.counts.closings > 0 ? "prior-month · click to review" : "all periods closed"}
+                  value={d.counts.closings}
+                  tint="rose"
+                  pulse={d.counts.closings > 0}
+                  active={closingsOpen}
+                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
+                />
                 <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
                 <ClickableStat
                   testid="v7-stat-in-progress"
@@ -313,15 +313,15 @@ export default function CockpitTodayV7() {
                   onClick={() => { setInProgressOpen(o => !o); setClientsOpen(false); setClosingsOpen(false); }}
                 />
                 <ClickableStat
-                  testid="v7-stat-closings"
-                  label="Closings"
-                  sublabel={d.counts.closings > 0 ? "prior-month · click to review" : "all periods closed"}
-                  value={d.counts.closings}
-                  tint="rose"
-                  pulse={d.counts.closings > 0}
-                  active={closingsOpen}
-                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
+                  testid="v7-stat-clients"
+                  label="Clients managed"
+                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
+                  value={d.counts.clients}
+                  tint="slate"
+                  active={clientsOpen}
+                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
                 />
+                <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
               </div>
 
               {/* Brief paragraph */}
