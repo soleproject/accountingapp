@@ -1043,8 +1043,10 @@ async def today_v4(
                 prior_unclosed.append({
                     "id": f"unclosed-{cid}-{ym}",
                     "company_id": cid,
+                    "company_name": name_by_id.get(cid, "Client"),
                     "period": ym,
                     "period_label": datetime(yy, mm, 1).strftime("%b %Y"),
+                    "month": datetime(yy, mm, 1).strftime("%B %Y"),
                     "text": f"{name_by_id.get(cid, 'Client')} · "
                             f"{datetime(yy, mm, 1).strftime('%B %Y')} books not closed",
                     "reason": "prior_month_unclosed",

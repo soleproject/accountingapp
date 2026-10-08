@@ -1167,3 +1167,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-10-08 — "Viewing as" pill toggle in Pro Settings ✅ screenshot-verified
 - `components/Entitlements.jsx`: `usePlanPreviewPillVisible()` (localStorage `axiom_plan_preview_pill_hidden` + custom event for instant sync) and `usePlanPreviewAvailable()`; `PlanPreviewPill` hides when toggled off.
 - `pages/ProSettings.jsx`: new `PlanPreviewPillSection` card (data-testid `plan-preview-pill-card`, switch `plan-preview-pill-switch`) directly under the white-label banner; only renders where the switcher is available (REACT_APP_PLAN_PREVIEW + backend preview_switcher). Persists across reloads; per browser.
+
+## 2026-10-08 — Cockpit "Today" demo data + In Progress tab clarity ✅ screenshot-verified
+- Seeds (idempotent, tagged): `scripts/seed_week_schedule.py` (13 scheduled check-ins Mon–Fri, tag seed_week_schedule_v1), NEW `scripts/seed_cockpit_inprogress.py` (3 live `in_progress` client conversations + 2 silent `sent/reminded` batches 4–6 days old, tag seed_inprogress_v1), `scripts/seed_demo_ghosted_batches.py` (expired batches → relationship items).
+- Backend `cockpit_today_v4.py` prior_unclosed rows now carry `company_name` + `month` (full month name).
+- Frontend `CockpitTodayV7.jsx`: Sent to Professional rows show company, "October 2025 not closed · 132 transactions posted · 12 months past due · AI reviewed, needs your sign-off", action link, "Closing · sign-off" / "Judgment call" pills + intro line; Client Cockpit tab now renders assistant items' headline, tried-steps chips and "Suggested:" line + intro; Client Messages rows show question count, started time, current item type.
+- Fixed `lib/cockpitAssistant.js` reading `conversations.waiting` (backend key is `waiting_on_client`) — silent-client items never appeared before.

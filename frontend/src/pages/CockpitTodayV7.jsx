@@ -1618,7 +1618,9 @@ function InProgressMessages({ items, onNav, onOpenQc }) {
                 {b.company_name || b.company || "—"}
               </div>
               <div className="text-[11px] text-slate-500 truncate">
-                {b.client_email || "client"} · {b.item_count || (b.items?.length) || 0} question{(b.item_count === 1) ? "" : "s"}
+                {b.client_email || "client"} · {b.item_count || b.total || (b.items?.length) || 0} question{((b.item_count || b.total) === 1) ? "" : "s"}
+                {b.started_ago ? ` · started ${b.started_ago}` : ""}
+                {b.current_type && b.current_type !== "…" ? ` · now on: ${String(b.current_type).replace(/_/g, " ")}` : ""}
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -2109,63 +2111,101 @@ function InProgressAutoRecon({ data, onNav }) {
   );
 }
 
+function _closingBlurb(p) {
+  const n = p.txn_count || 0;
+  const over = p.months_overdue || 0;
+  const age = over <= 0 ? "current month" : over === 1 ? "1 month past due" : `${over} months past due`;
+  return `${p.month || p.period_label || "Prior month"} not closed · ${n} transaction${n === 1 ? "" : "s"} posted · ${age} · AI reviewed, needs your sign-off`;
+}
+
+function _judgmentBlurb(p) {
+  const what = p.title || p.summary || (p.text ? p.text.split(" · ").slice(1).join(" · ") : "") || p.kind || "Needs professional judgment";
+  return p.reason ? `${what} · flagged for ${p.reason}` : what;
+}
+
 function InProgressSentPro({ professional, priorUnclosed, onNav }) {
   const combined = [
     ...professional.map(p => ({ ...p, _kind: "pro" })),
     ...priorUnclosed.map(p => ({ ...p, _kind: "closing" })),
   ];
   if (!combined.length) return <_EmptyTab text="Nothing has been escalated to a professional." />;
+  const closings = combined.filter(p => p._kind === "closing").length;
   return (
-    <ul className="divide-y divide-slate-100">
-      {combined.map((p, i) => (
-        <li key={`${p._kind}-${p.id || i}`}
-            onClick={() => p.route && onNav(p.route)}
-            className={`py-3 ${p.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
-            data-testid={`v7-ip-pro-${i}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {p.company_name || p.company || p.title || "—"}
+    <div>
+      <p className="text-[11px] text-slate-500 pb-2 border-b border-slate-100" data-testid="v7-ip-pro-intro">
+        Items the AI can't finish on its own: {closings ? `${closings} prior-month close${closings === 1 ? "" : "s"} waiting for a professional sign-off` : ""}
+        {closings && combined.length - closings ? " · " : ""}
+        {combined.length - closings ? `${combined.length - closings} judgment call${combined.length - closings === 1 ? "" : "s"} (unusual amounts, deferred answers, vendor escalations)` : ""}. Click a row to open it.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {combined.map((p, i) => (
+          <li key={`${p._kind}-${p.id || i}`}
+              onClick={() => p.route && onNav(p.route)}
+              className={`py-3 ${p.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
+              data-testid={`v7-ip-pro-${i}`}>
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div className="min-w-0">
+                <div className="text-[13px] font-medium text-slate-900 truncate">
+                  {p.company_name || p.company || p.title || (p.text ? p.text.split(" · ")[0] : "—")}
+                </div>
+                <div className="text-[11px] text-slate-500">
+                  {p._kind === "closing" ? _closingBlurb(p) : _judgmentBlurb(p)}
+                </div>
+                {p.route && (
+                  <div className="text-[11px] text-indigo-600 mt-0.5">
+                    {p._kind === "closing" ? "Open month-close checklist →" : "Review & decide →"}
+                  </div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {p._kind === "closing"
-                  ? `Prior-month close still open · ${p.month || ""}`
-                  : (p.title || p.summary || p.kind || "Needs professional judgment")}
+              <div className={`text-[11px] font-medium shrink-0 px-2 py-0.5 rounded-full ${p._kind === "closing" ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-700"}`}>
+                {p._kind === "closing" ? "Closing · sign-off" : "Judgment call"}
               </div>
             </div>
-            <div className="text-[11px] text-indigo-700 font-medium shrink-0">
-              {p._kind === "closing" ? "Closing" : "Judgment"}
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
 function InProgressCockpit({ items, onNav }) {
   if (!items.length) return <_EmptyTab text="No cockpit follow-ups outstanding." />;
   return (
-    <ul className="divide-y divide-slate-100">
-      {items.map((it, i) => (
-        <li key={it.id || i}
-            onClick={() => it.route && onNav(it.route)}
-            className={`py-3 ${it.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
-            data-testid={`v7-ip-cockpit-${i}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {it.company || it.title || "—"}
+    <div>
+      <p className="text-[11px] text-slate-500 pb-2 border-b border-slate-100" data-testid="v7-ip-cockpit-intro">
+        Clients the AI has stopped making progress with — what it already tried and what a human touch could do. Click a row to open the client.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {items.map((it, i) => (
+          <li key={it.id || i}
+              onClick={() => it.route && onNav(it.route)}
+              className={`py-3 ${it.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
+              data-testid={`v7-ip-cockpit-${i}`}>
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-slate-900 truncate">
+                  {it.company || it.title || "—"}
+                </div>
+                <div className="text-[12px] text-slate-700 mt-0.5">
+                  {it.headline || it.summary || it.reason || it.kind || "Needs human follow-up"}
+                </div>
+                {Array.isArray(it.steps) && it.steps.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5" data-testid={`v7-ip-cockpit-steps-${i}`}>
+                    {it.steps.map((s, j) => (
+                      <span key={j} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">✓ {s}</span>
+                    ))}
+                  </div>
+                )}
+                {it.suggested && (
+                  <div className="text-[11px] text-sky-700 mt-1.5">Suggested: {it.suggested}</div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {it.summary || it.reason || it.kind || "Needs human follow-up"}
-              </div>
+              <div className="text-[11px] text-sky-700 font-medium shrink-0 px-2 py-0.5 rounded-full bg-sky-50">Assistant</div>
             </div>
-            <div className="text-[11px] text-sky-700 font-medium shrink-0">Assistant</div>
-          </div>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
