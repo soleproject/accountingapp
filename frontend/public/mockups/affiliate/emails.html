@@ -1,0 +1,101 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_aff.css"><title>Affiliate mockups · Email drips</title>
+<style>
+.pair{display:flex;gap:28px;align-items:flex-start}
+.mail{width:900px}
+.mphone{width:390px;background:#fff;border-radius:40px;border:8px solid #111;overflow:hidden;min-height:760px}
+.mphone .ml{padding:14px 16px;border-bottom:1px solid var(--bd);font-size:13px}
+.mphone .ml b{display:block;font-size:14px}
+.mphone .mb{padding:18px 16px;font-size:14px;line-height:1.55;color:#1f2937}
+.mphone .mb p{margin:0 0 12px}.mphone .mb h2{font-size:19px;margin:0 0 10px}
+.mphone .cta{display:block;text-align:center;background:var(--pri);color:#fff;padding:12px;border-radius:999px;font-weight:600;font-size:14px;margin:6px 0 16px}
+.loop{width:1700px}
+.loop h2{color:#fff;font-size:24px;margin:30px 0 6px}
+.loop .sub{color:#94a3b8;font-size:14px;margin-bottom:14px}
+.rule{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px 14px;color:#cbd5e1;font-size:13px;display:inline-block;margin-bottom:12px}
+.rule b{color:#fde68a}
+.ev{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;width:1700px}
+.ev .card{font-size:13px}
+.ev .card .to{font-size:11px;color:var(--tx2);text-transform:uppercase;letter-spacing:.1em;font-weight:700;margin-bottom:6px}
+</style></head><body>
+<div class="topbar">AFFILIATE SALES CENTER · MOCKUPS <span class="sp"></span><a href="index.html">Index</a><a href="landing.html">1 Landing pages</a><a href="sales-center.html">2 Sales Center</a><a href="toolkit.html">3 Toolkit</a><a href="become-affiliate.html">4 Become an affiliate</a><a class="on" href="emails.html">5 Email drips</a></div>
+
+<div class="note" style="width:1700px"><b>Three email streams.</b> <b>Transactional</b> (fires instantly on the lead form) · <b>Loop A — prospect nurture</b> (the person who was referred; stops the moment they sign up / book / pay) · <b>Loop B — affiliate activation</b> (the new affiliate; stops when they get their first lead). All sent via the existing Resend dispatcher; white-label brand applied when the referrer belongs to a firm. Each drip is a daily cron that scans <code>leads</code> / <code>users</code> for the step due, idempotent per (recipient, step).</div>
+
+<div class="loop"><h2>Transactional · fires on form submit</h2><div class="sub">Three emails, one event. The affiliate email is the key one — today they never hear that their link worked.</div></div>
+<div class="ev">
+  <div class="card"><div class="to">→ Prospect (Dan)</div><b>“You're in, Dan — here's your SmartBooks login”</b><p class="muted" style="margin-top:6px">Set-password link, what happens next (3 steps), "Maria invited you" line, reply-to = support. Pro variant: calendar link + sandbox. Enterprise: "Sam will call tomorrow morning".</p></div>
+  <div class="card" style="border-color:#a7f3d0;background:#f0fdf4"><div class="to">→ Affiliate (Maria)</div><b>“🎉 Dan Reyes just signed up from your link”</b><p class="muted" style="margin-top:6px">Who (first name + business + role), which link variant, what we'll do next (trial emails), and <b>the one thing Maria should do</b>: "text Dan in 2 days — template inside". Deep link to the lead in Pipeline.</p></div>
+  <div class="card"><div class="to">→ Admin / firm owner</div><b>“New enterprise lead via maria-lopez: Harbor Dental (4 entities)”</b><p class="muted" style="margin-top:6px">Only for pro + enterprise roles (owners self-serve). Full form payload, affiliate, "Claim &amp; call" button → AdminLeads with status set to contacted.</p></div>
+</div>
+
+<div class="loop"><h2>Loop A · Prospect nurture (business owner)</h2><div class="sub">Exit conditions: bank connected → skip to trial sequence · paid → stop · unsubscribed → stop. Pro variant swaps Day 2/5 for "what the walkthrough covers" + QBO comparison.</div>
+<div class="rule">Day 0 confirmation · <b>Day 2</b> "90 seconds to connect a bank" · <b>Day 5</b> case study · <b>Day 9</b> "Maria asked us to check in" (affiliate name, reply goes to affiliate) · <b>Trial −3d</b> add a card · <b>Trial −1d</b> last call · <b>Day +7 after lapse</b> win-back (3 months Core at $19)</div></div>
+<div class="drip"><div class="d"><b>Day 0</b>You're in — set password</div><span class="arr">→</span><div class="d"><b>Day 2</b>Connect a bank in 90s</div><span class="arr">→</span><div class="d"><b>Day 5</b>How Jamie closed Sept in 11 min</div><span class="arr">→</span><div class="d"><b>Day 9</b>Maria asked us to check in</div><span class="arr">→</span><div class="d" style="border-color:#f97316"><b>Trial −3d</b>Keep what you've built</div><span class="arr">→</span><div class="d" style="border-color:#f97316"><b>Trial −1d</b>Last day</div><span class="arr">→</span><div class="d" style="border-color:#ef4444"><b>Lapsed +7</b>Come back for $19</div></div>
+
+<div class="pair">
+<div class="mail"><div class="mh"><b>From</b><span>SmartBooks &lt;hello@smartbookssoftware.ai&gt;</span><b>To</b><span>dan@reyesplumbing.com</span><b>Subject</b><span><b style="color:var(--tx)">Dan — 90 seconds to connect a bank (then we do the rest)</b></span><b>Step</b><span class="chip ind">Loop A · Day 2 · owner · no bank yet</span></div>
+  <div class="mb"><h2>The whole thing starts with one bank.</h2>
+    <p>Hi Dan — you created your SmartBooks account two days ago but haven't connected a bank yet, so there's nothing for the AI to work on.</p>
+    <p>Connecting takes about 90 seconds (Plaid, read-only). We'll pull 90 days of transactions, categorize what we're confident about, and send your first <b>Quick Check-in</b> to your phone — usually 5–8 questions.</p>
+    <a class="cta">Connect a bank →</a>
+    <p class="sm" style="color:#64748b">Not sure which account? Start with the one you pay most bills from. You can add more later (Core includes 3).</p>
+    <p class="sm" style="color:#64748b">— Maria Lopez pointed you here. Reply to this email and it goes to her.</p>
+    <div class="foot">SmartBooks · You're getting this because you started a trial via maria-lopez. <u>Unsubscribe</u> from tips (we'll still send billing notices).</div></div></div>
+<div class="mphone"><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div><div class="ml"><span class="muted xs">SmartBooks · 9:02 AM</span><b>Dan — 90 seconds to connect a bank (then we do the rest)</b></div>
+  <div class="mb"><h2>The whole thing starts with one bank.</h2><p>Hi Dan — you created your account two days ago but haven't connected a bank yet, so there's nothing for the AI to work on.</p><p>~90 seconds, read-only. We pull 90 days, categorize what we're sure about, and text you your first <b>Quick Check-in</b> (5–8 questions).</p><a class="cta">Connect a bank →</a><p class="sm" style="color:#64748b">Start with the account you pay most bills from.</p><p class="sm" style="color:#64748b">— Maria pointed you here. Reply and it goes to her.</p></div></div>
+</div>
+
+<div class="pair">
+<div class="mail"><div class="mh"><b>From</b><span>SmartBooks &lt;hello@smartbookssoftware.ai&gt;</span><b>Reply-To</b><span>maria@lopezcpa.com</span><b>To</b><span>dan@reyesplumbing.com</span><b>Subject</b><span><b style="color:var(--tx)">Maria asked us to check in</b></span><b>Step</b><span class="chip ind">Loop A · Day 9 · no activity 5d</span></div>
+  <div class="mb"><p>Hi Dan,</p><p>Maria Lopez mentioned you were thinking about getting your books off the spreadsheet. You've got an account but it's been quiet — totally fine, just checking whether something got in the way.</p>
+    <p>Three things people usually tell us at this point:</p>
+    <p>• <b>"I don't have time."</b> — Connecting a bank is 90 seconds; after that we only ask you questions.<br>• <b>"My accountant handles it."</b> — Invite them free; they'll see everything.<br>• <b>"Not now."</b> — Reply "later" and we'll pause until next quarter.</p>
+    <a class="cta">Pick up where I left off →</a>
+    <p class="sm" style="color:#64748b">Replies go straight to Maria.</p><div class="foot">SmartBooks · Referred by maria-lopez · <u>Unsubscribe</u></div></div></div>
+<div class="mphone"><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div><div class="ml"><span class="muted xs">SmartBooks · 9:02 AM</span><b>Maria asked us to check in</b></div>
+  <div class="mb"><p>Hi Dan,</p><p>Maria mentioned you were thinking about getting your books off the spreadsheet. Your account's been quiet — just checking if something got in the way.</p><p>• <b>No time?</b> Bank connect is 90s, then we only ask questions.<br>• <b>Accountant handles it?</b> Invite them free.<br>• <b>Not now?</b> Reply "later" — we pause till next quarter.</p><a class="cta">Pick up where I left off →</a><p class="sm" style="color:#64748b">Replies go to Maria.</p></div></div>
+</div>
+
+<div class="loop"><h2>Loop B · Affiliate activation</h2><div class="sub">Exit: first lead received → switch to "momentum" stream (celebrate, coach on conversion). The job of this loop is to get the first 3 messages sent in week one — affiliates who send nothing in 7 days almost never do.</div>
+<div class="rule"><b>Day 0</b> welcome + link + first 3 texts · <b>Day 1</b> "who to text first" · <b>Day 3</b> the accountant play ($69.80/mo) · <b>Day 7</b> if 0 clicks: "one text today" · <b>Day 14</b> if 0 leads: offer a 15-min coaching call · <b>Event</b> first click / first lead / first payout 🎉</div></div>
+<div class="drip"><div class="d"><b>Day 0</b>Welcome · link · 3 texts</div><span class="arr">→</span><div class="d"><b>Day 1</b>Who to text first</div><span class="arr">→</span><div class="d"><b>Day 3</b>The accountant play</div><span class="arr">→</span><div class="d" style="border-color:#f97316"><b>Day 7 · 0 clicks</b>One text today</div><span class="arr">→</span><div class="d" style="border-color:#f97316"><b>Day 14 · 0 leads</b>15-min coaching call</div><span class="arr">⤳</span><div class="d" style="border-color:#10b981"><b>Event</b>First lead 🎉 → momentum stream</div></div>
+
+<div class="pair">
+<div class="mail"><div class="mh"><b>From</b><span>Sam at SmartBooks &lt;sam@smartbookssoftware.ai&gt;</span><b>To</b><span>maria@lopezcpa.com</span><b>Subject</b><span><b style="color:var(--tx)">Your link is live — here are the first 3 people to text</b></span><b>Step</b><span class="chip em">Loop B · Day 0 · welcome</span></div>
+  <div class="mb"><h2>Welcome, Maria. Let's get you your first referral this week.</h2>
+    <p>Your link: <span class="mono" style="background:#f1f5f9;padding:2px 6px;border-radius:4px">app.smartbookssoftware.ai/r/maria-lopez</span> — it works for business owners, accountants and multi-entity groups (the page adapts).</p>
+    <p><b>Don't post it yet.</b> Affiliates who text 3 people they already know in the first 48 hours earn 4× more in year one than those who start on social. So:</p>
+    <p>1. Someone who's complained about their books or their bookkeeper.<br>2. Your own accountant (firm referrals pay $69.80/mo each).<br>3. A trades or services owner with under 10 staff.</p>
+    <p>Here's the text — copy, change the name, send:</p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;font-size:14px">Hey ___ — remember you said your books were a mess? I've started working with SmartBooks; it reads receipts and asks ~6 questions a week on your phone. Try it on me, 14 days free: app.smartbookssoftware.ai/r/maria-lopez</div>
+    <a class="cta" style="margin-top:16px">Open my Sales Center →</a>
+    <p class="sm" style="color:#64748b">Tomorrow: a short note on who converts best. Reply to this email any time — it's a real inbox.</p><div class="foot">SmartBooks Affiliates · <u>Manage emails</u></div></div></div>
+<div class="mphone"><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div><div class="ml"><span class="muted xs">Sam at SmartBooks · 4:12 PM</span><b>Your link is live — here are the first 3 people to text</b></div>
+  <div class="mb"><h2>Welcome, Maria. First referral this week?</h2><p>Your link: <span class="mono" style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:12px">…/r/maria-lopez</span></p><p><b>Don't post it yet.</b> Text 3 people you know in 48h — it's 4× more effective than social:</p><p>1. Someone who complains about their books<br>2. Your own accountant ($69.80/mo each)<br>3. A trades owner, &lt;10 staff</p><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:13px">Hey ___ — remember you said your books were a mess? I've started working with SmartBooks… 14 days free: …/r/maria-lopez</div><a class="cta" style="margin-top:14px">Open my Sales Center →</a></div></div>
+</div>
+
+<div class="pair">
+<div class="mail"><div class="mh"><b>From</b><span>Sam at SmartBooks</span><b>To</b><span>maria@lopezcpa.com</span><b>Subject</b><span><b style="color:var(--tx)">No clicks yet — send one text today?</b></span><b>Step</b><span class="chip or">Loop B · Day 7 · condition: clicks = 0</span></div>
+  <div class="mb"><p>Hi Maria — your link hasn't been clicked yet. That's normal for week one and it's also the only thing that predicts whether this works for you.</p>
+    <p>One text. Today. Here's the lowest-effort version — it doesn't even pitch, it just asks:</p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;font-size:14px">Random question — who does your books, and do you like them?</div>
+    <p style="margin-top:14px">Whatever they answer, you'll know whether to send the link. If you'd rather talk it through, grab 15 minutes with me: <u>book a call</u>.</p>
+    <a class="cta">Copy that text →</a><div class="foot">SmartBooks Affiliates · <u>Pause these for 30 days</u></div></div></div>
+<div class="mphone"><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div><div class="ml"><span class="muted xs">Sam at SmartBooks · 8:30 AM</span><b>No clicks yet — send one text today?</b></div>
+  <div class="mb"><p>Hi Maria — no clicks yet. Normal for week one, and also the only thing that predicts whether this works.</p><p>One text, today. It doesn't even pitch:</p><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:13px">Random question — who does your books, and do you like them?</div><a class="cta" style="margin-top:14px">Open in Messages →</a><p class="sm" style="color:#64748b">Or <u>book 15 min with me</u>.</p></div></div>
+</div>
+
+<div class="pair">
+<div class="mail"><div class="mh"><b>From</b><span>SmartBooks &lt;hello@smartbookssoftware.ai&gt;</span><b>To</b><span>maria@lopezcpa.com</span><b>Subject</b><span><b style="color:var(--tx)">🎉 Dan Reyes (Reyes Plumbing) just signed up from your link</b></span><b>Step</b><span class="chip em">Transactional · lead created · to affiliate</span></div>
+  <div class="mb"><h2>Your first referral.</h2>
+    <p><b>Dan Reyes</b> · Reyes Plumbing LLC · business owner · via your <i>owner</i> link · 2 min ago.</p>
+    <p><b>What we'll do:</b> we've sent Dan his login and will nudge him to connect a bank (Day 2) and share a case study (Day 5). If he connects a bank, we hand him to the trial sequence.</p>
+    <p><b>What you should do:</b> one text in ~2 days referencing whatever you talked about. Referrals that hear from the person who referred them convert at roughly 2× the rate.</p>
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;font-size:14px">Hey Dan — saw you got set up on SmartBooks 👍 Did you get the bank connected? That's the step that makes it click. Shout if you get stuck.</div>
+    <a class="cta" style="margin-top:16px">Open Dan in my pipeline →</a>
+    <p class="sm" style="color:#64748b">You'll earn once Dan pays his first invoice (after the 14-day trial). We'll email you.</p><div class="foot">SmartBooks Affiliates</div></div></div>
+<div class="mphone"><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div><div class="ml"><span class="muted xs">SmartBooks · just now</span><b>🎉 Dan Reyes (Reyes Plumbing) just signed up from your link</b></div>
+  <div class="mb"><h2>Your first referral.</h2><p><b>Dan Reyes</b> · Reyes Plumbing · owner · via your owner link.</p><p><b>We'll:</b> send login, nudge for a bank (Day 2), case study (Day 5).</p><p><b>You should:</b> text Dan in ~2 days. Referrals that hear from you convert ~2×.</p><div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:13px">Hey Dan — saw you got set up on SmartBooks 👍 Did you get the bank connected? Shout if you get stuck.</div><a class="cta" style="margin-top:14px">Open Dan in my pipeline →</a></div></div>
+</div>
+<div class="label">All copy is plain-text-first (one CTA, short paragraphs) so it renders in Gmail/Outlook/iOS Mail without a template engine — same approach as the existing dunning/reminder emails.</div>
+</body></html>

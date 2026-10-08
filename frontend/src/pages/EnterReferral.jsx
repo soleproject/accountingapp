@@ -1,320 +1,133 @@
 /**
- * Public referral landing page.
- *
- * URL pattern: `/refer/:slug` (or `/refer` without a slug for direct
- * visits). Sits between an affiliate's shared link and the paid
- * signup — captures name + email + role so we can drop the visitor
- * into a drip campaign even if they never complete signup.
- *
- * Once they submit, we forward to `/signup?ref=<slug>` so the
- * existing revenue-share attribution flow still fires. Superadmins
- * see the lead in `/admin/leads`.
+ * Public referral landing page — `/refer/:slug?for=owner|pro|enterprise&src=tag`.
+ * Role-specific copy + lead form; on submit routes the prospect (signup / book / call)
+ * and shows a "what happens next" state instead of dead-ending.
  */
-import { useEffect, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import axios from "axios";
-import { toast } from "sonner";
-import {
-  Sparkles, Loader2, Building2, User, Briefcase, DollarSign, ArrowRight,
-} from "lucide-react";
+import { Check, Sparkles } from "lucide-react";
+import { VARIANTS, FIRM_OWNER, fill } from "@/components/affiliate/landingCopy";
+import { LeadForm } from "@/components/affiliate/LeadForm";
+import { LeadDone } from "@/components/affiliate/LeadDone";
 
 const API = (process.env.REACT_APP_BACKEND_URL || "") + "/api";
-
-const ROLE_OPTIONS = [
-  {
-    value: "accounting_pro",
-    label: "Accounting professional",
-    hint: "CPA, bookkeeper, or firm looking to bring clients onto the platform",
-    icon: Briefcase,
-  },
-  {
-    value: "business_owner",
-    label: "Business owner",
-    hint: "I run a business and need bookkeeping for myself",
-    icon: User,
-  },
-  {
-    value: "enterprise",
-    label: "Enterprise / multi-firm",
-    hint: "I represent a partner network, franchise, or 50+ client shop",
-    icon: Building2,
-  },
-  {
-    value: "affiliate",
-    label: "New Affiliate",
-    hint: "I want to share my own link and earn on every paying signup",
-    icon: DollarSign,
-  },
-];
-
-// Which roles must give us a company name, and what we call it.
-const COMPANY_LABEL = {
-  accounting_pro: "Firm name",
-  business_owner: "Business name",
-  enterprise: "Business name",
-};
+const FOR_MAP = { owner: "owner", business_owner: "owner", pro: "pro", accounting_pro: "pro", accountant: "pro", enterprise: "enterprise" };
 
 export default function EnterReferral() {
   const { slug: urlSlug } = useParams();
   const [params] = useSearchParams();
   const nav = useNavigate();
-
-  const [slug] = useState(urlSlug || params.get("ref") || "");
+  const slug = urlSlug || params.get("ref") || "";
+  const sourceTag = params.get("src") || "";
+  const [vkey, setVkey] = useState(FOR_MAP[(params.get("for") || "").toLowerCase()] || "owner");
   const [referrer, setReferrer] = useState(null);
   const [firm, setFirm] = useState(null);
-  const [role, setRole] = useState("accounting_pro");
-  const [form, setForm] = useState({
-    name: "", email: "", phone: "", company_name: "", notes: "",
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
 
-  // Resolve referrer display name (+ their white-label firm) if a slug is present
   useEffect(() => {
     if (!slug) return;
-    axios.get(`${API}/public/refer/${encodeURIComponent(slug)}`)
-      .then(r => {
-        setReferrer(r.data?.referrer || null);
-        setFirm(r.data?.firm_slug ? { slug: r.data.firm_slug, name: r.data.firm_name, logo_url: r.data.firm_logo_url } : null);
-      })
-      .catch(() => setReferrer(null));
+    axios.get(`${API}/public/refer/${encodeURIComponent(slug)}`).then(r => {
+      setReferrer(r.data?.referrer || null);
+      setFirm(r.data?.firm_slug ? { slug: r.data.firm_slug, name: r.data.firm_name, logo_url: r.data.firm_logo_url } : null);
+    }).catch(() => setReferrer(null));
   }, [slug]);
 
-  const update = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const variant = VARIANTS[vkey];
+  const brand = firm?.name || "SmartBooks";
+  const copy = useMemo(() => {
+    const ctx = { brand, firm: firm?.name || "", refName: referrer || "They", refApplied: referrer ? ` ${referrer}'s referral is already applied.` : "" };
+    const base = { ...variant };
+    if (firm && vkey === "owner") Object.assign(base, FIRM_OWNER);
+    const out = {};
+    for (const k of Object.keys(base)) out[k] = Array.isArray(base[k]) ? base[k].map(x => typeof x === "string" ? fill(x, ctx) : x) : (typeof base[k] === "string" ? fill(base[k], ctx) : base[k]);
+    return out;
+  }, [variant, firm, referrer, brand, vkey]);
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!form.name.trim() || !form.email.trim()) {
-      toast.error("Name and email are required");
-      return;
-    }
-    if (COMPANY_LABEL[role] && !form.company_name.trim()) {
-      toast.error(`${COMPANY_LABEL[role]} is required`);
-      return;
-    }
-    setSubmitting(true);
-    try {
-      await axios.post(`${API}/public/leads`, {
-        name: form.name.trim(),
-        email: form.email.trim(),
-        role,
-        ref_slug: slug || null,
-        phone: form.phone.trim() || null,
-        company_name: form.company_name.trim() || null,
-        notes: form.notes.trim() || null,
-      });
-      toast.success("Thanks! We'll be in touch.");
-      // Forward to signup, preserving referral + white-label firm attribution
-      const qs = new URLSearchParams();
-      if (slug) qs.set("ref", slug);
-      if (firm?.slug) qs.set("firm", firm.slug);
-      const q = qs.toString() ? `?${qs.toString()}` : "";
-      nav(`${role === "affiliate" ? "/signup/affiliate" : "/signup"}${q}`, { replace: true });
-    } catch (err) {
-      const msg = err?.response?.data?.detail || "Something went wrong. Please try again.";
-      toast.error(typeof msg === "string" ? msg : "Submission failed");
-    } finally {
-      setSubmitting(false);
-    }
+  const goSignup = () => {
+    const qs = new URLSearchParams();
+    if (slug) qs.set("ref", slug);
+    if (firm?.slug) qs.set("firm", firm.slug);
+    if (result?.form?.email) qs.set("email", result.form.email);
+    if (result?.form?.name) qs.set("name", result.form.name);
+    if (result?.form?.company) qs.set("business", result.form.company);
+    nav(`/signup?${qs.toString()}`);
   };
 
-  return (
-    <div
-      data-testid="enter-referral-page"
-      className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-cyan-50"
-    >
-      {/* Top brand strip */}
-      <div className="border-b border-slate-200 bg-white/70 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center gap-3" data-testid="enter-referral-brand">
-          {firm?.logo_url ? (
-            <img src={firm.logo_url} alt={firm.name || "Firm logo"} className="h-9 w-auto max-w-[180px] object-contain" />
-          ) : (
-            <div className="h-8 w-8 rounded-md bg-gradient-to-br from-cyan-500 to-cyan-700 grid place-items-center text-white">
-              <Sparkles size={16} />
-            </div>
-          )}
-          <div>
-            <div className="font-heading text-lg font-bold text-slate-900 leading-tight">
-              {firm?.name || "Business Software"}
-            </div>
-            <div className="text-xs text-slate-500 -mt-0.5">
-              AI-native accounting for firms and their clients
-            </div>
-          </div>
-        </div>
-      </div>
+  const initials = (referrer || "").split(" ").map(s => s[0]).join("").slice(0, 2).toUpperCase();
 
-      <div className="max-w-3xl mx-auto px-6 py-10">
-        {/* Referrer badge */}
-        {referrer && (
-          <div
-            data-testid="referrer-badge"
-            className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-medium text-cyan-900"
-          >
-            <Sparkles size={12} className="text-cyan-600" />
-            Referred by <span className="font-bold">{referrer}</span>
+  return (
+    <div className="min-h-screen bg-[#F5F6F8] text-slate-900" data-testid="enter-referral-page">
+      <header className="h-14 bg-white/85 backdrop-blur border-b border-slate-200 flex items-center px-4 sm:px-8 gap-3">
+        {firm?.logo_url ? <img src={firm.logo_url} alt={brand} className="h-8 w-auto max-w-[160px] object-contain" />
+          : <div className="h-7 w-7 rounded-lg bg-slate-900 grid place-items-center text-white"><Sparkles size={14} /></div>}
+        <span className="font-heading font-extrabold tracking-tight text-lg" data-testid="landing-brand">{brand}</span>
+        <span className="flex-1" />
+        {firm && <span className="hidden sm:inline-flex items-center h-6 px-2.5 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-semibold border border-indigo-100">Private label · {firm.name}</span>}
+        <Link to="/login" className="text-sm text-slate-500 hover:text-slate-900" data-testid="landing-signin-link">Already a customer? Sign in</Link>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 pt-8 pb-16">
+        {!firm && (
+          <div className="flex gap-2 mb-6 overflow-x-auto" data-testid="landing-variant-tabs">
+            {Object.values(VARIANTS).map(v => (
+              <button key={v.key} onClick={() => setVkey(v.key)} data-testid={`landing-variant-${v.key}`}
+                className={"h-8 px-4 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors " + (vkey === v.key ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400")}>
+                {v.tab}
+              </button>
+            ))}
           </div>
         )}
 
-        <h1 className="text-3xl sm:text-4xl font-heading font-bold text-slate-900 tracking-tight">
-          Tell us who you are.
-        </h1>
-        <p className="mt-3 text-slate-600 max-w-2xl">
-          Just a few details so we can point you at the right onboarding —
-          and follow up if you're not ready to sign up today. No spam, no
-          card required.
-        </p>
-
-        <form onSubmit={submit} className="mt-8 space-y-6">
-          {/* Role selector */}
+        <div className="grid lg:grid-cols-[1.1fr_.9fr] gap-10 items-start">
           <div>
-            <label className="block text-sm font-semibold text-slate-800 mb-3">
-              I'm a…
-            </label>
-            <div className="grid sm:grid-cols-2 gap-3">
-              {ROLE_OPTIONS.map((opt) => {
-                const Icon = opt.icon;
-                const active = role === opt.value;
+            {referrer && (
+              <div className="inline-flex items-center gap-2.5 bg-white border border-slate-200 rounded-full pl-1.5 pr-4 py-1.5 text-sm" data-testid="referrer-badge">
+                <span className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-800 text-[11px] font-bold grid place-items-center">{initials}</span>
+                <span><b>{referrer}</b> invited you</span>
+              </div>
+            )}
+            <div className="text-[11px] font-bold tracking-[.14em] uppercase mt-6" style={{ color: firm ? "#0e7490" : "#4f46e5" }} data-testid="landing-eyebrow">{copy.eyebrow}</div>
+            <h1 className="font-heading font-extrabold tracking-tight text-3xl sm:text-4xl lg:text-5xl leading-[1.08] mt-3" data-testid="landing-h1">{copy.h1}</h1>
+            <p className="text-base sm:text-lg text-slate-600 leading-relaxed mt-4 max-w-xl">{copy.lead}</p>
+            <ul className="mt-6 grid sm:grid-cols-2 gap-3">
+              {copy.checks.map((c, i) => (
+                <li key={i} className="flex gap-2.5 text-sm text-slate-800"><span className="w-5 h-5 rounded-full bg-emerald-50 text-emerald-700 grid place-items-center shrink-0 mt-0.5"><Check size={12} /></span>{c}</li>
+              ))}
+            </ul>
+            <div className="hidden lg:grid grid-cols-3 gap-4 mt-12">
+              {copy.steps.map((s, i) => {
+                const [t, ...rest] = s.split(" — ");
                 return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    data-testid={`role-${opt.value}`}
-                    onClick={() => setRole(opt.value)}
-                    className={
-                      "text-left p-4 rounded-lg border-2 transition-all " +
-                      (active
-                        ? "border-cyan-600 bg-cyan-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-slate-300")
-                    }
-                  >
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={
-                          "h-9 w-9 rounded-md grid place-items-center shrink-0 " +
-                          (active ? "bg-cyan-600 text-white" : "bg-slate-100 text-slate-600")
-                        }
-                      >
-                        <Icon size={16} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-bold text-slate-900">
-                          {opt.label}
-                        </div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {opt.hint}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
+                  <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4">
+                    <div className="w-7 h-7 rounded-full text-white font-heading font-bold text-sm grid place-items-center" style={{ background: firm ? "#0e7490" : "#0f172a" }}>{i + 1}</div>
+                    <div className="font-heading font-bold mt-3">{t}</div>
+                    <p className="text-xs text-slate-500 mt-1 leading-relaxed">{rest.join(" — ")}</p>
+                  </div>
                 );
               })}
             </div>
           </div>
 
-          {/* Contact fields */}
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Your name *" testid="lead-name">
-              <input
-                type="text"
-                required
-                value={form.name}
-                onChange={update("name")}
-                data-testid="lead-name-input"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
-              />
-            </Field>
-            <Field label="Email *" testid="lead-email">
-              <input
-                type="email"
-                required
-                value={form.email}
-                onChange={update("email")}
-                data-testid="lead-email-input"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
-              />
-            </Field>
+          <div className="lg:sticky lg:top-6">
+            {result
+              ? <LeadDone result={result} variant={variant} referrer={referrer} firm={firm ? { ...firm, color: "#0e7490" } : null} onSignup={goSignup} />
+              : <LeadForm variant={variant} copy={copy} slug={slug} firm={firm ? { ...firm, color: "#0e7490" } : null} sourceTag={sourceTag} onDone={setResult} />}
           </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Field label="Phone (optional)" testid="lead-phone">
-              <input
-                type="tel"
-                value={form.phone}
-                onChange={update("phone")}
-                data-testid="lead-phone-input"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
-              />
-            </Field>
-            <Field
-              label={COMPANY_LABEL[role] ? `${COMPANY_LABEL[role]} *` : "Business name (optional)"}
-              testid="lead-company"
-            >
-              <input
-                type="text"
-                required={Boolean(COMPANY_LABEL[role])}
-                value={form.company_name}
-                onChange={update("company_name")}
-                data-testid="lead-company-input"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none"
-              />
-            </Field>
-          </div>
-
-          <Field label="Anything we should know? (optional)" testid="lead-notes">
-            <textarea
-              rows={3}
-              value={form.notes}
-              onChange={update("notes")}
-              data-testid="lead-notes-input"
-              placeholder={
-                role === "accounting_pro"
-                  ? "How many clients are you managing today? What accounting stack are you using?"
-                  : role === "affiliate"
-                    ? "Who do you plan to share your link with? Any audience or network you already have?"
-                    : "Tell us a bit about your business or what you're looking for."
-              }
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 outline-none resize-none"
-            />
-          </Field>
-
-          <div className="pt-2 flex items-center gap-3">
-            <button
-              type="submit"
-              disabled={submitting}
-              data-testid="lead-submit-btn"
-              className="inline-flex items-center gap-2 rounded-md bg-cyan-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {submitting ? (
-                <><Loader2 size={16} className="animate-spin" /> Sending…</>
-              ) : (
-                <>Continue to signup <ArrowRight size={16} /></>
-              )}
-            </button>
-            <div className="text-xs text-slate-500">
-              {role === "affiliate"
-                ? "We'll take you to affiliate signup next. No subscription required."
-                : "We'll take you to signup next. Free 14-day trial, no card required."}
-            </div>
-          </div>
-        </form>
-
-        {/* Trust footer */}
-        <div className="mt-16 pt-8 border-t border-slate-200 text-xs text-slate-500 flex flex-wrap gap-x-6 gap-y-2">
-          <span>SOC 2 in progress</span>
-          <span>UK GDPR compliant</span>
-          <span>Bank-grade encryption</span>
-          <span>No card required to trial</span>
         </div>
-      </div>
-    </div>
-  );
-}
 
-function Field({ label, testid, children }) {
-  return (
-    <label className="block" data-testid={testid}>
-      <span className="block text-sm font-semibold text-slate-800 mb-1.5">{label}</span>
-      {children}
-    </label>
+        <div className="mt-14 bg-white border border-slate-200 rounded-2xl p-6 grid sm:grid-cols-3 gap-6 text-sm text-slate-500">
+          <div><div className="font-mono text-xl font-semibold text-slate-900">94%</div>of transactions auto-categorized</div>
+          <div><div className="font-mono text-xl font-semibold text-slate-900">&lt; 2 min</div>weekly owner check-in</div>
+          <div><div className="font-mono text-xl font-semibold text-slate-900">Read-only</div>bank access via Plaid, encrypted at rest</div>
+        </div>
+
+        {!firm && (
+          <p className="mt-10 text-center text-xs text-slate-500">
+            Want to earn by referring others? <Link to={`/affiliates${slug ? `?ref=${slug}` : ""}`} className="underline font-medium text-slate-700" data-testid="landing-become-affiliate-link">Become an affiliate</Link>
+          </p>
+        )}
+      </main>
+    </div>
   );
 }

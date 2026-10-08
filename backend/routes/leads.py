@@ -23,7 +23,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from db import db
@@ -47,6 +47,86 @@ class LeadIn(BaseModel):
     notes: Optional[str] = Field(None, max_length=2000)
     phone: Optional[str] = Field(None, max_length=40)
     company_name: Optional[str] = Field(None, max_length=200)
+    variant: Optional[str] = Field(None, max_length=20, description="owner | pro | enterprise landing variant")
+    source_tag: Optional[str] = Field(None, max_length=40, description="free-form channel tag (&src=)")
+    extra: Optional[dict] = Field(None, description="role-specific answers (books_today, clients, software, entities, best_time)")
+
+
+ROLE_LABEL = {"business_owner": "Business owner", "accounting_pro": "Accounting pro", "enterprise": "Enterprise",
+              "affiliate": "Affiliate", "other": "Other"}
+
+
+async def _routing(doc: dict, firm: dict | None) -> dict:
+    """Where the prospect goes next + URLs the emails need."""
+    from email_dispatcher import public_base_url
+    import affiliate_content as ac
+    base = public_base_url((firm or {}).get("slug"))
+    qs = []
+    if doc.get("ref_slug"):
+        qs.append(f"ref={doc['ref_slug']}")
+    if (firm or {}).get("slug"):
+        qs.append(f"firm={firm['slug']}")
+    qs.append(f"email={doc['email']}")
+    q = "?" + "&".join(qs)
+    signup_url = f"{base}/signup/affiliate{q}" if doc["role"] == "affiliate" else f"{base}/signup{q}"
+    settings = await ac.get_settings()
+    booking_url = None
+    if doc["role"] == "accounting_pro" and settings.get("walkthrough_booking_slug"):
+        booking_url = f"{base}/book/{settings['walkthrough_booking_slug']}?name={doc.get('name','')}&email={doc['email']}"
+    action = {"business_owner": "signup", "affiliate": "signup", "other": "signup",
+              "accounting_pro": "book" if booking_url else "call", "enterprise": "call"}[doc["role"]]
+    if firm and doc["role"] == "business_owner":
+        action = "firm_contact"
+    return {"action": action, "signup_url": signup_url, "booking_url": booking_url, "base": base,
+            "admin_emails": [e.strip() for e in (settings.get("admin_notify_emails") or "").split(",") if e.strip()]}
+
+
+async def _after_lead_submit(doc: dict, firm: dict | None, referrer: dict | None, routing: dict) -> None:
+    """Transactional trio: prospect confirmation, affiliate notice, admin notice (pro/enterprise)."""
+    import logging
+    import affiliate_emails as ae
+    import affiliate_content as ac
+    from email_dispatcher import dispatch
+    log = logging.getLogger(__name__)
+    first = (doc.get("name") or "").split()[0] if doc.get("name") else "there"
+    ref_name = (referrer or {}).get("name") or ((referrer or {}).get("email") or "").split("@")[0] or None
+    brand = (firm or {}).get("name") if firm else None
+    try:
+        subject, html = ae.prospect_confirmation(role=doc["role"], first_name=first, email=doc["email"], referrer=ref_name,
+                                                 signup_url=routing["signup_url"], booking_url=routing["booking_url"],
+                                                 brand=brand, firm_name=brand)
+        await dispatch(kind="lead_confirmation", to=doc["email"], subject=subject, html=html,
+                       reply_to=(referrer or {}).get("email"), related={"lead_id": doc["id"]})
+    except Exception:
+        log.exception("lead confirmation failed lead=%s", doc["id"])
+    if referrer and referrer.get("email"):
+        try:
+            prior = await db.leads.count_documents({"referrer_user_id": referrer["id"], "id": {"$ne": doc["id"]}})
+            tk = await ac.get_toolkit()
+            tpl = next((t for t in tk["templates"] if t["id"] == "sms_signed_up_no_bank"), None)
+            text = ac.render((tpl or {}).get("body", ""), {"first_name": first})
+            subject, html = ae.affiliate_lead_notice(
+                affiliate_first=(referrer.get("name") or "").split()[0] if referrer.get("name") else "there",
+                lead_name=doc.get("name") or doc["email"], company=doc.get("company_name"),
+                role_label=ROLE_LABEL.get(doc["role"], "Business owner"), variant=doc.get("variant") or "owner",
+                pipeline_url=f"{routing['base']}/share?tab=pipeline&lead={doc['id']}", suggested_text=text, is_first=prior == 0)
+            await dispatch(kind="affiliate_lead_notice", to=referrer["email"], subject=subject, html=html,
+                           initiating_user_id=referrer["id"], related={"lead_id": doc["id"]})
+        except Exception:
+            log.exception("affiliate lead notice failed lead=%s", doc["id"])
+    firm_owner = (firm or {}).get("owner_email")
+    if doc["role"] in ("accounting_pro", "enterprise") or (firm_owner and doc["role"] == "business_owner"):
+        try:
+            to = [] if (firm_owner and doc["role"] == "business_owner") else (
+                routing["admin_emails"] or [u["email"] async for u in db.users.find({"role": "superadmin"}, {"_id": 0, "email": 1})])
+            if firm_owner:
+                to.append(firm_owner)
+            subject, html = ae.admin_lead_notice(lead=doc, affiliate_name=ref_name, admin_url=f"{routing['base']}/admin/leads",
+                                                 booking_url=routing["booking_url"])
+            for addr in dict.fromkeys(to):
+                await dispatch(kind="admin_lead_notice", to=addr, subject=subject, html=html, related={"lead_id": doc["id"]})
+        except Exception:
+            log.exception("admin lead notice failed lead=%s", doc["id"])
 
 
 class LeadStatusPatch(BaseModel):
@@ -60,7 +140,7 @@ def _now_iso() -> str:
 
 # ---- Public: submit lead ------------------------------------------------
 @router.post("/public/leads")
-async def submit_lead(payload: LeadIn, request: Request):
+async def submit_lead(payload: LeadIn, request: Request, background: BackgroundTasks):
     """Public lead-capture endpoint. Anyone (no auth) can drop a lead.
 
     Idempotent-ish: repeat submissions from the same email + ref within
@@ -71,8 +151,15 @@ async def submit_lead(payload: LeadIn, request: Request):
         raise HTTPException(400, f"Role must be one of: {sorted(VALID_ROLES)}")
 
     referrer_id = await resolve_referrer_id(payload.ref_slug) if payload.ref_slug else None
+    referrer = await db.users.find_one({"id": referrer_id}, {"_id": 0, "id": 1, "name": 1, "email": 1, "branding": 1,
+                                                            "signup_firm_slug": 1, "enterprise_id": 1}) if referrer_id else None
+    from routes.auth import _resolve_firm_for_user, _firm_public_info
+    raw_firm = await _resolve_firm_for_user(referrer) if referrer else None
+    firm = _firm_public_info(raw_firm)
+    if firm and raw_firm:
+        firm["owner_email"] = raw_firm.get("email")
 
-    # De-dupe within 24h on (email, ref_slug)
+    # De-dupe on (email, ref_slug)
     email_lc = payload.email.lower()
     existing = await db.leads.find_one({
         "email": email_lc,
@@ -87,10 +174,13 @@ async def submit_lead(payload: LeadIn, request: Request):
                 "role": payload.role,
                 "phone": payload.phone,
                 "company_name": payload.company_name,
+                "variant": payload.variant or existing.get("variant"),
                 "last_seen_at": _now_iso(),
             }}
         )
-        return {"ok": True, "id": existing["id"], "duplicate": True}
+        routing = await _routing({**existing, "role": payload.role}, firm)
+        return {"ok": True, "id": existing["id"], "duplicate": True, "next": routing["action"],
+                "signup_url": routing["signup_url"], "booking_url": routing["booking_url"]}
 
     doc = {
         "id": str(uuid.uuid4()),
@@ -102,6 +192,10 @@ async def submit_lead(payload: LeadIn, request: Request):
         "ref_slug": payload.ref_slug or None,
         "referrer_user_id": referrer_id,
         "notes": (payload.notes or "").strip() or None,
+        "variant": (payload.variant or "").strip() or None,
+        "source_tag": (payload.source_tag or "").strip() or None,
+        "extra": payload.extra or None,
+        "activities": [],
         "status": "new",
         "source": "referral" if payload.ref_slug else "direct",
         "ip": (request.client.host if request.client else None),
@@ -110,7 +204,11 @@ async def submit_lead(payload: LeadIn, request: Request):
         "last_seen_at": _now_iso(),
     }
     await db.leads.insert_one(doc)
-    return {"ok": True, "id": doc["id"], "duplicate": False}
+    doc.pop("_id", None)
+    routing = await _routing(doc, firm)
+    background.add_task(_after_lead_submit, doc, firm, referrer, routing)
+    return {"ok": True, "id": doc["id"], "duplicate": False, "next": routing["action"],
+            "signup_url": routing["signup_url"], "booking_url": routing["booking_url"]}
 
 
 # ---- Superadmin: list ---------------------------------------------------

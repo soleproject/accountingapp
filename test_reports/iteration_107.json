@@ -1,0 +1,49 @@
+{
+  "summary": "Comprehensive backend + frontend testing of the new Affiliate Sales Center (public leads routing, affiliate /share dashboard, toolkit, manual lead CRUD, admin content/settings editor, public /affiliates, cron drips). Wrote /app/backend/tests/test_affiliate_sales_center.py (24 tests — all passing). Ran Playwright flows against the public preview URL for: /r/avery-affiliate?for=pro (firm-branded landing), /refer?for=owner (non-firm variant tabs + enterprise swap + signup prefill), /share Sales Center (login as affiliate@axiom.ai, all 5 tabs, Pipeline columns + filters + add-lead modal, Toolkit nav sections, My links, Payouts), /affiliates public page (calculator defaults, payout table, mobile 390px overflow), and /admin/affiliate-toolkit (settings, drips dry-run, 6 section editors). Everything in the review request works. Found 1 minor data-testid naming inconsistency only.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "TodayTab stat card",
+        "issue": "data-testid is `today-stat-signed` while the review spec references `today-stat-signed_up` (card showing count of signed-up referrals). The 4 cards present are clicks / leads / signed / paying. Rename to `today-stat-signed_up` for consistency with other `_up`-stage ids (pipeline-col-signed_up, stats.signed_up in /affiliate/center payload). Low priority — card renders and is clickable.",
+        "selector": "[data-testid=\"today-stat-signed\"]",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_affiliate_sales_center.py",
+    "/app/test_reports/pytest/affiliate_sales_center.xml"
+  ],
+  "action_items": [
+    "(Optional) rename data-testid `today-stat-signed` → `today-stat-signed_up` to match spec/pipeline naming."
+  ],
+  "critical_code_review_comments": [
+    "routes/leads.py `submit_lead`: good — role whitelist, email dedupe on (email, ref_slug), background email dispatch. Firm-owner notification path overwrites `to = []` when firm has owner_email, then appends — intentional per spec (firm leads notify the firm owner, not all superadmins). Verified.",
+    "routes/affiliate_center.py `add_manual_lead`: uses `uuid.uuid4().hex[:10]@no-email.local` placeholder email when phone-only. Loop-A candidate query already excludes `@no-email.local` so these won't receive prospect drips — nice touch.",
+    "routes/affiliate_center.py `patch_my_lead` scopes by `{id, referrer_user_id: user.id}` → cross-affiliate PATCH correctly returns 404 (verified in tests).",
+    "cron_affiliate_drips.py: bearer check uses `hmac.compare_digest` — timing-safe. 401 returned for both missing and wrong tokens (verified).",
+    "affiliate_content.py `get_toolkit()` merges overrides at the section level (overridden section fully replaces default) — matches expected behavior that `DELETE /admin/affiliate/toolkit/{section}` restores all 5 defaults for who_first (verified).",
+    "Share.jsx TodayTab stat-card data-testid uses raw stat key `signed` (likely from an abbreviated stats key) instead of `signed_up` — minor spec drift noted above.",
+    "No MongoDB `_id` leakage detected on any tested endpoint (all queries use `{\"_id\": 0}` projection or `.pop('_id', None)`).",
+    "payout tiers table hard-coded in affiliate_content.PAYOUT_TABLE; comment says it mirrors `stripe_billing._PAYOUT_TIERS` — risk of drift if one is updated without the other. Consider sourcing from a single constant."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_affiliate_sales_center.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (24/24 pytest tests pass)",
+    "frontend": "~98% (all critical flows pass; 1 minor data-testid naming nit on today-stat-signed_up)"
+  },
+  "test_credentials": "admin@axiom.ai/admin123, affiliate@axiom.ai/aff123, pro@axiom.ai/pro123 (all from /app/memory/test_credentials.md).",
+  "seed_data_creation": "Created several TEST_*@example.com leads via POST /api/public/leads and /api/affiliate/leads during testing. These are routed to referrer_user_id of avery-affiliate and visible in her /share pipeline. Resend logs them as skipped_test_recipient (expected). Safe to leave or delete via DELETE /api/admin/leads/{id}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend regression suite /app/backend/tests/test_affiliate_sales_center.py covers all /api/public/leads routing branches (business_owner+firm→firm_contact, accounting_pro w/o slug→call, accounting_pro w/ slug→book), /api/affiliate/center shape, /api/affiliate/leads CRUD + activity, toolkit admin override+reset, /api/admin/affiliate/settings validation, /api/cron/affiliate-drips auth & dry-run plan output, preview HTML + 404 on unknown step. Run with `python -m pytest backend/tests/test_affiliate_sales_center.py -o addopts='' -v`. Note: pytest.ini has `-n --dist loadscope` default addopts; override empty addopts to avoid xdist which was pinning module splits and swallowing env var context. Test file reads REACT_APP_BACKEND_URL from /app/frontend/.env directly.",
+  "rca of the issue": "No bugs blocking release. Only nit: Share.jsx TodayTab emits data-testid=\"today-stat-signed\" (shorthand) instead of the spec-referenced `today-stat-signed_up`. Fix: in TodayTab.jsx (or wherever the stat grid maps keys) map `signed_up` → testid `today-stat-signed_up` to align with /affiliate/center stats key name (which IS `signed_up`)."
+}

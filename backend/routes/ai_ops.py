@@ -386,8 +386,14 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
     # naturally without hitting the TTL wait.
     today = datetime.now(timezone.utc).date()
     key = cache.key("dash_metrics", company_id=cid, day=today.isoformat())
+    return await cache.get_or_compute(key, DASH_CACHE_TTL, lambda: compute_dashboard_metrics(cid))
 
-    async def compute():
+
+async def compute_dashboard_metrics(cid: str) -> dict:
+    """Cash-on-hand / A-R / A-P / 30d cash activity for one company. Shared by
+    the single-company dashboard and the multi-company Portfolio rollup."""
+    if True:
+        today = datetime.now(timezone.utc).date()
         thirty_ago = (today - timedelta(days=30)).isoformat()
         today_str = today.isoformat()
 
@@ -477,7 +483,6 @@ async def dashboard_metrics(cid: str, user: dict = Depends(get_current_user)):
             "net_cash_30d": round(net_30d, 2),
             "activity_count_30d": len(recent),
         }
-    return await cache.get_or_compute(key, DASH_CACHE_TTL, compute)
 
 
 UNRECONCILED_STALENESS_DAYS = 45

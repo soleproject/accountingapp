@@ -45,10 +45,10 @@ export default function Signup() {
   const affiliateMode  = pathname.startsWith("/signup/affiliate");
   const enterpriseMode = pathname.startsWith("/signup/enterprise");
 
-  const [name, setName] = useState("");
+  const [name, setName] = useState(params.get("name") || "");
   const [firmName, setFirmName] = useState("");
-  const [bizName, setBizName] = useState("");
-  const [email, setEmail] = useState("");
+  const [bizName, setBizName] = useState(params.get("business") || "");
+  const [email, setEmail] = useState(params.get("email") || "");
   const [password, setPassword] = useState("");
   const [ref, setRef] = useState("");
   const [refWho, setRefWho] = useState(null);  // {name, firm_name} once resolved

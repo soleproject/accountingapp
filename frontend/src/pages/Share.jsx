@@ -1,5 +1,9 @@
 import { useEffect, useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
+import { TodayTab } from "@/components/affiliate/TodayTab";
+import { PipelineTab } from "@/components/affiliate/PipelineTab";
+import { ToolkitTab } from "@/components/affiliate/ToolkitTab";
 import { useAuth } from "@/lib/auth";
 import AddCompanyModal from "@/components/AddCompanyModal";
 import { QRCodeSVG } from "qrcode.react";
@@ -19,13 +23,19 @@ import {
  * "Payouts" tabs load lazily to keep the initial paint fast.
  */
 export default function Share() {
-  const [tab, setTab] = useState("overview");
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") || "today";
+  const setTab = (t) => { const p = new URLSearchParams(params); p.set("tab", t); setParams(p, { replace: true }); };
   const [data, setData] = useState(null);
+  const [center, setCenter] = useState(null);
+  const [toolkit, setToolkit] = useState(null);
 
   const load = () =>
     api.get("/share").then(r => setData(r.data)).catch(() => setData({}));
+  const loadCenter = () => api.get("/affiliate/center").then(r => setCenter(r.data)).catch(() => setCenter({ today: [], pipeline: [], counts: {}, stats: {} }));
+  const loadToolkit = () => api.get("/affiliate/toolkit").then(r => setToolkit(r.data)).catch(() => setToolkit(null));
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadCenter(); loadToolkit(); }, []);
 
   if (!data) return (
     <div className="p-10 text-center text-slate-400 text-sm">
@@ -34,10 +44,10 @@ export default function Share() {
   );
 
   return (
-    <div className="p-6 max-w-5xl mx-auto" data-testid="share-page">
+    <div className="p-4 sm:p-6 max-w-6xl mx-auto" data-testid="share-page">
       <UpgradePill />
       <div className="flex items-center gap-2 text-slate-500 text-sm mb-1">
-        <Share2 size={14} /> Affiliate
+        <Share2 size={14} /> Sales Center
         {data.firm?.name && (
           <span className="inline-flex items-center gap-1.5 ml-2 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs" data-testid="share-firm-chip">
             {data.firm.logo_url && <img src={data.firm.logo_url} alt="" className="h-4 w-auto max-w-[80px] object-contain" />}
@@ -45,28 +55,41 @@ export default function Share() {
           </span>
         )}
       </div>
-      <h1 className="text-2xl font-heading font-bold text-slate-900">Refer &amp; earn</h1>
-      <p className="text-sm text-slate-500 mt-1 mb-6">
-        Share your link. When someone signs up{data.firm?.name ? ` with ${data.firm.name}` : ""} and pays, you get credited
-        automatically — first month and every month after, for as long
-        as they pay.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-heading font-bold text-slate-900">
+            {tab === "today" && center ? `Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, ${center.first_name}` : "Refer & earn"}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            {tab === "today" && center ? `${center.today.length} thing${center.today.length === 1 ? "" : "s"} worth doing today` :
+              `Share your link. When someone signs up${data.firm?.name ? ` with ${data.firm.name}` : ""} and pays, you get credited — first month and every month after.`}
+          </p>
+        </div>
+        {center && (
+          <div className="rounded-2xl bg-slate-900 text-white px-4 py-2.5 text-right" data-testid="share-month-earnings">
+            <div className="text-[10px] tracking-[.12em] uppercase text-indigo-200 font-bold">This month</div>
+            <div className="font-mono text-xl font-semibold leading-tight">{fmtUsd(center.stats.month_cents || 0)}</div>
+            <div className="text-[11px] text-slate-300">{center.stats.paying || 0} paying · ~{fmtUsd(center.stats.recurring_cents || 0)}/mo recurring</div>
+          </div>
+        )}
+      </div>
 
-      <div className="mb-5 border-b border-slate-200 flex gap-1">
+      <div className="mt-5 mb-5 border-b border-slate-200 flex gap-1 overflow-x-auto">
         {[
-          { id: "overview",  label: "Overview" },
-          { id: "enter",     label: "Enter referral" },
-          { id: "referrals", label: "Referrals" },
-          { id: "payouts",   label: "Payouts" },
+          { id: "today",    label: "Today" },
+          { id: "pipeline", label: "Pipeline" },
+          { id: "toolkit",  label: "Toolkit" },
+          { id: "links",    label: "My links" },
+          { id: "payouts",  label: "Payouts" },
         ].map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             data-testid={`share-tab-${t.id}`}
             className={
-              "px-4 py-2 text-sm border-b-2 -mb-px transition " +
+              "px-4 py-2 text-sm border-b-2 -mb-px transition whitespace-nowrap " +
               (tab === t.id
-                ? "border-cyan-600 text-cyan-700 font-medium"
+                ? "border-slate-900 text-slate-900 font-semibold"
                 : "border-transparent text-slate-500 hover:text-slate-700")
             }
           >
@@ -75,10 +98,11 @@ export default function Share() {
         ))}
       </div>
 
-      {tab === "overview"  && <OverviewTab data={data} onChanged={load} />}
-      {tab === "enter"     && <EnterReferralTab slug={data.slug} />}
-      {tab === "referrals" && <ReferralsTab />}
-      {tab === "payouts"   && <PayoutsTab />}
+      {tab === "today"    && <TodayTab center={center} toolkit={toolkit} onChanged={loadCenter} onGoto={setTab} />}
+      {tab === "pipeline" && <PipelineTab center={center} toolkit={toolkit} onChanged={loadCenter} slug={data.slug} EnterReferral={EnterReferralTab} />}
+      {tab === "toolkit"  && <ToolkitTab toolkit={toolkit} />}
+      {tab === "links"    && <OverviewTab data={data} onChanged={load} links={center?.links} />}
+      {tab === "payouts"  && <PayoutsTab />}
     </div>
   );
 }
@@ -86,7 +110,7 @@ export default function Share() {
 // --------------------------------------------------------------------------
 // OVERVIEW — stats + editable slug + shareable link + QR code.
 // --------------------------------------------------------------------------
-function OverviewTab({ data, onChanged }) {
+function OverviewTab({ data, onChanged, links }) {
   const [copied, setCopied] = useState(false);
   const [slugEditing, setSlugEditing] = useState(false);
   const [slugDraft, setSlugDraft] = useState(data.slug || "");
@@ -169,6 +193,20 @@ function OverviewTab({ data, onChanged }) {
             </>
           )}
         </div>
+
+        {links && (
+          <div className="mt-4 space-y-2" data-testid="share-link-variants">
+            <div className="text-xs uppercase tracking-wide text-slate-500">Audience-specific versions (same attribution, different landing copy)</div>
+            {[["Business owner", links.my_link_owner, "owner"], ["Accountant / firm", links.my_link_pro, "pro"], ["Enterprise / multi-entity", links.my_link_enterprise, "enterprise"]].map(([label, url, k]) => (
+              <div key={k} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs" data-testid={`share-link-${k}`}>
+                <span className="font-semibold text-slate-700 w-40 shrink-0">{label}</span>
+                <span className="font-mono text-slate-500 truncate flex-1">{url}</span>
+                <button onClick={() => { navigator.clipboard.writeText(url); toast.success("Copied"); }} className="px-2.5 py-1 rounded-full border border-slate-200 hover:bg-slate-50 font-medium" data-testid={`share-link-copy-${k}`}>Copy</button>
+              </div>
+            ))}
+            <div className="text-[11px] text-slate-500">Add <span className="font-mono">&amp;src=linkedin</span> (or any tag) to see which channel converts in Pipeline.</div>
+          </div>
+        )}
 
         {/* Editable slug */}
         <div className="mt-4 flex items-center gap-2 text-xs text-slate-500">
@@ -275,7 +313,7 @@ const ROLE_OPTIONS = [
     hint: "Investor, journalist, curious",  icon: HelpCircle },
 ];
 
-function EnterReferralTab({ slug }) {
+function EnterReferralTab({ slug, onDone }) {
   const [role, setRole] = useState("accounting_pro");
   const [form, setForm] = useState({
     name: "", email: "", phone: "", company_name: "", notes: "",
@@ -303,8 +341,9 @@ function EnterReferralTab({ slug }) {
         company_name: form.company_name.trim() || null,
         notes: form.notes.trim() || null,
       });
-      toast.success("Lead submitted — it's in your Referrals + the admin queue.");
+      toast.success("Invite sent — they're in your pipeline.");
       reset();
+      onDone?.();
     } catch (err) {
       toast.error(err?.response?.data?.detail || "Submission failed");
     } finally {
@@ -437,200 +476,6 @@ function FieldRow({ label, children }) {
       <span className="block text-sm font-semibold text-slate-800 mb-1.5">{label}</span>
       {children}
     </label>
-  );
-}
-
-// --------------------------------------------------------------------------
-// REFERRALS — pipeline view showing every prospect in the funnel.
-// Combines leads (submitted form) + signed-up users, with a computed
-// stage, last-activity timestamp, and a suggested next action per row.
-// Modeled on PartnerStack + FirstPromoter dashboard patterns.
-// --------------------------------------------------------------------------
-const STAGES = [
-  { id: "lead",      label: "Lead",       color: "bg-amber-100 text-amber-900 border-amber-200" },
-  { id: "contacted", label: "Contacted",  color: "bg-blue-100 text-blue-900 border-blue-200" },
-  { id: "trial",     label: "Trial",      color: "bg-cyan-100 text-cyan-900 border-cyan-200" },
-  { id: "paying",    label: "Paying",     color: "bg-emerald-100 text-emerald-900 border-emerald-200" },
-  { id: "dead",      label: "Dead",       color: "bg-slate-100 text-slate-600 border-slate-200" },
-];
-
-function ReferralsTab() {
-  const [data, setData] = useState(null);
-  const [filter, setFilter] = useState("");   // "" = all
-
-  useEffect(() => {
-    api.get("/share/pipeline")
-      .then(r => setData(r.data))
-      .catch(() => setData({ entries: [], totals: null }));
-  }, []);
-
-  if (!data) return <Loading />;
-
-  if (data.entries.length === 0) return (
-    <EmptyBox
-      title="No referrals yet"
-      body="Share your link, submit one from the Enter referral tab, or wait for form submissions. As soon as anyone comes in under your slug they'll show up here — even before they sign up."
-    />
-  );
-
-  const t = data.totals || {};
-  const filtered = filter
-    ? data.entries.filter(e => e.stage === filter)
-    : data.entries;
-
-  return (
-    <div data-testid="referrals-pipeline">
-      {/* Funnel stat tiles */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
-        <FunnelTile
-          label="Clicks"
-          value={t.clicks || 0}
-          hint={t.unique_clicks ? `${t.unique_clicks} unique` : null}
-          accent="violet"
-        />
-        <FunnelTile label="Total prospects" value={t.total} accent="slate" />
-        <FunnelTile label="Leads" value={t.counts?.lead || 0} accent="amber"
-                    active={filter === "lead"} onClick={() => setFilter(filter === "lead" ? "" : "lead")} />
-        <FunnelTile label="Contacted" value={t.counts?.contacted || 0} accent="blue"
-                    active={filter === "contacted"} onClick={() => setFilter(filter === "contacted" ? "" : "contacted")} />
-        <FunnelTile label="Trial" value={t.counts?.trial || 0} accent="cyan"
-                    active={filter === "trial"} onClick={() => setFilter(filter === "trial" ? "" : "trial")} />
-        <FunnelTile label="Paying" value={t.counts?.paying || 0} accent="emerald"
-                    active={filter === "paying"} onClick={() => setFilter(filter === "paying" ? "" : "paying")} />
-      </div>
-
-      {/* Conversion rate summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
-        <ConvTile
-          label="Click → Prospect"
-          value={t.clicks ? `${t.click_to_lead_pct || 0}%` : "—"}
-          hint={t.clicks ? `${t.total || 0} of ${t.clicks} clicks became prospects` : "No clicks tracked yet"}
-        />
-        <ConvTile
-          label="Lead → Signup"
-          value={`${t.lead_to_signup_pct || 0}%`}
-          hint={`${t.signed_up_total || 0} of ${t.total || 0} prospects created an account`}
-        />
-        <ConvTile
-          label="Signup → Paying"
-          value={`${t.signup_to_paying_pct || 0}%`}
-          hint={`${t.counts?.paying || 0} of ${t.signed_up_total || 0} sign-ups are recurring`}
-        />
-        <ConvTile
-          label="Total earned"
-          value={fmtUsd(t.total_earned_cents || 0)}
-          hint="Lifetime commission from this pipeline"
-          accent="emerald"
-        />
-      </div>
-
-      {/* Filter chip bar */}
-      {filter && (
-        <div className="mb-3 flex items-center gap-2 text-xs">
-          <span className="text-slate-500">Showing</span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 border border-cyan-200 px-2 py-0.5 text-cyan-900 font-medium">
-            {STAGES.find(s => s.id === filter)?.label || filter}
-            <button
-              onClick={() => setFilter("")}
-              data-testid="clear-stage-filter"
-              className="text-cyan-700 hover:text-cyan-900"
-            >
-              <X size={12} />
-            </button>
-          </span>
-          <span className="text-slate-500">only — click again or clear to see all.</span>
-        </div>
-      )}
-
-      {/* Pipeline table */}
-      <div className="bg-white rounded-lg border overflow-hidden" data-testid="referrals-table">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-            <tr>
-              <Th>Prospect</Th>
-              <Th>Stage</Th>
-              <Th>Last activity</Th>
-              <Th>Suggested next step</Th>
-              <Th className="text-right">Earned</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y">
-            {filtered.map(r => <PipelineRow key={r.email} r={r} />)}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="mt-3 text-xs text-slate-500">
-        Drip-campaign status will land here once outbound email flows are wired.
-        For now, use <b>Suggested next step</b> to hand-nudge accounts stuck in Lead
-        or Trial.
-      </div>
-    </div>
-  );
-}
-
-function FunnelTile({ label, value, hint, accent = "slate", active, onClick }) {
-  const accents = {
-    slate:   "border-slate-200 bg-white",
-    amber:   "border-amber-200 bg-amber-50",
-    blue:    "border-blue-200 bg-blue-50",
-    cyan:    "border-cyan-200 bg-cyan-50",
-    emerald: "border-emerald-200 bg-emerald-50",
-    violet:  "border-violet-200 bg-violet-50",
-  };
-  const clickable = onClick ? "cursor-pointer hover:shadow-sm" : "";
-  const activeRing = active ? "ring-2 ring-cyan-500" : "";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      data-testid={`funnel-tile-${label.toLowerCase().replace(/\s+/g, "-")}`}
-      className={`rounded-lg border p-3 text-left transition ${accents[accent]} ${clickable} ${activeRing}`}
-    >
-      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
-      <div className="text-2xl font-bold text-slate-900 leading-tight mt-0.5 tabular-nums">{value}</div>
-      {hint && <div className="text-[10px] text-slate-500 mt-0.5">{hint}</div>}
-    </button>
-  );
-}
-
-function ConvTile({ label, value, hint, accent }) {
-  const border = accent === "emerald"
-    ? "border-emerald-200 bg-emerald-50"
-    : "border-slate-200 bg-white";
-  const valueColor = accent === "emerald" ? "text-emerald-700" : "text-slate-900";
-  return (
-    <div className={`rounded-lg border p-3 ${border}`}>
-      <div className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{label}</div>
-      <div className={`text-xl font-bold leading-tight mt-0.5 tabular-nums ${valueColor}`}>{value}</div>
-      <div className="text-xs text-slate-500 mt-1">{hint}</div>
-    </div>
-  );
-}
-
-function PipelineRow({ r }) {
-  const stage = STAGES.find(s => s.id === r.stage) || STAGES[0];
-  return (
-    <tr data-testid={`pipeline-row-${r.email}`}>
-      <td className="px-3 py-2.5">
-        <div className="text-slate-800 font-medium">{r.name || "—"}</div>
-        <div className="text-xs text-slate-500">{r.email}</div>
-        {r.company_name && (
-          <div className="text-xs text-slate-400 mt-0.5">{r.company_name}</div>
-        )}
-      </td>
-      <td className="px-3 py-2.5">
-        <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${stage.color}`}>
-          {stage.label}
-        </span>
-      </td>
-      <td className="px-3 py-2.5 text-xs text-slate-600">{fmtDate(r.last_seen_at)}</td>
-      <td className="px-3 py-2.5 text-xs text-slate-700">{r.next_action || "—"}</td>
-      <td className="px-3 py-2.5 text-right tabular-nums font-medium text-emerald-700">
-        {fmtUsd(r.earned_cents)}
-      </td>
-    </tr>
   );
 }
 

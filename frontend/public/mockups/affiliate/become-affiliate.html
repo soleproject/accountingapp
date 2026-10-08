@@ -1,0 +1,107 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="_aff.css"><title>Affiliate mockups · Become an affiliate</title>
+<style>
+.hero{padding:52px 48px 36px;display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center}
+.hero h1{font-size:46px;line-height:1.06;margin:14px 0}
+.hero p{font-size:17px;color:#334155;line-height:1.55}
+.calc{background:#0f172a;color:#fff;border-radius:20px;padding:26px 28px}
+.calc label{font-size:13px;color:#cbd5e1;display:flex;justify-content:space-between;margin-top:14px}
+.calc label b{color:#fff;font-family:"IBM Plex Mono"}
+input[type=range]{width:100%;accent-color:#10b981;margin-top:8px}
+.res{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px}
+.res div{background:#1e293b;border-radius:14px;padding:14px 16px}
+.res .k{font-size:11px;color:#a5b4fc;letter-spacing:.1em;text-transform:uppercase;font-weight:700}
+.res .v{font:700 30px "IBM Plex Mono";color:#6ee7b7;margin-top:4px;letter-spacing:-.02em}
+.sec{padding:36px 48px}
+.band{background:#fff;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+.comm td,.comm th{padding:12px 14px}
+</style></head><body>
+<div class="topbar">AFFILIATE SALES CENTER · MOCKUPS <span class="sp"></span><a href="index.html">Index</a><a href="landing.html">1 Landing pages</a><a href="sales-center.html">2 Sales Center</a><a href="toolkit.html">3 Toolkit</a><a class="on" href="become-affiliate.html">4 Become an affiliate</a><a href="emails.html">5 Email drips</a></div>
+
+<div class="note" style="width:1700px"><b>Public /affiliates page</b> (linked from the marketing footer, the 4th tile on referral pages, and the "Become an affiliate" email). Goal: recruit. The <b>earnings calculator is live</b> here — drag the sliders. Commission numbers shown are illustrative (<b>20% of every invoice, recurring, no cap</b>); the real rate comes from the admin-set <span class="mono">share_bps</span> so the page reads it from the API. Signing up creates the existing <code>affiliate</code> role user and drops them into the Sales Center + activation drip (Loop B).</div>
+
+<div class="row">
+<div class="desk">
+  <div class="chrome"><i></i><i></i><i></i><div class="url">smartbookssoftware.ai/affiliates</div></div>
+  <div class="appbar"><div class="logo"><i></i>SmartBooks</div><span style="flex:1"></span><a class="btn sm ghost">Pricing</a><a class="btn sm ghost">For accountants</a><a class="btn sm ghost">Sign in</a><a class="btn sm pri">Become an affiliate</a></div>
+  <div class="hero">
+    <div>
+      <div class="eyebrow">Affiliate program</div>
+      <h1>Refer a business once.<br>Get paid every month they stay.</h1>
+      <p>Earn <b>20% of every invoice</b> your referrals pay — business owners <i>and</i> accounting firms — for as long as they're customers. No cap, no decay, paid monthly by ACH. We give you the links, the scripts and a pipeline that tells you who to call.</p>
+      <div style="display:flex;gap:12px;margin-top:22px"><a class="btn pri" style="height:48px;padding:0 24px">Get my link — it's free</a><a class="btn" style="height:48px">See how it works ↓</a></div>
+      <div class="muted xs" style="margin-top:12px">Takes 60 seconds · no customer account needed · upgrade to the full platform any time</div>
+    </div>
+    <div class="calc">
+      <div class="xs" style="color:#a5b4fc;letter-spacing:.12em;text-transform:uppercase;font-weight:700">Earnings calculator</div>
+      <label>Business owners you refer <b id="ov">10</b></label><input type="range" min="0" max="100" value="10" id="o" oninput="calc()">
+      <label>Accounting firms you refer <b id="pv">2</b></label><input type="range" min="0" max="30" value="2" id="p" oninput="calc()">
+      <label>Average plan <b id="plv">AI Bookkeeper · $99</b></label><input type="range" min="0" max="3" value="2" id="pl" oninput="calc()">
+      <div class="res"><div><div class="k">Per month</div><div class="v" id="m">$337</div></div><div><div class="k">Per year</div><div class="v" id="y">$4,046</div></div></div>
+      <div class="xs" style="color:#94a3b8;margin-top:12px">Firms: 20% of $349/mo base = $69.80 each. Owners: 20% of plan. Illustrative; rate set in your agreement.</div>
+    </div>
+  </div>
+
+  <div class="band sec" style="display:flex;gap:40px;justify-content:space-between"><div><div class="big" style="font-size:28px">$412</div><div class="sm muted">avg monthly payout, active affiliates</div></div><div><div class="big" style="font-size:28px">9.2%</div><div class="sm muted">click → lead rate on referral pages</div></div><div><div class="big" style="font-size:28px">14 mo</div><div class="sm muted">median customer lifetime so far</div></div><div><div class="big" style="font-size:28px">1st</div><div class="sm muted">of the month — ACH payout, $25 minimum</div></div></div>
+
+  <div class="sec"><div class="eyebrow">How it works</div><h2 style="font-size:28px;margin:8px 0 18px">Three steps, and the app does the chasing.</h2>
+    <div class="steps">
+      <div class="step"><div class="num">1</div><h4>Get your link</h4><p class="sm muted" style="margin-top:6px">One slug, three landing pages (owner / accountant / enterprise). Share by text, QR or post.</p></div>
+      <div class="step"><div class="num">2</div><h4>Introduce, don't sell</h4><p class="sm muted" style="margin-top:6px">We send the welcome, the trial reminders and the demo invite. Your Sales Center tells you the one thing to do each day.</p></div>
+      <div class="step"><div class="num">3</div><h4>Get paid monthly</h4><p class="sm muted" style="margin-top:6px">Every invoice your referral pays shows in Payouts. ACH on the 1st. Forever.</p></div>
+    </div></div>
+
+  <div class="band sec"><div class="eyebrow">What you earn</div><h2 style="font-size:28px;margin:8px 0 18px">Same share, every plan, every month.</h2>
+    <div class="card" style="padding:0;overflow:hidden"><table class="comm"><tr><th>Referral type</th><th>They pay</th><th>You earn / month</th><th>10 referrals</th></tr>
+      <tr><td>Business · Core</td><td class="mono">$38</td><td class="mono ok">$7.60</td><td class="mono">$76</td></tr>
+      <tr><td>Business · AI Assistant</td><td class="mono">$79</td><td class="mono ok">$15.80</td><td class="mono">$158</td></tr>
+      <tr><td>Business · AI Bookkeeper</td><td class="mono">$99</td><td class="mono ok">$19.80</td><td class="mono">$198</td></tr>
+      <tr><td>Business · Advanced</td><td class="mono">$149</td><td class="mono ok">$29.80</td><td class="mono">$298</td></tr>
+      <tr><td><b>Accounting firm</b> · Practice Partner</td><td class="mono">$349 + $15/client</td><td class="mono ok"><b>$69.80</b> + $3/client</td><td class="mono"><b>$698+</b></td></tr></table></div></div>
+
+  <div class="sec" style="display:grid;grid-template-columns:1fr 1fr;gap:40px">
+    <div><div class="eyebrow">Questions</div><h2 style="font-size:24px;margin:8px 0 14px">Straight answers</h2>
+      <div class="acc"><div class="q">Do I need to be a SmartBooks customer? <span>−</span></div><div class="a">No. Affiliates get a free Sales Center login. If you later want your own books on SmartBooks, "Upgrade" converts your account and keeps your link and earnings.</div></div>
+      <div class="acc"><div class="q">How long does attribution last? <span>+</span></div></div>
+      <div class="acc"><div class="q">When do I get paid? <span>+</span></div></div>
+      <div class="acc"><div class="q">Can I refer my own accountant? <span>+</span></div></div>
+      <div class="acc"><div class="q">What if they cancel? <span>+</span></div></div></div>
+    <div class="card" style="padding:22px"><h3 style="font-size:18px">Get your link</h3><div class="muted sm">60 seconds. We'll email your login + first 3 texts to send.</div><div class="hr"></div>
+      <div class="grid2"><div class="field"><label>First name <b>*</b></label><div class="in"></div></div><div class="field"><label>Last name <b>*</b></label><div class="in"></div></div></div>
+      <div class="field" style="margin-top:12px"><label>Email <b>*</b></label><div class="in"></div></div>
+      <div class="field" style="margin-top:12px"><label>Mobile <span class="muted">(for payout &amp; nudges)</span></label><div class="in"></div></div>
+      <div class="field" style="margin-top:12px"><label>Where will you share? <span class="muted">(optional)</span></label><div class="in">My network · LinkedIn · Newsletter · YouTube · Clients ▾</div></div>
+      <div class="field" style="margin-top:12px"><label>Choose your link</label><div class="in v" style="font-family:'IBM Plex Mono';font-size:13px">app.smartbookssoftware.ai/r/<b>maria-lopez</b></div></div>
+      <a class="btn pri w" style="margin-top:16px;height:48px">Create my affiliate account →</a><div class="muted xs" style="text-align:center;margin-top:10px">By continuing you agree to the <u>affiliate terms</u>. Payouts via Stripe Connect / ACH.</div></div>
+  </div>
+</div>
+
+<div class="phone"><div class="notch"></div><div class="status"><span>9:41</span><span>●●● ᯤ ▮</span></div>
+  <div class="pbody" style="overflow:hidden">
+    <div class="logo" style="font-size:15px"><i style="width:20px;height:20px"></i>SmartBooks</div>
+    <div class="eyebrow">Affiliate program</div>
+    <h1 style="font-size:26px;line-height:1.1;margin-top:-6px">Refer a business once. Get paid every month they stay.</h1>
+    <p class="sm muted">20% of every invoice, recurring, no cap. Paid monthly by ACH.</p>
+    <div class="calc" style="padding:16px">
+      <div class="xs" style="color:#a5b4fc;letter-spacing:.12em;text-transform:uppercase;font-weight:700">Calculator</div>
+      <label style="margin-top:8px">Owners <b>10</b></label><div class="slider" style="margin:10px 0 4px;background:#334155"><i style="width:10%;background:#10b981"></i><b style="left:10%;border-color:#10b981"></b></div>
+      <label style="margin-top:8px">Firms <b>2</b></label><div class="slider" style="margin:10px 0 4px;background:#334155"><i style="width:7%;background:#10b981"></i><b style="left:7%;border-color:#10b981"></b></div>
+      <div class="res" style="margin-top:14px"><div style="padding:10px 12px"><div class="k">Per month</div><div class="v" style="font-size:22px">$337</div></div><div style="padding:10px 12px"><div class="k">Per year</div><div class="v" style="font-size:22px">$4,046</div></div></div>
+    </div>
+    <a class="btn pri w" style="height:48px">Get my link — free</a>
+    <div class="steps" style="grid-template-columns:1fr;gap:8px">
+      <div class="step" style="padding:12px;display:flex;gap:12px;align-items:center"><div class="num" style="margin:0">1</div><div><b class="sm">Get your link</b><div class="xs muted">Owner / accountant / enterprise pages</div></div></div>
+      <div class="step" style="padding:12px;display:flex;gap:12px;align-items:center"><div class="num" style="margin:0">2</div><div><b class="sm">Introduce, don't sell</b><div class="xs muted">We send the reminders; you get a daily to-do</div></div></div>
+      <div class="step" style="padding:12px;display:flex;gap:12px;align-items:center"><div class="num" style="margin:0">3</div><div><b class="sm">Get paid monthly</b><div class="xs muted">ACH on the 1st, forever</div></div></div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="label">The calculator doubles as the <b>objection-killer for recruiting</b>: 10 owners + 2 firms ≈ $337/mo with zero servicing. Signup form asks "Where will you share?" so the activation drip can tailor the first 3 suggested texts.</div>
+<script>
+const PL=[['Core',38],['AI Assistant',79],['AI Bookkeeper',99],['Advanced',149]];
+function calc(){const o=+document.getElementById('o').value,p=+document.getElementById('p').value,pl=PL[+document.getElementById('pl').value];
+document.getElementById('ov').textContent=o;document.getElementById('pv').textContent=p;document.getElementById('plv').textContent=pl[0]+' · $'+pl[1];
+const m=o*pl[1]*.2+p*349*.2;document.getElementById('m').textContent='$'+Math.round(m).toLocaleString();document.getElementById('y').textContent='$'+Math.round(m*12).toLocaleString();}
+calc();
+</script>
+</body></html>
