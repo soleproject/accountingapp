@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight, ChevronDown, Lock, Clock,
+  ChevronLeft, ChevronRight, ChevronDown, Lock, Clock, MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -196,8 +196,11 @@ export default function CockpitTodayV7() {
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [clientsOpen, setClientsOpen] = useState(false);
-  const [inProgressOpen, setInProgressOpen] = useState(false);
-  const [inProgressTab, setInProgressTab] = useState("messages");
+  // Which work panel is open: null | "inprogress" | "messages" | "assistant"
+  const [panel, setPanel] = useState(null);
+  const inProgressOpen = panel !== null;
+  const setInProgressOpen = (v) => setPanel(typeof v === "function" ? (v(panel !== null) ? "inprogress" : null) : (v ? "inprogress" : null));
+  const togglePanel = (k) => { setPanel(p => (p === k ? null : k)); setClientsOpen(false); setClosingsOpen(false); };
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
   const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
@@ -226,11 +229,9 @@ export default function CockpitTodayV7() {
   // the tile and inside the tabs always agree.
   const inProgressTotal = useMemo(() => {
     if (!d) return 0;
-    const msgs      = (d.clientMessages || []).length;
     const emailQs   = (d.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
-    const sentPro   = (d.professional || []).length + (d.priorUnclosed || []).length;
-    const cockpit   = (d.assistantItems || []).length;
-    return msgs + emailQs + sentPro + cockpit;
+    const live      = (d.active || []).length;
+    return emailQs + live;
   }, [d]);
   const firstName = (user?.name || user?.email || "there").split(" ")[0].split("@")[0];
 
@@ -300,11 +301,8 @@ export default function CockpitTodayV7() {
                   value={d.counts.questions}
                   tint="emerald"
                   pulse={d.counts.questions > 0}
-                  active={inProgressOpen && inProgressTab === "messages"}
-                  onClick={() => {
-                    if (inProgressOpen && inProgressTab === "messages") { setInProgressOpen(false); return; }
-                    setInProgressTab("messages"); setInProgressOpen(true); setClientsOpen(false); setClosingsOpen(false);
-                  }}
+                  active={panel === "messages"}
+                  onClick={() => togglePanel("messages")}
                 />
                 <ClickableStat
                   testid="v7-stat-closings"
@@ -314,9 +312,18 @@ export default function CockpitTodayV7() {
                   tint="rose"
                   pulse={d.counts.closings > 0}
                   active={closingsOpen}
-                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
+                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); setPanel(null); }}
                 />
-                <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
+                <ClickableStat
+                  testid="v7-stat-assistant"
+                  label="Assistant follow-ups"
+                  sublabel={d.counts.assistant > 0 ? "needs a human · click to see" : "nobody stuck"}
+                  value={d.counts.assistant}
+                  tint="sky"
+                  pulse={d.counts.assistant > 0}
+                  active={panel === "assistant"}
+                  onClick={() => togglePanel("assistant")}
+                />
                 <ClickableStat
                   testid="v7-stat-in-progress"
                   label="In Progress"
@@ -324,9 +331,8 @@ export default function CockpitTodayV7() {
                   value={inProgressTotal}
                   tint="indigo"
                   pulse={inProgressTotal > 0}
-                  active={inProgressOpen}
-                  onClick={() => { setInProgressOpen(o => !o); setClientsOpen(false); setClosingsOpen(false); }}
-                  key="ip-tile"
+                  active={panel === "inprogress"}
+                  onClick={() => togglePanel("inprogress")}
                 />
                 <ClickableStat
                   testid="v7-stat-clients"
@@ -335,7 +341,7 @@ export default function CockpitTodayV7() {
                   value={d.counts.clients}
                   tint="slate"
                   active={clientsOpen}
-                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
+                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); setPanel(null); }}
                 />
                 <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
               </div>
@@ -366,13 +372,14 @@ export default function CockpitTodayV7() {
                 onNav={navigate}
                 onClose={() => setClientsOpen(false)}
               />
-            ) : inProgressOpen ? (
+            ) : panel ? (
               <InProgressPanel
+                key={panel}
+                mode={panel}
                 d={d}
                 onNav={navigate}
                 refetch={fetchData}
-                onClose={() => setInProgressOpen(false)}
-                initialTab={inProgressTab}
+                onClose={() => setPanel(null)}
               />
             ) : (
               <>
@@ -1247,13 +1254,20 @@ function KpiTile({ label, value, tint }) {
 //   5. Sent to Professional — matters escalated to the accountant
 //   6. Client Cockpit       — assistant/human follow-up work by client
 const IN_PROGRESS_TABS = [
-  { key: "messages",   label: "Client Messages",      tint: "sky",     icon: "💬" },
   { key: "ai_emails",  label: "AI Email Questions",   tint: "emerald", icon: "✉" },
   { key: "scheduled",  label: "Scheduled QC",         tint: "indigo",  icon: "📅" },
   { key: "autorecon",  label: "Auto Reconciliations", tint: "cyan",    icon: "🔁" },
-  { key: "sent_pro",   label: "Sent to Professional", tint: "rose",    icon: "👤" },
-  { key: "cockpit",    label: "Assistant follow up",  tint: "violet",  icon: "📍" },
 ];
+
+// Standalone work cards that share the In Progress panel chrome.
+const PANEL_MODES = {
+  inprogress: { tab: "ai_emails", title: "In Progress", icon: Clock, tint: "indigo",
+                sub: "Everything the AI has moving right now — emails it's waiting on, scheduled & live check-ins, running recons.", testid: "v7-in-progress-panel" },
+  messages:   { tab: "messages", title: "Client Messages", icon: MessageSquare, tint: "emerald",
+                sub: "Questions your clients sent you — from “Ask my accountant”, a transaction, or a check-in they sent to their bookkeeper.", testid: "v7-client-messages-panel" },
+  assistant:  { tab: "cockpit", title: "Assistant follow up", icon: Sparkles, tint: "sky",
+                sub: "Clients the AI has stopped making progress with and where a human touch is needed.", testid: "v7-assistant-panel" },
+};
 
 // Small "Open QC" affordance rendered at the end of every In Progress
 // row that maps to a client review batch. Opens the client's Quick
@@ -1407,9 +1421,10 @@ function InProgressCompanyFilter({ companies, selected, onChange }) {
   );
 }
 
-function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }) {
-  const [tab, setTab] = useState(initialTab);
-  useEffect(() => { setTab(initialTab); }, [initialTab]);
+function InProgressPanel({ d, onNav, refetch, onClose, mode = "inprogress" }) {
+  const cfg = PANEL_MODES[mode] || PANEL_MODES.inprogress;
+  const [tab, setTab] = useState(cfg.tab);
+  const PanelIcon = cfg.icon;
   const [selectedCos, setSelectedCos] = useState(() => new Set());
   // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
   const [openQc, setOpenQc] = useState(null);
@@ -1495,7 +1510,6 @@ function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }
     const ai_emails = filtered.emailQ
       ? filtered.emailQ.rows.filter(r => r.outcome === "waiting").length
       : filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
-    const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
     const cockpit   = filtered.assistant.length;
     const scheduled = filtered.scheduledQc
       ? (filtered.scheduledQc.scheduled.length + (filtered.scheduledQc.in_progress || []).length
@@ -1506,22 +1520,20 @@ function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }
       ? (filtered.autoRecon.companies || []).reduce(
           (s, c) => s + (c.totals?.waiting || 0) + (c.totals?.ready || 0) + (c.totals?.manual || 0), 0)
       : null;
-    return { messages, ai_emails, scheduled, autorecon, sent_pro, cockpit };
+    return { messages, ai_emails, scheduled, autorecon, cockpit };
   }, [filtered]);
 
   return (
-    <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 p-5"
-         data-testid="v7-in-progress-panel">
+    <div className={`rounded-2xl border-2 p-5 ${cfg.tint === "emerald" ? "border-emerald-200 bg-emerald-50/30" : cfg.tint === "sky" ? "border-sky-200 bg-sky-50/30" : "border-indigo-200 bg-indigo-50/30"}`}
+         data-testid={cfg.testid}>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center">
-            <Clock size={15} />
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${cfg.tint === "emerald" ? "bg-emerald-100 text-emerald-700" : cfg.tint === "sky" ? "bg-sky-100 text-sky-700" : "bg-indigo-100 text-indigo-700"}`}>
+            <PanelIcon size={15} />
           </div>
           <div>
-            <div className="text-sm font-semibold text-slate-900">In Progress</div>
-            <div className="text-[11px] text-slate-500">
-              Everything the firm has moving right now — messages, scheduled touchpoints, running recons and open escalations.
-            </div>
+            <div className="text-sm font-semibold text-slate-900">{cfg.title}</div>
+            <div className="text-[11px] text-slate-500">{cfg.sub}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1551,16 +1563,11 @@ function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }
         </div>
       )}
 
-      {/* Tab strip */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
+      {/* Tab strip (In Progress only — Client Messages / Assistant are single-purpose cards) */}
+      {mode === "inprogress" && <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
         {IN_PROGRESS_TABS.map(t => {
           const on = tab === t.key;
-          const n  = counts[t.key === "sent_pro" ? "sent_pro"
-                     : t.key === "messages"  ? "messages"
-                     : t.key === "ai_emails" ? "ai_emails"
-                     : t.key === "scheduled" ? "scheduled"
-                     : t.key === "autorecon" ? "autorecon"
-                     : "cockpit"];
+          const n  = counts[t.key];
           return (
             <button
               key={t.key}
@@ -1584,7 +1591,7 @@ function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }
             </button>
           );
         })}
-      </div>
+      </div>}
 
       {/* Tab bodies */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
@@ -1606,9 +1613,6 @@ function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }
                                      return { ...q, missed: bump(q.missed), sent_awaiting: bump(q.sent_awaiting) };
                                    })} />}
         {tab === "autorecon" && <InProgressAutoRecon data={filtered.autoRecon} onNav={onNav} />}
-        {tab === "sent_pro"  && <InProgressSentPro professional={filtered.professional}
-                                                   priorUnclosed={filtered.priorUnclosed}
-                                                   onNav={onNav} />}
         {tab === "cockpit"   && <InProgressCockpit items={filtered.assistant} onNav={onNav} />}
         </>)}
       </div>
@@ -2126,63 +2130,6 @@ function InProgressAutoRecon({ data, onNav }) {
           </ul>
         </div>
       ))}
-    </div>
-  );
-}
-
-function _closingBlurb(p) {
-  const n = p.txn_count || 0;
-  const over = p.months_overdue || 0;
-  const age = over <= 0 ? "current month" : over === 1 ? "1 month past due" : `${over} months past due`;
-  return `${p.month || p.period_label || "Prior month"} not closed · ${n} transaction${n === 1 ? "" : "s"} posted · ${age} · AI reviewed, needs your sign-off`;
-}
-
-function _judgmentBlurb(p) {
-  const what = p.title || p.summary || (p.text ? p.text.split(" · ").slice(1).join(" · ") : "") || p.kind || "Needs professional judgment";
-  return p.reason ? `${what} · flagged for ${p.reason}` : what;
-}
-
-function InProgressSentPro({ professional, priorUnclosed, onNav }) {
-  const combined = [
-    ...professional.map(p => ({ ...p, _kind: "pro" })),
-    ...priorUnclosed.map(p => ({ ...p, _kind: "closing" })),
-  ];
-  if (!combined.length) return <_EmptyTab text="Nothing has been escalated to a professional." />;
-  const closings = combined.filter(p => p._kind === "closing").length;
-  return (
-    <div>
-      <p className="text-[11px] text-slate-500 pb-2 border-b border-slate-100" data-testid="v7-ip-pro-intro">
-        Items the AI can't finish on its own: {closings ? `${closings} prior-month close${closings === 1 ? "" : "s"} waiting for a professional sign-off` : ""}
-        {closings && combined.length - closings ? " · " : ""}
-        {combined.length - closings ? `${combined.length - closings} judgment call${combined.length - closings === 1 ? "" : "s"} (unusual amounts, deferred answers, vendor escalations)` : ""}. Click a row to open it.
-      </p>
-      <ul className="divide-y divide-slate-100">
-        {combined.map((p, i) => (
-          <li key={`${p._kind}-${p.id || i}`}
-              onClick={() => p.route && onNav(p.route)}
-              className={`py-3 ${p.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
-              data-testid={`v7-ip-pro-${i}`}>
-            <div className="flex items-start justify-between gap-2 flex-wrap">
-              <div className="min-w-0">
-                <div className="text-[13px] font-medium text-slate-900 truncate">
-                  {p.company_name || p.company || p.title || (p.text ? p.text.split(" · ")[0] : "—")}
-                </div>
-                <div className="text-[11px] text-slate-500">
-                  {p._kind === "closing" ? _closingBlurb(p) : _judgmentBlurb(p)}
-                </div>
-                {p.route && (
-                  <div className="text-[11px] text-indigo-600 mt-0.5">
-                    {p._kind === "closing" ? "Open month-close checklist →" : "Review & decide →"}
-                  </div>
-                )}
-              </div>
-              <div className={`text-[11px] font-medium shrink-0 px-2 py-0.5 rounded-full ${p._kind === "closing" ? "bg-indigo-50 text-indigo-700" : "bg-amber-50 text-amber-700"}`}>
-                {p._kind === "closing" ? "Closing · sign-off" : "Judgment call"}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
