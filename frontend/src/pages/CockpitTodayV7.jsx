@@ -130,7 +130,7 @@ function derive(data) {
   const counts = {
     clients: clients.length,
     resolved: acc.thisWeek.total,
-    questions: acc.thisWeek.questions,
+    questions: clientMessages.length,
     assistant: assistantItems.length,
     professional: professionalTotal,
     closings: priorUnclosedTotal,
@@ -197,6 +197,7 @@ export default function CockpitTodayV7() {
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [clientsOpen, setClientsOpen] = useState(false);
   const [inProgressOpen, setInProgressOpen] = useState(false);
+  const [inProgressTab, setInProgressTab] = useState("messages");
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
   const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
@@ -292,7 +293,19 @@ export default function CockpitTodayV7() {
 
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
+                <ClickableStat
+                  testid="v7-stat-questions"
+                  label="Client questions"
+                  sublabel={d.counts.questions > 0 ? "from clients · click to reply" : "no open questions"}
+                  value={d.counts.questions}
+                  tint="emerald"
+                  pulse={d.counts.questions > 0}
+                  active={inProgressOpen && inProgressTab === "messages"}
+                  onClick={() => {
+                    if (inProgressOpen && inProgressTab === "messages") { setInProgressOpen(false); return; }
+                    setInProgressTab("messages"); setInProgressOpen(true); setClientsOpen(false); setClosingsOpen(false);
+                  }}
+                />
                 <ClickableStat
                   testid="v7-stat-closings"
                   label="Closings"
@@ -313,6 +326,7 @@ export default function CockpitTodayV7() {
                   pulse={inProgressTotal > 0}
                   active={inProgressOpen}
                   onClick={() => { setInProgressOpen(o => !o); setClientsOpen(false); setClosingsOpen(false); }}
+                  key="ip-tile"
                 />
                 <ClickableStat
                   testid="v7-stat-clients"
@@ -358,6 +372,7 @@ export default function CockpitTodayV7() {
                 onNav={navigate}
                 refetch={fetchData}
                 onClose={() => setInProgressOpen(false)}
+                initialTab={inProgressTab}
               />
             ) : (
               <>
@@ -1392,8 +1407,9 @@ function InProgressCompanyFilter({ companies, selected, onChange }) {
   );
 }
 
-function InProgressPanel({ d, onNav, refetch, onClose }) {
-  const [tab, setTab] = useState("messages");
+function InProgressPanel({ d, onNav, refetch, onClose, initialTab = "messages" }) {
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
   const [selectedCos, setSelectedCos] = useState(() => new Set());
   // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
   const [openQc, setOpenQc] = useState(null);
