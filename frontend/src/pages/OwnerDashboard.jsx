@@ -9,6 +9,7 @@ import { BooksCard, ProfitCard, CashCard, AttentionCard, TeamStrip } from "@/com
 import MoneyTab from "@/components/owner/MoneyTab";
 import DocumentsTab from "@/components/owner/DocumentsTab";
 import TeamTab from "@/components/owner/TeamTab";
+import MessagesTab from "@/components/owner/MessagesTab";
 import { MissingReceiptsModal } from "@/components/owner/MissingReceiptsModal";
 import { OverdueInvoicesModal } from "@/components/owner/OverdueInvoicesModal";
 import { StatementUploadModal } from "@/components/owner/StatementUploadModal";
@@ -20,6 +21,7 @@ const TABS = [
   { key: "money", label: "Money", path: "/owner/money" },
   { key: "documents", label: "Documents", path: "/owner/documents" },
   { key: "team", label: "Your team", path: "/owner/team" },
+  { key: "messages", label: "Messages", path: "/owner/messages", needsMessages: true },
 ];
 
 const HEADLINES = {
@@ -27,6 +29,7 @@ const HEADLINES = {
   money: () => ["Know what's coming and going.", "Cash, collections and commitments in one place."],
   documents: () => ["A home for your paperwork.", "Send it once. Your bookkeeping team handles the rest."],
   team: () => ["Your books have a team behind them.", "See what's done, what's next, and where you can help."],
+  messages: () => ["Messages with your accountant.", "Questions you've asked, what they answered, and what's still waiting on you."],
 };
 
 function periodOptions() {
@@ -50,6 +53,11 @@ export default function OwnerDashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const options = useMemo(periodOptions, []);
+  const [msgCount, setMsgCount] = useState(0);
+  useEffect(() => {
+    if (!currentId) return;
+    api.get(`/companies/${currentId}/client-messages`).then(r => setMsgCount((r.data?.messages || []).length)).catch(() => setMsgCount(0));
+  }, [currentId]);
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -90,7 +98,7 @@ export default function OwnerDashboard() {
     <div className="max-w-[1180px] mx-auto px-4 sm:px-6 py-6 sm:py-8" data-testid="owner-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <nav className="flex gap-1 bg-slate-100 p-1 rounded-xl" data-testid="owner-tabs">
-          {TABS.map(t => (
+          {TABS.filter(t => !t.needsMessages || msgCount > 0 || tab === "messages").map(t => (
             <button key={t.key} onClick={() => navigate(t.path)} className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`} data-testid={`owner-tab-${t.key}`}>{t.label}</button>
           ))}
         </nav>
@@ -140,6 +148,7 @@ export default function OwnerDashboard() {
       {tab === "money" && <MoneyTab data={data} fmt={fmt} companyId={currentId} reload={load} />}
       {tab === "documents" && <DocumentsTab data={data} companyId={currentId} reload={load} />}
       {tab === "team" && <TeamTab data={data} />}
+      {tab === "messages" && <MessagesTab companyId={currentId} />}
       {stmtItem && (
         <StatementUploadModal companyId={currentId} item={stmtItem} onClose={() => { setStmtItem(null); load(); }} />
       )}

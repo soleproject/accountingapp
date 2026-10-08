@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { X, Send, Loader2, MessageSquare } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
@@ -12,7 +13,10 @@ function fmtAmt(a) {
   return (n < 0 ? "-" : "") + "$" + Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", compact = false }) {
+export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", compact = false, hideResolve = false, maxReplies = null }) {
+  const replies = m.replies || [];
+  const hidden = maxReplies !== null && replies.length > maxReplies ? replies.length - maxReplies : 0;
+  const shown = hidden ? replies.slice(replies.length - maxReplies) : replies;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const send = async (resolve) => {
@@ -31,7 +35,8 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", comp
         </div>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${m.status === "resolved" ? "bg-emerald-50 text-emerald-700" : m.status === "replied" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"}`}>{m.status}</span>
       </div>
-      {(m.replies || []).map(r => (
+      {hidden > 0 && <div className="mt-2 ml-3 text-[11px] text-slate-400" data-testid={`client-message-hidden-${m.id}`}>… {hidden} earlier repl{hidden === 1 ? "y" : "ies"} — open the thread to see all</div>}
+      {shown.map(r => (
         <div key={r.id} className={`mt-2 ml-3 pl-3 border-l-2 ${r.by_pro ? "border-indigo-200" : "border-slate-200"} text-[12px]`} data-testid={`client-message-reply-${r.id}`}>
           <span className="font-semibold text-slate-700">{r.by_name}</span><span className="text-slate-400"> · {new Date(r.at).toLocaleString()}</span>
           <div className="text-slate-800 whitespace-pre-wrap">{r.text}</div>
@@ -42,7 +47,7 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", comp
           <input value={text} onChange={e => setText(e.target.value)} placeholder={`${replyLabel}…`} className="flex-1 h-9 rounded-lg border border-slate-300 px-3 text-[13px] focus:border-slate-900 outline-none" data-testid={`client-message-reply-input-${m.id}`}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(false); } }} />
           <button onClick={() => send(false)} disabled={busy || !text.trim()} className="h-9 px-3 rounded-lg bg-slate-900 text-white text-xs font-semibold disabled:opacity-50" data-testid={`client-message-reply-send-${m.id}`}>{replyLabel}</button>
-          {replyLabel === "Reply" && <button onClick={() => send(true)} disabled={busy || !text.trim()} className="h-9 px-3 rounded-lg border border-slate-300 text-xs font-semibold disabled:opacity-50" data-testid={`client-message-reply-resolve-${m.id}`}>Reply &amp; resolve</button>}
+          {replyLabel === "Reply" && !hideResolve && <button onClick={() => send(true)} disabled={busy || !text.trim()} className="h-9 px-3 rounded-lg border border-slate-300 text-xs font-semibold disabled:opacity-50" data-testid={`client-message-reply-resolve-${m.id}`}>Reply &amp; resolve</button>}
         </div>
       )}
     </div>
@@ -103,7 +108,8 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
             <div className="text-[11px] font-bold tracking-[.12em] uppercase text-slate-500 mb-1">Your messages</div>
             {!data ? <div className="text-xs text-slate-400 py-3">Loading…</div>
               : data.messages.length === 0 ? <div className="text-xs text-slate-400 py-3">No messages yet.</div>
-              : <div className="divide-y divide-slate-100">{data.messages.map(m => <MessageThread key={m.id} m={m} onReply={reply} canReply={m.status === "replied"} replyLabel="Reply back" compact />)}</div>}
+              : <div className="divide-y divide-slate-100">{data.messages.slice(0, 5).map(m => <MessageThread key={m.id} m={m} onReply={reply} canReply={m.status !== "resolved"} replyLabel="Reply back" compact hideResolve maxReplies={1} />)}
+                  {data.messages.length > 0 && <Link to="/owner/messages" onClick={onClose} className="block text-center text-xs font-medium text-slate-700 underline py-2" data-testid="ask-accountant-see-all">See all messages →</Link>}</div>}
           </div>
         )}
       </div>

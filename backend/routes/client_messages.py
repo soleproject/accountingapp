@@ -120,7 +120,7 @@ async def reply_message(mid: str, inp: ReplyIn, user: dict = Depends(get_current
     await require_company(user, msg["company_id"])
     is_pro = user.get("role") in ("pro", "superadmin", "admin", "partner", "firm_staff")
     reply = {"id": str(uuid.uuid4()), "by": user["id"], "by_name": user.get("name") or user.get("email"), "by_pro": is_pro, "text": inp.text.strip(), "at": _now()}
-    status = "resolved" if inp.resolve else ("replied" if is_pro else "open")
+    status = "resolved" if (inp.resolve and not is_pro) else ("replied" if is_pro else "open")
     await db.client_messages.update_one({"id": mid}, {"$push": {"replies": reply}, "$set": {"status": status, "updated_at": _now()}})
     if is_pro and msg.get("from_email"):
         try:
@@ -149,5 +149,7 @@ async def set_status(mid: str, inp: StatusIn, user: dict = Depends(get_current_u
     if not msg:
         raise HTTPException(404, "Message not found")
     await require_company(user, msg["company_id"])
+    if inp.status == "resolved" and user.get("role") in ("pro", "superadmin", "admin", "partner", "firm_staff"):
+        raise HTTPException(403, "Only the client marks a thread resolved")
     await db.client_messages.update_one({"id": mid}, {"$set": {"status": inp.status, "updated_at": _now()}})
     return {"ok": True}
