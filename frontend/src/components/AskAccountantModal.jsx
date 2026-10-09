@@ -182,7 +182,6 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
     } catch (e) { toast.error(e?.response?.data?.detail || "Couldn't send"); }
     finally { setBusy(false); }
   };
-  const reply = async (m, text, _resolve, attachments = []) => { await api.post(`/client-messages/${m.id}/reply`, { text, attachments }); load(); };
 
   return (
     <div className="fixed inset-0 z-[1200] bg-slate-900/50 flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose} data-testid="ask-accountant-modal">
@@ -213,13 +212,7 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
           </button>
         </div>
         {!txn && (
-          <div className="mt-4 border-t border-slate-200 pt-3 overflow-auto min-h-0" data-testid="ask-accountant-history">
-            <div className="text-[11px] font-bold tracking-[.12em] uppercase text-slate-500 mb-1">Your messages</div>
-            {!data ? <div className="text-xs text-slate-400 py-3">Loading…</div>
-              : data.messages.length === 0 ? <div className="text-xs text-slate-400 py-3">No messages yet.</div>
-              : <div className="divide-y divide-slate-100">{data.messages.slice(0, 5).map(m => <MessageThread key={m.id} m={m} onReply={reply} canReply={m.status !== "resolved"} replyLabel="Reply back" compact hideResolve maxReplies={1} onChanged={load} />)}
-                  {data.messages.length > 0 && <Link to="/owner/messages" onClick={onClose} className="block text-center text-xs font-medium text-slate-700 underline py-2" data-testid="ask-accountant-see-all">See all messages →</Link>}</div>}
-          </div>
+          <Link to="/owner/messages" onClick={onClose} className="mt-3 block text-center text-xs font-medium text-slate-600 hover:text-slate-900 underline" data-testid="ask-accountant-see-all">See all my messages →</Link>
         )}
       </div>
     </div>
