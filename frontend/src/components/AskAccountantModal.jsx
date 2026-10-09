@@ -37,7 +37,7 @@ function InlineEditor({ initial, onSave, onCancel, testid }) {
   );
 }
 
-export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hideResolve = false, hideSubject = false, maxReplies = null, onChanged }) {
+export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hideResolve = false, hideSubject = false, maxReplies = null, onChanged, quickReplies = null }) {
   const { user } = useAuth();
   const replies = m.replies || [];
   const hidden = maxReplies !== null && replies.length > maxReplies ? replies.length - maxReplies : 0;
@@ -45,10 +45,11 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null); // "body" | reply id
-  const send = async (resolve) => {
-    if (!text.trim()) return;
+  const send = async (resolve, override) => {
+    const t = (override ?? text).trim();
+    if (!t) return;
     setBusy(true);
-    try { await onReply(m, text.trim(), resolve); setText(""); } finally { setBusy(false); }
+    try { await onReply(m, t, resolve); setText(""); } finally { setBusy(false); }
   };
   const run = async (fn, ok) => {
     try { await fn(); toast.success(ok); setEditing(null); onChanged?.(); }
@@ -79,7 +80,17 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
         ))}
       </div>
       {canReply && m.status !== "resolved" && (
-        <div className="mt-3 flex items-center gap-2">
+        <>
+          {quickReplies?.length > 0 && (
+            <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1 -mb-1 [scrollbar-width:none]" data-testid={`client-message-quick-replies-${m.id}`}>
+              {quickReplies.map((qr, i) => (
+                <button key={qr} onClick={() => send(false, qr)} disabled={busy}
+                  className="shrink-0 h-7 px-3 rounded-full border border-sky-200 bg-white text-[11px] font-medium text-sky-800 hover:bg-sky-50 hover:border-sky-300 disabled:opacity-50 transition-colors whitespace-nowrap"
+                  data-testid={`client-message-quick-reply-${m.id}-${i}`}>{qr}</button>
+              ))}
+            </div>
+          )}
+        <div className="mt-2 flex items-center gap-2">
           <input value={text} onChange={e => setText(e.target.value)} placeholder="Type a message…" className="flex-1 h-10 rounded-full border border-slate-300 bg-white px-4 text-[13px] focus:border-sky-500 focus:ring-2 focus:ring-sky-100 outline-none" data-testid={`client-message-reply-input-${m.id}`}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(false); } }} />
           <button onClick={() => send(false)} disabled={busy || !text.trim()} title={replyLabel} className="h-10 w-10 shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center disabled:opacity-40 transition-colors" data-testid={`client-message-reply-send-${m.id}`}>
@@ -87,6 +98,7 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
           </button>
           {replyLabel === "Reply" && !hideResolve && <button onClick={() => send(true)} disabled={busy || !text.trim()} className="h-10 px-3 rounded-full border border-slate-300 text-xs font-semibold disabled:opacity-50 whitespace-nowrap" data-testid={`client-message-reply-resolve-${m.id}`}>Reply &amp; resolve</button>}
         </div>
+        </>
       )}
     </div>
   );

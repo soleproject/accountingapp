@@ -53,6 +53,7 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
         "from_user_id": (from_user or {}).get("id"), "from_name": from_name or (from_user or {}).get("name"),
         "from_email": from_email or (from_user or {}).get("email"),
         "txn": txn, "item": item, "status": "open", "replies": [], "created_at": _now(), "updated_at": _now(),
+        "read_by": ({(from_user or {}).get("id"): _now()} if (from_user or {}).get("id") else {}),
     }
     await db.client_messages.insert_one(doc)
     doc.pop("_id", None)
@@ -123,7 +124,7 @@ async def reply_message(mid: str, inp: ReplyIn, user: dict = Depends(get_current
     is_pro = user.get("role") in ("pro", "superadmin", "admin", "partner", "firm_staff")
     reply = {"id": str(uuid.uuid4()), "by": user["id"], "by_name": user.get("name") or user.get("email"), "by_pro": is_pro, "text": inp.text.strip(), "at": _now()}
     status = "resolved" if (inp.resolve and not is_pro) else ("replied" if is_pro else "open")
-    await db.client_messages.update_one({"id": mid}, {"$push": {"replies": reply}, "$set": {"status": status, "updated_at": _now()}})
+    await db.client_messages.update_one({"id": mid}, {"$push": {"replies": reply}, "$set": {"status": status, "updated_at": _now(), f"read_by.{user['id']}": _now()}})
     if is_pro and msg.get("from_email"):
         try:
             from email_dispatcher import dispatch, public_base_url
@@ -137,6 +138,16 @@ async def reply_message(mid: str, inp: ReplyIn, user: dict = Depends(get_current
         except Exception:
             log.exception("client_message reply notify failed")
     return {"ok": True, "reply": reply, "status": status}
+
+
+@router.post("/client-messages/{mid}/read")
+async def mark_read(mid: str, user: dict = Depends(get_current_user)):
+    msg = await db.client_messages.find_one({"id": mid}, {"_id": 0, "company_id": 1})
+    if not msg:
+        raise HTTPException(404, "Message not found")
+    await require_company(user, msg["company_id"])
+    await db.client_messages.update_one({"id": mid}, {"$set": {f"read_by.{user['id']}": _now()}})
+    return {"ok": True}
 
 
 class StatusIn(BaseModel):
