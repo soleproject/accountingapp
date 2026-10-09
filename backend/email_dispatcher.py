@@ -73,6 +73,8 @@ DEFAULT_PREFS = {
     "admin_lead_notice":        True,   # Pro/enterprise lead → superadmins / firm owner
     "prospect_drip":            True,   # Loop A nurture
     "affiliate_drip":           True,   # Loop B activation
+    "client_message":           True,   # client → pro "Ask my accountant"
+    "client_message_reply":     True,   # pro reply → client
 }
 
 

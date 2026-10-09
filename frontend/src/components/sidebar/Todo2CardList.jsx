@@ -165,6 +165,7 @@ const _buildOpenHref = (href, returnTo, returnLabel, extraParams = {}) => {
 // just to jump into Invoices/Bills/etc. while triaging tasks.
 const QUICK_LINKS = [
   { to: "/owner",                 label: "My business",  icon: Compass },
+  { to: "/portfolio",             label: "All businesses", icon: Building2, multiOnly: true },
   { to: "/dashboard",             label: "Dashboard",    icon: LayoutDashboard },
   { to: "/invoices",              label: "Invoices",     icon: FileText },
   { to: "/bills",                 label: "Bills",        icon: Receipt },
@@ -249,7 +250,7 @@ const ACCOUNTING_LINKS = [
 ];
 
 export default function Todo2CardList({ onExit, collapsed = false, returnPath = "/accounting/todo", variant = "both" }) {
-  const { currentId, current } = useCompany();
+  const { currentId, current, companies } = useCompany();
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -593,7 +594,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
             )}
             {!collapsedClient && (
               <>
-                {QUICK_LINKS.map((l) => {
+                {QUICK_LINKS.filter((l) => !l.multiOnly || (companies?.length || 0) > 1).map((l) => {
                   const active = location.pathname === l.to;
                   const Icon = l.icon;
                   return (
@@ -604,7 +605,7 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
                       className={`w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-left transition-colors ${
                         active ? "bg-slate-100 text-slate-900 font-medium" : "text-slate-700 hover:bg-slate-100"
                       }`}
-                      data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase()}`}
+                      data-testid={`sidebar-todo2-quick-link-${l.label.toLowerCase().replace(/\s+/g, "-")}`}
                     >
                       <Icon size={16} className="text-slate-500" strokeWidth={2} />
                       <span className="truncate">{l.label}</span>

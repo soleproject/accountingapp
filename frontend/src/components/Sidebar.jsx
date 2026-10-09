@@ -327,6 +327,7 @@ const ACCOUNTING_TOP = { to: "/dashboard", label: "Dashboard",
 // Owner-facing "Your business, in view" dashboard. Clients land here;
 // pros see it too so they can preview exactly what their client sees.
 const ACCOUNTING_OWNER = { to: "/owner", label: "My business", icon: Compass };
+const ACCOUNTING_PORTFOLIO = { to: "/portfolio", label: "All businesses", icon: Building2, testid: "sidebar-all-businesses" };
 // "To Do" sits directly below Dashboard in every nav style. The
 // Product Accordion has this hard-coded in `renderKids`; the other
 // three styles (rail, modules-menu, modules-dropdown) reference this
@@ -597,6 +598,7 @@ function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTod
         <>
           <Item item={{ to: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true }} />
           <Item item={ACCOUNTING_OWNER} />
+          {(companies?.length || 0) > 1 && <Item item={ACCOUNTING_PORTFOLIO} />}
           <Item item={{ to: "/accounting/todo", label: "Cockpit", icon: CheckSquare, exact: true }} />
           {/* To Do 2 — same task list, rendered as sidebar cards for
               rapid triage. Doesn't route (uses local sidebar state)
@@ -926,7 +928,7 @@ function UnderwriterSidebar({ user }) {
 
 export default function Sidebar({ collapsed, onToggle }) {
   const { branding } = useBranding();
-  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled, currentId, current } = useCompany();
+  const { isAdvancedMode, classesEnabled, projectsEnabled, budgetsEnabled, advancedPayrollEnabled, currentId, current, companies } = useCompany();
   const labV3Count = useLabV3ReviewCount(currentId);
   const { can: canFeature, openUpgrade } = useEntitlements();
   const isLabV3 = current?.categorization_mode === "lab_v3";
@@ -1568,6 +1570,7 @@ export default function Sidebar({ collapsed, onToggle }) {
             {navStyle === "dropdown" && <ModulesDropdown activeKey={product} collapsed={showCollapsed} user={user} />}
             <Item item={ACCOUNTING_TOP} />
             <Item item={ACCOUNTING_OWNER} />
+            {(companies?.length || 0) > 1 && <Item item={ACCOUNTING_PORTFOLIO} />}
             <Item item={ACCOUNTING_TODO} />
           </>
         ) : product === "home" ? (

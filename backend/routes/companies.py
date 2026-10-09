@@ -86,6 +86,7 @@ async def list_companies(user: dict = Depends(get_current_user)):
     # Batch-fetch owner users so we don't make one query per company.
     owner_ids = list({d.get("owner_user_id") for d in docs if d.get("owner_user_id")})
     owners = {u["id"]: u for u in await db.users.find({"id": {"$in": owner_ids}}).to_list(1000)}
+    pro_cids = {m["company_id"] async for m in db.memberships.find({"company_id": {"$in": ids}, "role": "pro"}, {"_id": 0, "company_id": 1})}
     enriched = []
     from crypto_service import decrypt_doc
     for d in docs:
@@ -93,6 +94,7 @@ async def list_companies(user: dict = Depends(get_current_user)):
         owner = owners.get(d.get("owner_user_id"))
         row["owner_name"] = (owner or {}).get("name")
         row["owner_email"] = (owner or {}).get("email")
+        row["has_pro"] = bool(d.get("primary_pro_id") or d.get("pro_user_id") or d["id"] in pro_cids)
         enriched.append(row)
     return {"companies": enriched}
 

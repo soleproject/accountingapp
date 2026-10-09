@@ -566,6 +566,17 @@ async def post_defer(token: str, item_id: str, body: DeferRequest):
          },
          "$inc": {"defer_count": 1}},
     )
+    try:
+        from routes.client_messages import create_message
+        await create_message(
+            company_id=batch["company_id"], kind="checkin_deferred",
+            body=(body.note or "").strip() or "Not sure about this one — sending it to you.",
+            from_name=batch.get("client_name"), from_email=batch.get("client_email"),
+            txn_id=(item.get("context") or {}).get("txn_id") or item.get("txn_id"),
+            item={"item_id": item_id, "kind": item.get("kind"), "prompt": item.get("prompt"), "batch_id": batch["id"]},
+        )
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("defer → client_message failed")
     return {"ok": True, **result}
 
 

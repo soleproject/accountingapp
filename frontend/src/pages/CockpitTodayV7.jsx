@@ -15,13 +15,14 @@ import { useAuth } from "@/lib/auth";
 import {
   Loader2, CheckCircle2, ArrowUpRight, ArrowDownRight,
   Sparkles, UserRound, Scale, Users, AlertTriangle, MoreVertical,
-  ChevronLeft, ChevronRight, ChevronDown, Lock, Clock,
+  ChevronLeft, ChevronRight, ChevronDown, Lock, Clock, MessageSquare,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 import { deriveAssistantItems } from "@/lib/cockpitAssistant";
+import { ClientMessagesCard } from "@/components/ClientMessagesCard";
 import { NewClientModal } from "@/pages/ProClients";
 import PaymentsAppResumeCard from "@/components/PaymentsAppResumeCard";
 import { useCompany } from "@/lib/company";
@@ -66,6 +67,7 @@ function derive(data) {
   const clients = data.books.clients || [];
   const scheduledWeek = data.conversations.scheduled_today || [];
   const active = data.conversations.in_progress || [];
+  const clientMessages = data.conversations.client_messages || [];
   const waiting = data.conversations.waiting_on_client || [];
   const activity = data.activity;
 
@@ -128,7 +130,7 @@ function derive(data) {
   const counts = {
     clients: clients.length,
     resolved: acc.thisWeek.total,
-    questions: acc.thisWeek.questions,
+    questions: clientMessages.filter(m => m.status !== "resolved" && !((m.replies || []).length && m.replies[m.replies.length - 1].by_pro)).length,
     assistant: assistantItems.length,
     professional: professionalTotal,
     closings: priorUnclosedTotal,
@@ -153,7 +155,7 @@ function derive(data) {
   }
 
   return {
-    counts, brief, active, waiting, waitingCount, scheduleByDay,
+    counts, brief, active, clientMessages, waiting, waitingCount, scheduleByDay,
     tabs: { client: waiting.length, vendor: 4, docs: 3 }, // heuristic
     accomplishments: acc,
     assistantItems,
@@ -194,7 +196,11 @@ export default function CockpitTodayV7() {
   const [waitingTab, setWaitingTab] = useState("client");
   const [closingsOpen, setClosingsOpen] = useState(false);
   const [clientsOpen, setClientsOpen] = useState(false);
-  const [inProgressOpen, setInProgressOpen] = useState(false);
+  // Which work panel is open: null | "inprogress" | "messages" | "assistant"
+  const [panel, setPanel] = useState(null);
+  const inProgressOpen = panel !== null;
+  const setInProgressOpen = (v) => setPanel(typeof v === "function" ? (v(panel !== null) ? "inprogress" : null) : (v ? "inprogress" : null));
+  const togglePanel = (k) => { setPanel(p => (p === k ? null : k)); setClientsOpen(false); setClosingsOpen(false); };
   const [newClientOpen, setNewClientOpen] = useState(false);
   const { user } = useAuth();
   const { refresh: refreshCompanies, switchCompany, currentId } = useCompany();
@@ -223,11 +229,9 @@ export default function CockpitTodayV7() {
   // the tile and inside the tabs always agree.
   const inProgressTotal = useMemo(() => {
     if (!d) return 0;
-    const msgs      = (d.active || []).length;
     const emailQs   = (d.waiting || []).reduce((s, w) => s + (w.count || 0), 0);
-    const sentPro   = (d.professional || []).length + (d.priorUnclosed || []).length;
-    const cockpit   = (d.assistantItems || []).length;
-    return msgs + emailQs + sentPro + cockpit;
+    const live      = (d.active || []).length;
+    return emailQs + live;
   }, [d]);
   const firstName = (user?.name || user?.email || "there").split(" ")[0].split("@")[0];
 
@@ -291,26 +295,14 @@ export default function CockpitTodayV7() {
               {/* Big stats row */}
               <div className="mt-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                 <ClickableStat
-                  testid="v7-stat-clients"
-                  label="Clients managed"
-                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
-                  value={d.counts.clients}
-                  tint="slate"
-                  active={clientsOpen}
-                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); }}
-                />
-                <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
-                <BigStat label="Client questions" value={d.counts.questions} tint="emerald" />
-                <BigStat label="Assistant follow-ups" value={d.counts.assistant} tint="sky" pulse={d.counts.assistant > 0} />
-                <ClickableStat
-                  testid="v7-stat-in-progress"
-                  label="In Progress"
-                  sublabel={inProgressTotal > 0 ? "click to open live work" : "nothing moving right now"}
-                  value={inProgressTotal}
-                  tint="indigo"
-                  pulse={inProgressTotal > 0}
-                  active={inProgressOpen}
-                  onClick={() => { setInProgressOpen(o => !o); setClientsOpen(false); setClosingsOpen(false); }}
+                  testid="v7-stat-questions"
+                  label="Client questions"
+                  sublabel={d.counts.questions > 0 ? "from clients · click to reply" : "no open questions"}
+                  value={d.counts.questions}
+                  tint="emerald"
+                  pulse={d.counts.questions > 0}
+                  active={panel === "messages"}
+                  onClick={() => togglePanel("messages")}
                 />
                 <ClickableStat
                   testid="v7-stat-closings"
@@ -320,8 +312,38 @@ export default function CockpitTodayV7() {
                   tint="rose"
                   pulse={d.counts.closings > 0}
                   active={closingsOpen}
-                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); }}
+                  onClick={() => { setClosingsOpen(o => !o); setClientsOpen(false); setPanel(null); }}
                 />
+                <ClickableStat
+                  testid="v7-stat-assistant"
+                  label="Assistant follow-ups"
+                  sublabel={d.counts.assistant > 0 ? "needs a human · click to see" : "nobody stuck"}
+                  value={d.counts.assistant}
+                  tint="sky"
+                  pulse={d.counts.assistant > 0}
+                  active={panel === "assistant"}
+                  onClick={() => togglePanel("assistant")}
+                />
+                <ClickableStat
+                  testid="v7-stat-in-progress"
+                  label="In Progress"
+                  sublabel={inProgressTotal > 0 ? "click to open live work" : "nothing moving right now"}
+                  value={inProgressTotal}
+                  tint="indigo"
+                  pulse={inProgressTotal > 0}
+                  active={panel === "inprogress"}
+                  onClick={() => togglePanel("inprogress")}
+                />
+                <ClickableStat
+                  testid="v7-stat-clients"
+                  label="Clients managed"
+                  sublabel={d.counts.clients > 0 ? "click to review roster" : "no clients yet"}
+                  value={d.counts.clients}
+                  tint="slate"
+                  active={clientsOpen}
+                  onClick={() => { setClientsOpen(o => !o); setClosingsOpen(false); setPanel(null); }}
+                />
+                <BigStat label="Items resolved" value={d.counts.resolved.toLocaleString()} tint="emerald" />
               </div>
 
               {/* Brief paragraph */}
@@ -350,12 +372,14 @@ export default function CockpitTodayV7() {
                 onNav={navigate}
                 onClose={() => setClientsOpen(false)}
               />
-            ) : inProgressOpen ? (
+            ) : panel ? (
               <InProgressPanel
+                key={panel}
+                mode={panel}
                 d={d}
                 onNav={navigate}
                 refetch={fetchData}
-                onClose={() => setInProgressOpen(false)}
+                onClose={() => setPanel(null)}
               />
             ) : (
               <>
@@ -1230,13 +1254,20 @@ function KpiTile({ label, value, tint }) {
 //   5. Sent to Professional — matters escalated to the accountant
 //   6. Client Cockpit       — assistant/human follow-up work by client
 const IN_PROGRESS_TABS = [
-  { key: "messages",   label: "Client Messages",      tint: "sky",     icon: "💬" },
   { key: "ai_emails",  label: "AI Email Questions",   tint: "emerald", icon: "✉" },
   { key: "scheduled",  label: "Scheduled QC",         tint: "indigo",  icon: "📅" },
   { key: "autorecon",  label: "Auto Reconciliations", tint: "cyan",    icon: "🔁" },
-  { key: "sent_pro",   label: "Sent to Professional", tint: "rose",    icon: "👤" },
-  { key: "cockpit",    label: "Client Cockpit",       tint: "violet",  icon: "📍" },
 ];
+
+// Standalone work cards that share the In Progress panel chrome.
+const PANEL_MODES = {
+  inprogress: { tab: "ai_emails", title: "In Progress", icon: Clock, tint: "indigo",
+                sub: "Everything the AI has moving right now — emails it's waiting on, scheduled & live check-ins, running recons.", testid: "v7-in-progress-panel" },
+  messages:   { tab: "messages", title: "Client Messages", icon: MessageSquare, tint: "emerald",
+                sub: "Questions your clients sent you — from “Ask my accountant”, a transaction, or a check-in they sent to their bookkeeper.", testid: "v7-client-messages-panel" },
+  assistant:  { tab: "cockpit", title: "Assistant follow up", icon: Sparkles, tint: "sky",
+                sub: "Clients the AI has stopped making progress with and where a human touch is needed.", testid: "v7-assistant-panel" },
+};
 
 // Small "Open QC" affordance rendered at the end of every In Progress
 // row that maps to a client review batch. Opens the client's Quick
@@ -1390,8 +1421,10 @@ function InProgressCompanyFilter({ companies, selected, onChange }) {
   );
 }
 
-function InProgressPanel({ d, onNav, refetch, onClose }) {
-  const [tab, setTab] = useState("messages");
+function InProgressPanel({ d, onNav, refetch, onClose, mode = "inprogress" }) {
+  const cfg = PANEL_MODES[mode] || PANEL_MODES.inprogress;
+  const [tab, setTab] = useState(cfg.tab);
+  const PanelIcon = cfg.icon;
   const [selectedCos, setSelectedCos] = useState(() => new Set());
   // Inline Quick Check-in viewer. { token, company_name, client_email, meta }
   const [openQc, setOpenQc] = useState(null);
@@ -1453,6 +1486,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
 
   const filtered = useMemo(() => ({
     active:        byCo(d?.active),
+    clientMessages: byCo(d?.clientMessages),
     waiting:       byCo(d?.waiting),
     professional:  byCo(d?.professional),
     priorUnclosed: byCo(d?.priorUnclosed),
@@ -1472,11 +1506,10 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
   }), [d, scheduledQc, autoRecon, emailQ, selectedCos, nameById]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const counts = useMemo(() => {
-    const messages  = filtered.active.length;
+    const messages  = filtered.clientMessages.length;
     const ai_emails = filtered.emailQ
       ? filtered.emailQ.rows.filter(r => r.outcome === "waiting").length
       : filtered.waiting.reduce((s, w) => s + (w.count || 0), 0);
-    const sent_pro  = filtered.professional.length + filtered.priorUnclosed.length;
     const cockpit   = filtered.assistant.length;
     const scheduled = filtered.scheduledQc
       ? (filtered.scheduledQc.scheduled.length + (filtered.scheduledQc.in_progress || []).length
@@ -1487,22 +1520,20 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
       ? (filtered.autoRecon.companies || []).reduce(
           (s, c) => s + (c.totals?.waiting || 0) + (c.totals?.ready || 0) + (c.totals?.manual || 0), 0)
       : null;
-    return { messages, ai_emails, scheduled, autorecon, sent_pro, cockpit };
+    return { messages, ai_emails, scheduled, autorecon, cockpit };
   }, [filtered]);
 
   return (
-    <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 p-5"
-         data-testid="v7-in-progress-panel">
+    <div className={`rounded-2xl border-2 p-5 ${cfg.tint === "emerald" ? "border-emerald-200 bg-emerald-50/30" : cfg.tint === "sky" ? "border-sky-200 bg-sky-50/30" : "border-indigo-200 bg-indigo-50/30"}`}
+         data-testid={cfg.testid}>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center">
-            <Clock size={15} />
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${cfg.tint === "emerald" ? "bg-emerald-100 text-emerald-700" : cfg.tint === "sky" ? "bg-sky-100 text-sky-700" : "bg-indigo-100 text-indigo-700"}`}>
+            <PanelIcon size={15} />
           </div>
           <div>
-            <div className="text-sm font-semibold text-slate-900">In Progress</div>
-            <div className="text-[11px] text-slate-500">
-              Everything the firm has moving right now — messages, scheduled touchpoints, running recons and open escalations.
-            </div>
+            <div className="text-sm font-semibold text-slate-900">{cfg.title}</div>
+            <div className="text-[11px] text-slate-500">{cfg.sub}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1532,16 +1563,11 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
         </div>
       )}
 
-      {/* Tab strip */}
-      <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
+      {/* Tab strip (In Progress only — Client Messages / Assistant are single-purpose cards) */}
+      {mode === "inprogress" && <div className="flex flex-wrap gap-1 border-b border-slate-200 mb-4">
         {IN_PROGRESS_TABS.map(t => {
           const on = tab === t.key;
-          const n  = counts[t.key === "sent_pro" ? "sent_pro"
-                     : t.key === "messages"  ? "messages"
-                     : t.key === "ai_emails" ? "ai_emails"
-                     : t.key === "scheduled" ? "scheduled"
-                     : t.key === "autorecon" ? "autorecon"
-                     : "cockpit"];
+          const n  = counts[t.key];
           return (
             <button
               key={t.key}
@@ -1565,7 +1591,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
             </button>
           );
         })}
-      </div>
+      </div>}
 
       {/* Tab bodies */}
       <div className="bg-white rounded-lg border border-slate-200 p-4 min-h-[220px]">
@@ -1576,7 +1602,7 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
             backLabel={IN_PROGRESS_TABS.find(t => t.key === tab)?.label || "Back"}
           />
         ) : (<>
-        {tab === "messages"  && <InProgressMessages items={filtered.active} onNav={onNav} onOpenQc={setOpenQc} />}
+        {tab === "messages"  && <InProgressClientMessages items={filtered.clientMessages} onNav={onNav} refetch={refetch} />}
         {tab === "ai_emails" && <InProgressAiEmails data={filtered.emailQ} onOpenQc={setOpenQc} pill={emailPill} setPill={setEmailPill} />}
         {tab === "scheduled" && <InProgressScheduledQc data={filtered.scheduledQc} onNav={onNav} onOpenQc={setOpenQc}
                                    pill={qcPill} setPill={setQcPill}
@@ -1587,9 +1613,6 @@ function InProgressPanel({ d, onNav, refetch, onClose }) {
                                      return { ...q, missed: bump(q.missed), sent_awaiting: bump(q.sent_awaiting) };
                                    })} />}
         {tab === "autorecon" && <InProgressAutoRecon data={filtered.autoRecon} onNav={onNav} />}
-        {tab === "sent_pro"  && <InProgressSentPro professional={filtered.professional}
-                                                   priorUnclosed={filtered.priorUnclosed}
-                                                   onNav={onNav} />}
         {tab === "cockpit"   && <InProgressCockpit items={filtered.assistant} onNav={onNav} />}
         </>)}
       </div>
@@ -1603,569 +1626,64 @@ function _EmptyTab({ text }) {
   );
 }
 
-function InProgressMessages({ items, onNav, onOpenQc }) {
-  if (!items.length) return <_EmptyTab text="No live conversations right now." />;
-  return (
-    <ul className="divide-y divide-slate-100">
-      {items.map(b => (
-        <li key={b.id}
-            onClick={() => onNav(`/client-review/${b.client_token || b.id}?via=pro`)}
-            className="py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded"
-            data-testid={`v7-ip-msg-${b.id}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {b.company_name || b.company || "—"}
-              </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {b.client_email || "client"} · {b.item_count || (b.items?.length) || 0} question{(b.item_count === 1) ? "" : "s"}
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="text-[11px] text-emerald-700 font-medium">
-                {b.answered || 0}/{b.item_count || b.total || (b.items?.length) || 0} answered
-              </div>
-              <OpenQcButton token={b.client_token} testid={`v7-ip-msg-open-${b.id}`}
-                onOpen={() => onOpenQc({ token: b.client_token, company_name: b.company_name || b.company,
-                                         client_email: b.client_email, meta: `${b.answered || 0}/${b.total || 0} answered` })} />
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function _fmtDate(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch { return "—"; }
-}
-function _fmtRelDays(iso) {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso).getTime();
-    const diff = Math.round((Date.now() - d) / 86400000);
-    if (diff === 0) return "today";
-    if (diff === 1) return "yesterday";
-    if (diff < 7)   return `${diff}d ago`;
-    if (diff < 30)  return `${Math.round(diff / 7)}w ago`;
-    return `${Math.round(diff / 30)}mo ago`;
-  } catch { return "—"; }
-}
-
-const EMAIL_Q_PILLS = [
-  { key: "quick_ones",    label: "Quick Ones" },
-  { key: "setup_invites", label: "Set-up & Invites" },
-  { key: "qc_emails",     label: "QC Emails" },
-];
-
-const EMAIL_KIND_LABEL = {
-  ai_ask_client: "AI quick one", ask_client: "Pro question", client_review_batch: "Quick Check-in",
-  client_welcome: "Set password & activate", client_welcome_returning: "Welcome back",
-  portal_invite: "Portal invite", team_invite: "Team invite",
-};
-
-const OUTCOME_STYLE = {
-  waiting:       ["Waiting",       "bg-amber-50 text-amber-700 border-amber-200"],
-  answered:      ["Answered",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
-  completed:     ["Completed",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
-  activated:     ["Activated",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
-  accepted:      ["Accepted",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
-  info:          ["Sent",          "bg-slate-50 text-slate-600 border-slate-200"],
-  expired:       ["Expired",       "bg-rose-50 text-rose-700 border-rose-200"],
-  revoked:       ["Revoked",       "bg-slate-50 text-slate-600 border-slate-200"],
-  superseded:    ["Re-sent",       "bg-slate-50 text-slate-600 border-slate-200"],
-  not_delivered: ["Not delivered", "bg-slate-50 text-slate-500 border-slate-200"],
-};
-
-const DELIVERY_LABEL = {
-  sent: null, failed: "send failed", skipped_pref_off: "flow turned off",
-  skipped_test_recipient: "test address — not sent",
-};
-
-function EmailQRow({ r, onOpen }) {
-  const [label, cls] = OUTCOME_STYLE[r.outcome] || OUTCOME_STYLE.waiting;
-  const dl = DELIVERY_LABEL[r.delivery];
-  const isQc = r.kind === "client_review_batch";
-  return (
-    <li className="px-3 py-2 flex items-start justify-between gap-3 flex-wrap" data-testid={`v7-ip-email-${r.id}`}>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[13px] text-slate-900 truncate">{r.company_name}</span>
-          <span className="text-[10px] uppercase tracking-wider text-slate-400 shrink-0">{EMAIL_KIND_LABEL[r.kind] || r.kind}</span>
-        </div>
-        <div className="text-[12px] text-slate-700 truncate" title={r.subject}>{r.subject}</div>
-        <div className="text-[11px] text-slate-500 truncate">
-          to {r.to} · sent {_fmtRelDays(r.sent_at)}{r.detail ? ` · ${r.detail}` : ""}
-          {dl ? <span className="text-rose-500"> · {dl}</span> : null}
-        </div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${cls}`} data-testid={`v7-ip-email-outcome-${r.id}`}>
-          {label}{r.outcome === "waiting" && r.days_since >= 1 ? ` · ${r.days_since}d` : ""}
-        </span>
-        {r.open_url && (
-          <button type="button" data-testid={`v7-ip-email-open-${r.id}`}
-                  onClick={(e) => { e.stopPropagation(); onOpen(r); }}
-                  className="text-[11px] font-medium px-2 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 inline-flex items-center gap-1">
-            {isQc ? "Open QC" : "Open"} <ArrowUpRight size={11} />
-          </button>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function InProgressAiEmails({ data, onOpenQc, pill, setPill }) {
-  const [showUndelivered, setShowUndelivered] = useState(false);
-  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
-  const rows = data.rows || [];
-  const inGroup = rows.filter(r => r.group === pill);
-  const waiting   = inGroup.filter(r => r.outcome === "waiting");
-  const resolved  = inGroup.filter(r => !["waiting", "not_delivered"].includes(r.outcome));
-  const undeliv   = inGroup.filter(r => r.outcome === "not_delivered");
-  const counts = Object.fromEntries(EMAIL_Q_PILLS.map(p => [p.key, rows.filter(r => r.group === p.key && r.outcome === "waiting").length]));
-  const open = (r) => onOpenQc({
-    url: r.open_url, token: null, company_name: r.company_name, client_email: r.to,
-    meta: `${EMAIL_KIND_LABEL[r.kind] || r.kind} · sent ${_fmtRelDays(r.sent_at)}`,
-  });
-  const scopeNote = data.scope === "enterprise"
-    ? `All companies under ${data.enterprise_name || "your enterprise"}`
-    : data.scope === "superadmin" ? "All companies on the platform" : "Your client companies";
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-email-pills">
-          {EMAIL_Q_PILLS.map(p => {
-            const on = pill === p.key;
-            const n = counts[p.key];
-            return (
-              <button key={p.key} type="button" onClick={() => setPill(p.key)} data-testid={`v7-ip-email-pill-${p.key}`}
-                      className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-                        on ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                {p.label}
-                <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
-                  on ? "bg-white/20 text-white" : n > 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{n}</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="text-[11px] text-slate-400" data-testid="v7-ip-email-scope">{scopeNote} · last {data.days}d</div>
-      </div>
-
-      <QcSection title="Waiting on the client" count={waiting.length} empty="Nothing outstanding — every email in this group has been actioned.">
-        {waiting.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
-      </QcSection>
-      <QcSection title="Resolved" count={resolved.length} empty="No resolved emails yet in this window.">
-        {resolved.slice(0, 25).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
-      </QcSection>
-      {undeliv.length > 0 && (
-        <div>
-          <button type="button" onClick={() => setShowUndelivered(v => !v)} data-testid="v7-ip-email-undelivered-toggle"
-                  className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 hover:text-slate-600 inline-flex items-center gap-1">
-            {showUndelivered ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            Not delivered · {undeliv.length}
-          </button>
-          {showUndelivered && (
-            <ul className="mt-2 divide-y divide-slate-100 border border-slate-100 rounded-md">
-              {undeliv.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
-            </ul>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-const QC_PILLS = [
-  { key: "scheduled",   label: "Scheduled" },
-  { key: "in_progress", label: "In Progress" },
-  { key: "missed",      label: "Missed" },
-  { key: "no_response", label: "No Response" },
-  { key: "completed",   label: "Completed" },
-];
-
-function _fmtDateTime(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("en-US", {
-      weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-    });
-  } catch { return "—"; }
-}
-
-// One row shared by all Scheduled QC pills: company / email line on the
-// left, a status string on the right, and the inline Open QC button.
-function _fmtShortWhen(iso) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  } catch { return "—"; }
-}
-
-// Chips listing the specific questions a client parked ("don't have it
-// now") and when each reminder fires.
-function ParkedChips({ parked, testid, onJump }) {
-  if (!parked?.length) return null;
-  return (
-    <div className="w-full flex flex-wrap gap-1.5 mt-1.5" data-testid={`${testid}-parked`}>
-      {parked.map(p => (
-        <button key={p.item_id} type="button"
-              title={`${p.prompt} — open this question`}
-              onClick={(e) => { e.stopPropagation(); onJump?.(p); }}
-              data-testid={`${testid}-parked-${p.item_id}`}
-              className="inline-flex items-center gap-1.5 max-w-full text-[11px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200 hover:bg-sky-100 hover:border-sky-300 transition-colors cursor-pointer">
-          <Clock size={10} className="shrink-0" />
-          <span className="truncate max-w-[380px]">{p.prompt || "Question"}</span>
-          <span className="text-sky-600 shrink-0">· {p.reminded ? "reminded" : "reminds"} {_fmtShortWhen(p.remind_at)}</span>
-          <ArrowUpRight size={10} className="shrink-0 text-sky-500" />
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function _fmtRelShort(iso) {
-  if (!iso) return "";
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
-  return _fmtRelDays(iso);
-}
-
-// One-click re-ping for Missed / No Response rows.
-function NudgeButton({ r, testid, onNudged }) {
-  const [busy, setBusy] = useState(false);
-  const send = async (e) => {
-    e.stopPropagation();
-    if (busy) return;
-    setBusy(true);
-    try {
-      const { data } = await api.post(`/cockpit/scheduled-qc/${r.batch_id}/nudge`);
-      if (data.status === "sent") {
-        toast.success(`Reminder sent to ${data.to}`);
-        onNudged?.(r.batch_id, data.manual_nudge_at);
-      } else if (data.status === "skipped_test_recipient") {
-        toast.warning(`Not sent — ${data.to} is a test address`);
-      } else if (data.status === "skipped_pref_off") {
-        toast.warning("Not sent — client check-in emails are turned off in your settings");
-      } else {
-        toast.error(data.error || "Couldn't send the reminder");
-      }
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Couldn't send the reminder");
-    } finally {
-      setBusy(false);
-    }
+// Messages clients sent to the firm ("Ask my accountant", transaction
+// questions, check-in items deferred to the bookkeeper). Reply inline.
+function InProgressClientMessages({ items, onNav, refetch }) {
+  if (!items.length) return <_EmptyTab text="No messages from clients yet. Clients reach you here via “Ask my accountant”, a transaction's “Ask my accountant about this”, or a check-in's “send to my bookkeeper”." />;
+  const reply = async (m, text, _resolve, attachments = []) => {
+    try { await api.post(`/client-messages/${m.id}/reply`, { text, attachments }); toast.success("Reply sent"); refetch?.(); }
+    catch { toast.error("Couldn't send reply"); }
   };
   return (
-    <div className="flex flex-col items-end gap-0.5 shrink-0">
-      <button type="button" onClick={send} disabled={busy} data-testid={`${testid}-nudge`}
-              className="text-[11px] font-medium px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1">
-        {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
-        Send reminder
-      </button>
-      {r.manual_nudge_at && (
-        <span className="text-[10px] text-slate-400" data-testid={`${testid}-nudged-at`}>
-          Reminded {_fmtRelShort(r.manual_nudge_at)}{r.manual_nudge_count > 1 ? ` · ×${r.manual_nudge_count}` : ""}
-        </span>
-      )}
-    </div>
-  );
-}
-
-function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children, extra }) {
-  return (
-    <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
-      <div className="min-w-0">
-        <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
-        <div className="text-[11px] text-slate-500 truncate">{sub}</div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <div className={`text-[11px] font-medium text-right ${statusClass}`}>{status}</div>
-        {extra}
-        <OpenQcButton token={r.client_token} testid={`${testid}-open`}
-          onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
-                                   client_email: r.client_email, meta })} />
-      </div>
-      {children}
-    </li>
-  );
-}
-
-function QcSection({ title, count, empty, children }) {
-  return (
-    <div>
-      <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
-        {title} · {count}
-      </div>
-      {count === 0
-        ? <div className="text-[12px] text-slate-400">{empty}</div>
-        : <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">{children}</ul>}
-    </div>
-  );
-}
-
-const _plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
-
-function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged, pill, setPill }) {
-  if (!data) {
-    return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
-  }
-  const {
-    scheduled = [], in_progress = [], missed = [], sent_awaiting = [],
-    expired_no_response = [], completed = [], last_completed = [],
-  } = data;
-  const neverDone  = last_completed.filter(r => r.never);
-  const pillCounts = {
-    scheduled:   scheduled.length,
-    in_progress: in_progress.length,
-    missed:      missed.length,
-    no_response: sent_awaiting.length + expired_no_response.length,
-    completed:   completed.length,
-  };
-  const items = (arr) => arr.slice(0, 25);
-  const badgeTone = (key, n, on) => {
-    if (on) return "bg-white/20 text-white";
-    if (n === 0) return "bg-slate-100 text-slate-500";
-    return { scheduled: "bg-indigo-100 text-indigo-700", in_progress: "bg-sky-100 text-sky-700",
-             missed: "bg-amber-100 text-amber-700", no_response: "bg-rose-100 text-rose-700",
-             completed: "bg-emerald-100 text-emerald-700" }[key];
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-qc-pills">
-        {QC_PILLS.map(p => {
-          const on = pill === p.key;
-          const n  = pillCounts[p.key];
-          return (
-            <button key={p.key} type="button" onClick={() => setPill(p.key)}
-                    data-testid={`v7-ip-qc-pill-${p.key}`}
-                    className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
-                      on ? "bg-indigo-600 border-indigo-600 text-white"
-                         : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
-                    }`}>
-              {p.label}
-              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${badgeTone(p.key, n, on)}`}>{n}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {pill === "scheduled" && (
-        <QcSection title="Client picked a time" count={scheduled.length}
-                   empty="No upcoming times — clients haven't scheduled a check-in yet.">
-          {items(scheduled).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-sched-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")}${b.note ? ` · ${b.note}` : ""}`}
-              status={_fmtDateTime(b.scheduled_for)} statusClass="text-indigo-700"
-              meta={`${_plural(b.item_count, "question")} · ${_fmtDateTime(b.scheduled_for)}`} />
-          ))}
-        </QcSection>
-      )}
-
-      {pill === "in_progress" && (
-        <QcSection title="Started · not finished" count={in_progress.length}
-                   empty="No check-ins are mid-flight right now.">
-          {items(in_progress).map(b => {
-            const done = (b.answered || 0) + (b.deferred || 0);
-            const bits = [`${b.client_email || "—"}`, `${done}/${b.item_count} done`];
-            if (b.snoozed_count) bits.push(`${_plural(b.snoozed_count, "question")} parked`);
-            if (b.pro_answered) bits.push(`${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}`);
-            const when = b.follow_up_at || b.next_snooze_at;
-            return (
-              <QcRow key={b.batch_id} r={b} testid={`v7-ip-inprog-${b.batch_id}`} onOpenQc={onOpenQc}
-                sub={bits.join(" · ")}
-                status={when ? `Follow-up ${_fmtDateTime(when)}` : `Last activity ${_fmtRelDays(b.updated_at)}`}
-                statusClass={when ? "text-sky-700" : "text-slate-500"}
-                meta={`${done}/${b.item_count} done`}>
-                <ParkedChips parked={b.parked} testid={`v7-ip-inprog-${b.batch_id}`}
-                  onJump={(p) => onOpenQc({ token: b.client_token, company_name: b.company_name,
-                                            client_email: b.client_email, item_id: p.item_id,
-                                            meta: `parked question · reminds ${_fmtShortWhen(p.remind_at)}` })} />
-              </QcRow>
-            );
-          })}
-        </QcSection>
-      )}
-
-      {pill === "missed" && (
-        <QcSection title="Scheduled time passed · no engagement" count={missed.length}
-                   empty="No missed check-ins — every scheduled slot was kept.">
-          {items(missed).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-missed-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · was ${_fmtDateTime(b.scheduled_for)}${
-                b.nudge_sent ? " · nudged" : b.reminder_sent ? " · reminded" : ""}`}
-              status={b.days_past === 0 ? "Missed today" : `Missed · ${b.days_past}d ago`}
-              statusClass={b.days_past >= 3 ? "text-rose-600" : "text-amber-600"}
-              meta={`missed ${_fmtDateTime(b.scheduled_for)}`}
-              extra={<NudgeButton r={b} testid={`v7-ip-missed-${b.batch_id}`} onNudged={onNudged} />} />
-          ))}
-        </QcSection>
-      )}
-
-      {pill === "no_response" && (<>
-        <QcSection title="Emailed · never opened or answered" count={sent_awaiting.length}
-                   empty="Every emailed check-in has been engaged with.">
-          {items(sent_awaiting).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-noresp-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · 0/${b.item_count} answered`}
-              status={`Sent ${_fmtRelDays(b.email_sent_at)}`}
-              statusClass={b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"}
-              meta={`0/${b.item_count} answered`}
-              extra={<NudgeButton r={b} testid={`v7-ip-noresp-${b.batch_id}`} onNudged={onNudged} />} />
-          ))}
-        </QcSection>
-        <QcSection title="Link expired · never answered" count={expired_no_response.length}
-                   empty="No check-ins have lapsed unanswered in the last 60 days.">
-          {items(expired_no_response).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-expired-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · sent ${_fmtDate(b.email_sent_at || b.scheduled_for)}`}
-              status={`Expired ${_fmtRelDays(b.expired_at)}`} statusClass="text-rose-600"
-              meta={`expired ${_fmtRelDays(b.expired_at)}`} />
-          ))}
-        </QcSection>
-        {neverDone.length > 0 && (
-          <QcSection title="Clients who have never completed a check-in" count={neverDone.length} empty="">
-            {items(neverDone).map((r, i) => (
-              <QcRow key={`${r.company_id}-${r.client_email}-${i}`} r={r} testid={`v7-ip-engagement-${i}`} onOpenQc={onOpenQc}
-                sub={r.client_email || "—"}
-                status={`First emailed ${_fmtRelDays(r.first_sent)}`} statusClass="text-rose-600"
-                meta="never completed" />
-            ))}
-          </QcSection>
-        )}
-      </>)}
-
-      {pill === "completed" && (
-        <QcSection title="Finished · newest first" count={completed.length}
-                   empty="No completed check-ins yet.">
-          {items(completed).map(b => (
-            <QcRow key={b.batch_id} r={b} testid={`v7-ip-done-${b.batch_id}`} onOpenQc={onOpenQc}
-              sub={`${b.client_email || "—"} · ${_plural(b.answered, "answer")}${b.deferred ? ` · ${b.deferred} to bookkeeper` : ""}${b.pro_answered ? ` · ${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}` : ""} · ${_plural(b.item_count, "question")}`}
-              status={`Completed ${_fmtDateTime(b.completed_at)}`} statusClass="text-emerald-700"
-              meta={`completed ${_fmtRelDays(b.completed_at)}`} />
-          ))}
-        </QcSection>
-      )}
-    </div>
-  );
-}
-
-function InProgressAutoRecon({ data, onNav }) {
-  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
-  const companies = data.companies || [];
-  if (!companies.length) return <_EmptyTab text="No auto-reconciliations in flight." />;
-  return (
-    <div className="space-y-3">
-      <div className="text-[11px] text-slate-500">
-        {data.waiting
-          ? <>Plaid 5-day settle · <b>{data.days_left} day{data.days_left === 1 ? "" : "s"} left</b> · eligible {data.eligible_at}.</>
-          : <>Settle period complete — next Plaid sync will auto-finalize eligible accounts.</>}
-      </div>
-      {companies.map(c => (
-        <div key={c.company_id} className="rounded-md border border-slate-100 p-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-            <div className="text-sm font-medium text-slate-900">{c.company_name}</div>
-            <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
-              {c.totals.done    > 0 && <span className="text-emerald-700 font-medium">{c.totals.done} done</span>}
-              {c.totals.waiting > 0 && <span className="text-cyan-700 font-medium">{c.totals.waiting} waiting</span>}
-              {c.totals.ready   > 0 && <span className="text-amber-700 font-medium">{c.totals.ready} ready</span>}
-              {c.totals.manual  > 0 && <span className="text-rose-700 font-medium">{c.totals.manual} manual</span>}
-            </div>
-          </div>
-          <ul className="space-y-1">
-            {c.rows.map(r => (
-              <li key={r.account_id}
-                  className="flex items-center gap-2 text-[12px] px-2 py-1 rounded border border-slate-100">
-                <ReconStatusIcon status={r.status} />
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-slate-800 truncate">{r.account_name}</div>
-                  <div className="text-[11px] text-slate-500 truncate">
-                    {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
-                  </div>
-                </div>
-                {r.status === "ineligible_non_plaid" && (
-                  <button
-                    onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
-                    className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
-                    data-testid={`v7-ip-autorecon-manual-${r.account_id}`}
-                  >
-                    Reconcile →
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function InProgressSentPro({ professional, priorUnclosed, onNav }) {
-  const combined = [
-    ...professional.map(p => ({ ...p, _kind: "pro" })),
-    ...priorUnclosed.map(p => ({ ...p, _kind: "closing" })),
-  ];
-  if (!combined.length) return <_EmptyTab text="Nothing has been escalated to a professional." />;
-  return (
-    <ul className="divide-y divide-slate-100">
-      {combined.map((p, i) => (
-        <li key={`${p._kind}-${p.id || i}`}
-            onClick={() => p.route && onNav(p.route)}
-            className={`py-3 ${p.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
-            data-testid={`v7-ip-pro-${i}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {p.company_name || p.company || p.title || "—"}
-              </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {p._kind === "closing"
-                  ? `Prior-month close still open · ${p.month || ""}`
-                  : (p.title || p.summary || p.kind || "Needs professional judgment")}
-              </div>
-            </div>
-            <div className="text-[11px] text-indigo-700 font-medium shrink-0">
-              {p._kind === "closing" ? "Closing" : "Judgment"}
-            </div>
-          </div>
-        </li>
-      ))}
-    </ul>
+    <ClientMessagesCard
+      messages={items}
+      perspective="pro"
+      onReply={reply}
+      onChanged={refetch}
+      onOpenCompany={(m) => onNav(m.txn ? `/accounting/transactions?company=${m.company_id}&tid=${m.txn.id}` : `/company/${m.company_id}/dashboard`)}
+      testidPrefix="v7-cm"
+    />
   );
 }
 
 function InProgressCockpit({ items, onNav }) {
   if (!items.length) return <_EmptyTab text="No cockpit follow-ups outstanding." />;
   return (
-    <ul className="divide-y divide-slate-100">
-      {items.map((it, i) => (
-        <li key={it.id || i}
-            onClick={() => it.route && onNav(it.route)}
-            className={`py-3 ${it.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
-            data-testid={`v7-ip-cockpit-${i}`}>
-          <div className="flex items-start justify-between gap-2 flex-wrap">
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium text-slate-900 truncate">
-                {it.company || it.title || "—"}
+    <div>
+      <p className="text-[11px] text-slate-500 pb-2 border-b border-slate-100" data-testid="v7-ip-cockpit-intro">
+        Clients the AI has stopped making progress with — what it already tried and what a human touch could do. Click a row to open the client.
+      </p>
+      <ul className="divide-y divide-slate-100">
+        {items.map((it, i) => (
+          <li key={it.id || i}
+              onClick={() => it.route && onNav(it.route)}
+              className={`py-3 ${it.route ? "cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded" : ""}`}
+              data-testid={`v7-ip-cockpit-${i}`}>
+            <div className="flex items-start justify-between gap-2 flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] font-medium text-slate-900 truncate">
+                  {it.company || it.title || "—"}
+                </div>
+                <div className="text-[12px] text-slate-700 mt-0.5">
+                  {it.headline || it.summary || it.reason || it.kind || "Needs human follow-up"}
+                </div>
+                {Array.isArray(it.steps) && it.steps.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5" data-testid={`v7-ip-cockpit-steps-${i}`}>
+                    {it.steps.map((s, j) => (
+                      <span key={j} className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">✓ {s}</span>
+                    ))}
+                  </div>
+                )}
+                {it.suggested && (
+                  <div className="text-[11px] text-sky-700 mt-1.5">Suggested: {it.suggested}</div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-500 truncate">
-                {it.summary || it.reason || it.kind || "Needs human follow-up"}
-              </div>
+              <div className="text-[11px] text-sky-700 font-medium shrink-0 px-2 py-0.5 rounded-full bg-sky-50">Assistant</div>
             </div>
-            <div className="text-[11px] text-sky-700 font-medium shrink-0">Assistant</div>
-          </div>
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

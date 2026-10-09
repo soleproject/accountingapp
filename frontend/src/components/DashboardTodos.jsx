@@ -346,17 +346,15 @@ function MonthlyTodos({ todos, onDismiss }) {
           </div>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {todos.mode === "setup" && (
-            <select
-              value={mode}
-              onChange={(e) => pickMode(e.target.value)}
-              data-testid="dashboard-review-mode-select"
-              title="Choose how you want to review"
-              className="hidden md:block text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-1 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-300"
-            >
-              {MODES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-            </select>
-          )}
+          <select
+            value={mode}
+            onChange={(e) => pickMode(e.target.value)}
+            data-testid="dashboard-review-mode-select"
+            title="Choose how you want to review"
+            className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-1 hover:bg-indigo-100 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+          >
+            {MODES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+          </select>
           <div className="text-[11px] text-slate-500">
             {aiMode ? `${aiDoneCount} of 2 done` : `${chatMode ? chatDoneCount : doneCount} of 3 done`}
           </div>

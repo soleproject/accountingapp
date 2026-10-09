@@ -4,7 +4,9 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useBranding, THEME_PRESETS, THEME_TOKEN_META, resolvePalette } from "@/lib/branding";
 import PlanComparisonCard from "@/components/PlanComparisonCard";
-import { Loader2, Upload, Trash2, Check, Save, Palette, Image as ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { usePlanPreviewPillVisible, usePlanPreviewAvailable } from "@/components/Entitlements";
+import { Loader2, Upload, Trash2, Check, Save, Palette, Image as ImageIcon, Link as LinkIcon, RotateCcw, Type, Sparkles, Lock, Eye } from "lucide-react";
 
 // Pro-firm branding — slice B: 4 logo variants, per-token custom colors
 // with a live preview card, and a public sign-in subdomain.
@@ -475,6 +477,8 @@ export default function ProSettings() {
           Placed FIRST so identity/account controls sit above branding
           controls — matches user's mental model (account first, then
           how the account renders). */}
+      <PlanPreviewPillSection />
+
       <section
         className="rounded-xl border bg-white p-6"
         data-testid="account-email-card"
@@ -984,6 +988,32 @@ export default function ProSettings() {
 // events when the firm hasn't unlocked white-label. The wrapped children
 // still render (so pros can see WHAT they're unlocking) but no click or
 // keystroke reaches them.
+// Toggle for the floating "Viewing as" plan switcher (preview environments only).
+function PlanPreviewPillSection() {
+  const available = usePlanPreviewAvailable();
+  const [visible, setVisible] = usePlanPreviewPillVisible();
+  if (!available) return null;
+  return (
+    <section className="rounded-xl border bg-white p-6" data-testid="plan-preview-pill-card">
+      <div className="flex items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <Eye size={16} className="text-slate-500" />
+            <h2 className="font-heading font-semibold">"Viewing as" plan switcher</h2>
+          </div>
+          <p className="text-sm text-slate-500">
+            The yellow pill in the bottom-left corner that lets you preview the app as a client on a different plan. Turn it off to hide it; your real plan is used either way.
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-sm font-medium shrink-0">
+          <span className="text-slate-600">{visible ? "Shown" : "Hidden"}</span>
+          <Switch checked={visible} onCheckedChange={setVisible} data-testid="plan-preview-pill-switch" />
+        </label>
+      </div>
+    </section>
+  );
+}
+
 function LockedSection({ isLocked, testId, children }) {
   if (!isLocked) return <>{children}</>;
   return (

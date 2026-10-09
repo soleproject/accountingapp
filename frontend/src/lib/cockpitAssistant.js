@@ -13,7 +13,7 @@ export function deriveAssistantItems(data) {
   const items = [];
 
   // Silent-client escalations from the "conversations" section.
-  const waiting = (data.conversations && data.conversations.waiting) || [];
+  const waiting = (data.conversations && (data.conversations.waiting || data.conversations.waiting_on_client)) || [];
   waiting.filter(w => w.days_silent >= 3).forEach(w => {
     const attempts = w.days_silent >= 5 ? 3 : w.days_silent >= 4 ? 2 : 1;
     const steps = ["Sent initial check-in"];

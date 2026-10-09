@@ -187,11 +187,37 @@ export function Gate({ feature, mode = "lock", children, className = "" }) {
   );
 }
 
+const PILL_HIDDEN_KEY = "axiom_plan_preview_pill_hidden";
+const PILL_EVENT = "axiom:plan-preview-pill";
+
+// Per-browser preference: show/hide the floating "Viewing as" pill (toggle lives in Pro → Settings).
+export function usePlanPreviewPillVisible() {
+  const [visible, setVisibleState] = React.useState(() => localStorage.getItem(PILL_HIDDEN_KEY) !== "1");
+  React.useEffect(() => {
+    const sync = () => setVisibleState(localStorage.getItem(PILL_HIDDEN_KEY) !== "1");
+    window.addEventListener(PILL_EVENT, sync);
+    window.addEventListener("storage", sync);
+    return () => { window.removeEventListener(PILL_EVENT, sync); window.removeEventListener("storage", sync); };
+  }, []);
+  const setVisible = (v) => {
+    if (v) localStorage.removeItem(PILL_HIDDEN_KEY); else localStorage.setItem(PILL_HIDDEN_KEY, "1");
+    window.dispatchEvent(new Event(PILL_EVENT));
+  };
+  return [visible, setVisible];
+}
+
+// Whether the switcher is available at all in this environment (so settings can hide the toggle when irrelevant).
+export function usePlanPreviewAvailable() {
+  const { ent } = useEntitlements();
+  return process.env.REACT_APP_PLAN_PREVIEW === "true" && !!ent?.preview_switcher;
+}
+
 // Preview-only floating switcher (REACT_APP_PLAN_PREVIEW=true + backend PLAN_PREVIEW_SWITCHER=true).
 export function PlanPreviewPill() {
   const { ent, preview, setPreview } = useEntitlements();
   const [open, setOpen] = React.useState(false);
-  if (process.env.REACT_APP_PLAN_PREVIEW !== "true" || !ent?.preview_switcher) return null;
+  const [visible] = usePlanPreviewPillVisible();
+  if (process.env.REACT_APP_PLAN_PREVIEW !== "true" || !ent?.preview_switcher || !visible) return null;
   const label = preview === "real" ? `Real (${ent.plan_label || "no plan"}${ent.all_access ? " · all access" : ""})` : preview === "free_spot" ? "Free spot" : PLAN_LABELS[preview];
   const choices = [["real", "Real plan"], ["simple_start", "Core · $38"], ["assistant", "AI Assistant · $79"], ["bookkeeper", "AI Bookkeeper · $99"], ["advanced", "Advanced · $149"], ["free_spot", "Free spot (sponsored)"]];
   return (
