@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { Loader2, Bell } from "lucide-react";
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
+import { useClientUnread } from "@/lib/useClientUnread";
 import { toast } from "sonner";
 import { BooksCard, ProfitCard, CashCard, AttentionCard, TeamStrip } from "@/components/owner/OverviewCards";
 import MoneyTab from "@/components/owner/MoneyTab";
@@ -58,7 +59,7 @@ export default function OwnerDashboard() {
     if (!currentId) return;
     api.get(`/companies/${currentId}/client-messages`).then(r => setMsgCount((r.data?.messages || []).length)).catch(() => setMsgCount(0));
   }, [currentId]);
-
+  const unread = useClientUnread(currentId);
   const load = useCallback(async () => {
     if (!currentId) return;
     setLoading(true);
@@ -98,9 +99,17 @@ export default function OwnerDashboard() {
     <div className="max-w-[1180px] mx-auto px-4 sm:px-6 py-6 sm:py-8" data-testid="owner-dashboard">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <nav className="flex gap-1 bg-slate-100 p-1 rounded-xl" data-testid="owner-tabs">
-          {TABS.filter(t => !t.needsMessages || msgCount > 0 || tab === "messages").map(t => (
-            <button key={t.key} onClick={() => navigate(t.path)} className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`} data-testid={`owner-tab-${t.key}`}>{t.label}</button>
-          ))}
+          {TABS.filter(t => !t.needsMessages || msgCount > 0 || tab === "messages").map(t => {
+            const hot = t.key === "messages" && unread > 0;
+            return (
+              <button key={t.key} onClick={() => navigate(t.path)} data-unread={hot ? "true" : "false"}
+                className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"} ${hot ? "ring-1 ring-inset ring-red-500" : ""}`}
+                data-testid={`owner-tab-${t.key}`} title={hot ? `${unread} new message${unread === 1 ? "" : "s"}` : undefined}>
+                {t.label}
+                {hot && <span className="inline-flex items-center gap-0.5 text-red-600" data-testid="owner-tab-messages-bell"><Bell size={13} className="fill-red-600" /><span className="text-[11px] font-bold">{unread}</span></span>}
+              </button>
+            );
+          })}
         </nav>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           {loading && <Loader2 className="animate-spin" size={14} />}
