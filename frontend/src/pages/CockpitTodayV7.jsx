@@ -1182,7 +1182,10 @@ function ClientsPanel({ clients, counts, onNav, onClose }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map(c => <ClientHealthCard key={c.id} c={c} onNav={onNav} />)}
+          {filtered.map(c => (
+            <ClientHealthCard key={c.id} c={c} onNav={onNav}
+              kpi={kpiFilter ? { ...(kpiTiles.find(x => x.key === kpiFilter) || {}), count: (attnById[c.id] || {})[`${kpiFilter}_count`] || 0 } : null} />
+          ))}
         </div>
       )}
     </div>
@@ -2633,12 +2636,18 @@ function StandardJudgmentRow({ m, onNav }) {
 }
 
 // -------- Client health card --------------------------------------
-function ClientHealthCard({ c, onNav }) {
+function ClientHealthCard({ c, onNav, kpi = null }) {
   const tier = c.recon_pct >= 95 ? "pro" : c.recon_pct >= 80 ? "ai" : "assistant";
   const t = TIER[tier];
   const state = c.recon_pct >= 95 ? "Close ready"
              : c.recon_pct >= 80 ? "AI working"
              : "Waiting on client";
+  const kpiTints = {
+    amber: "bg-amber-50 text-amber-800 border-amber-200",
+    purple: "bg-purple-50 text-purple-800 border-purple-200",
+    red: "bg-rose-50 text-rose-800 border-rose-200",
+    indigo: "bg-indigo-50 text-indigo-800 border-indigo-200",
+  };
   const openCockpit = () => {
     // Open Client Cockpit scoped to this company; leave a breadcrumb
     // hint so the destination page can render a "back to Today"
@@ -2654,6 +2663,13 @@ function ClientHealthCard({ c, onNav }) {
         <div className="text-sm font-semibold text-slate-900 truncate flex-1">{c.name}</div>
         <TierBadge tier={tier} />
       </div>
+      {kpi && (
+        <div className={`mt-2 inline-flex items-baseline gap-1.5 rounded-lg border px-2.5 py-1 ${kpiTints[kpi.tint] || "bg-slate-50 text-slate-800 border-slate-200"}`}
+             data-testid={`v7-client-card-${c.id}-kpi`}>
+          <span className="text-xl font-semibold leading-none font-mono-num">{kpi.count.toLocaleString()}</span>
+          <span className="text-[11px] font-medium">{kpi.label?.toLowerCase()}</span>
+        </div>
+      )}
       <div className="flex items-baseline gap-2 mt-1">
         <div className="text-2xl font-semibold text-slate-900">{c.recon_pct}%</div>
         <div className="text-[11px] text-slate-500">{state}</div>
