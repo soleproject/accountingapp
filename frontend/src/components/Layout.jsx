@@ -17,6 +17,7 @@ import { useIsMobile } from "@/lib/useIsMobile";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import AskAccountantModal from "@/components/AskAccountantModal";
+import { useClientUnread } from "@/lib/useClientUnread";
 import { canUseCockpit } from "@/lib/cockpitAccess";
 import { TID } from "@/constants/testIds";
 import { ChevronDown, LogOut, MessageSquare, Settings2, User, KeyRound, Loader2, X, Search, Building2, MessageCircle, Inbox, Plus, Users, LayoutGrid } from "lucide-react";
@@ -651,15 +652,19 @@ function AskAccountantHeaderButton() {
   const { user } = useAuth();
   const { current } = useCompany();
   const [open, setOpen] = useState(false);
+  const unread = useClientUnread(current?.has_pro ? current?.id : null);
   if (!user || canUseCockpit(user) || !current?.has_pro) return null;
+  const hot = unread > 0;
   return (
     <>
       <button
         data-testid="ask-accountant-header-btn"
+        data-unread={hot ? "true" : "false"}
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-slate-800 text-xs font-medium hover:bg-slate-50"
+        title={hot ? `${unread} new message${unread === 1 ? "" : "s"} from your accountant` : undefined}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-xs font-medium transition-colors ${hot ? "border-red-500 text-slate-800 hover:bg-red-50" : "border-slate-300 text-slate-800 hover:bg-slate-50"}`}
       >
-        <MessageSquare size={13} /> Ask my accountant
+        <MessageSquare size={13} className={hot ? "text-red-600" : ""} /> Ask my accountant
       </button>
       <AskAccountantModal open={open} onClose={() => setOpen(false)} />
     </>

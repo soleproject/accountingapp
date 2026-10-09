@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
-import { MessageSquare, Loader2 } from "lucide-react";
+import { MessageSquare, Loader2, Bell } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
-import { ClientMessagesCard } from "@/components/ClientMessagesCard";
+import { useAuth } from "@/lib/auth";
+import { ClientMessagesCard, isUnread } from "@/components/ClientMessagesCard";
 import AskAccountantModal from "@/components/AskAccountantModal";
+import { notifyClientMessagesChanged } from "@/lib/useClientUnread";
 
 /** My business → Messages: the client's view of their threads with the accounting pro. */
 export default function MessagesTab({ companyId }) {
+  const { user } = useAuth();
   const [data, setData] = useState(null);
   const [compose, setCompose] = useState(false);
   const load = useCallback(() => {
     if (!companyId) return;
-    api.get(`/companies/${companyId}/client-messages`).then(r => setData(r.data)).catch(() => setData({ messages: [], pro: null }));
+    api.get(`/companies/${companyId}/client-messages`).then(r => { setData(r.data); notifyClientMessagesChanged(); }).catch(() => setData({ messages: [], pro: null }));
   }, [companyId]);
   useEffect(() => { load(); }, [load]);
+  const unread = (data?.messages || []).filter(m => m.status !== "resolved" && isUnread(m, user?.id)).length;
 
   const reply = async (m, text) => {
     try { await api.post(`/client-messages/${m.id}/reply`, { text }); toast.success("Sent"); load(); }
@@ -25,12 +29,15 @@ export default function MessagesTab({ companyId }) {
   };
 
   return (
-    <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/30 p-5" data-testid="owner-messages-card">
+    <div className={`rounded-2xl border-2 p-5 transition-colors ${unread > 0 ? "border-red-400 bg-red-50/20" : "border-emerald-200 bg-emerald-50/30"}`} data-testid="owner-messages-card" data-unread={unread > 0 ? "true" : "false"}>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center"><MessageSquare size={15} /></div>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${unread > 0 ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-700"}`}><MessageSquare size={15} /></div>
           <div>
-            <div className="text-sm font-semibold text-slate-900">Messages</div>
+            <div className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+              Messages
+              {unread > 0 && <span className="inline-flex items-center gap-1 text-red-600" title={`${unread} new message${unread === 1 ? "" : "s"}`} data-testid="owner-messages-bell"><Bell size={14} className="fill-red-600" /><span className="text-[11px] font-bold">{unread}</span></span>}
+            </div>
             <div className="text-[11px] text-slate-500">
               {data?.pro?.name ? `Your threads with ${data.pro.name}. ` : "Your threads with your accountant. "}
               Outstanding = their reply is waiting on you · Answered = you replied last · Resolved = you marked it handled.
