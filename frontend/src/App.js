@@ -187,12 +187,12 @@ function Protected({ children }) {
   return children;
 }
 
-// Business owners (client role) land on the owner dashboard instead of
-// the pro-oriented accounting dashboard.
-function ClientHome({ children }) {
+// Root "/" landing: business owners (client role) default to the owner
+// dashboard; everyone else to the accounting dashboard. Clients can still
+// open /dashboard directly.
+function HomeRedirect() {
   const { user } = useAuth();
-  if (user?.role === "client") return <Navigate to="/owner" replace />;
-  return children;
+  return <Navigate to={user?.role === "client" ? "/owner" : "/dashboard"} replace />;
 }
 
 // Sits inside BrandingProvider so the hook can read the signed-in user's
@@ -242,8 +242,8 @@ function App() {
             <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<ProductGuard product="accounting"><ClientHome><Dashboard /></ClientHome></ProductGuard>} />
+              <Route path="/" element={<HomeRedirect />} />
+              <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
               <Route path="/owner" element={<OwnerDashboard />} />
               <Route path="/owner/:tab" element={<OwnerDashboard />} />
               <Route path="/accounting/todo" element={<ProductGuard product="accounting"><ToDo /></ProductGuard>} />
