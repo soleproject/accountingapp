@@ -1182,7 +1182,10 @@ function ClientsPanel({ clients, counts, onNav, onClose }) {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {filtered.map(c => <ClientHealthCard key={c.id} c={c} onNav={onNav} />)}
+          {filtered.map(c => (
+            <ClientHealthCard key={c.id} c={c} onNav={onNav}
+              kpi={kpiFilter ? { ...(kpiTiles.find(x => x.key === kpiFilter) || {}), count: (attnById[c.id] || {})[`${kpiFilter}_count`] || 0 } : null} />
+          ))}
         </div>
       )}
     </div>
@@ -1645,6 +1648,480 @@ function InProgressClientMessages({ items, onNav, refetch }) {
     />
   );
 }
+
+function _fmtDate(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  } catch { return "—"; }
+}
+function _fmtRelDays(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso).getTime();
+    const diff = Math.round((Date.now() - d) / 86400000);
+    if (diff === 0) return "today";
+    if (diff === 1) return "yesterday";
+    if (diff < 7)   return `${diff}d ago`;
+    if (diff < 30)  return `${Math.round(diff / 7)}w ago`;
+    return `${Math.round(diff / 30)}mo ago`;
+  } catch { return "—"; }
+}
+
+const EMAIL_Q_PILLS = [
+  { key: "quick_ones",    label: "Quick Ones" },
+  { key: "setup_invites", label: "Set-up & Invites" },
+  { key: "qc_emails",     label: "QC Emails" },
+];
+
+const EMAIL_KIND_LABEL = {
+  ai_ask_client: "AI quick one", ask_client: "Pro question", client_review_batch: "Quick Check-in",
+  client_welcome: "Set password & activate", client_welcome_returning: "Welcome back",
+  portal_invite: "Portal invite", team_invite: "Team invite",
+};
+
+const OUTCOME_STYLE = {
+  waiting:       ["Waiting",       "bg-amber-50 text-amber-700 border-amber-200"],
+  answered:      ["Answered",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  completed:     ["Completed",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  activated:     ["Activated",     "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  accepted:      ["Accepted",      "bg-emerald-50 text-emerald-700 border-emerald-200"],
+  info:          ["Sent",          "bg-slate-50 text-slate-600 border-slate-200"],
+  expired:       ["Expired",       "bg-rose-50 text-rose-700 border-rose-200"],
+  revoked:       ["Revoked",       "bg-slate-50 text-slate-600 border-slate-200"],
+  superseded:    ["Re-sent",       "bg-slate-50 text-slate-600 border-slate-200"],
+  not_delivered: ["Not delivered", "bg-slate-50 text-slate-500 border-slate-200"],
+};
+
+const DELIVERY_LABEL = {
+  sent: null, failed: "send failed", skipped_pref_off: "flow turned off",
+  skipped_test_recipient: "test address — not sent",
+};
+
+function EmailQRow({ r, onOpen }) {
+  const [label, cls] = OUTCOME_STYLE[r.outcome] || OUTCOME_STYLE.waiting;
+  const dl = DELIVERY_LABEL[r.delivery];
+  const isQc = r.kind === "client_review_batch";
+  return (
+    <li className="px-3 py-2 flex items-start justify-between gap-3 flex-wrap" data-testid={`v7-ip-email-${r.id}`}>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-[13px] text-slate-900 truncate">{r.company_name}</span>
+          <span className="text-[10px] uppercase tracking-wider text-slate-400 shrink-0">{EMAIL_KIND_LABEL[r.kind] || r.kind}</span>
+        </div>
+        <div className="text-[12px] text-slate-700 truncate" title={r.subject}>{r.subject}</div>
+        <div className="text-[11px] text-slate-500 truncate">
+          to {r.to} · sent {_fmtRelDays(r.sent_at)}{r.detail ? ` · ${r.detail}` : ""}
+          {dl ? <span className="text-rose-500"> · {dl}</span> : null}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${cls}`} data-testid={`v7-ip-email-outcome-${r.id}`}>
+          {label}{r.outcome === "waiting" && r.days_since >= 1 ? ` · ${r.days_since}d` : ""}
+        </span>
+        {r.open_url && (
+          <button type="button" data-testid={`v7-ip-email-open-${r.id}`}
+                  onClick={(e) => { e.stopPropagation(); onOpen(r); }}
+                  className="text-[11px] font-medium px-2 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 inline-flex items-center gap-1">
+            {isQc ? "Open QC" : "Open"} <ArrowUpRight size={11} />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function InProgressAiEmails({ data, onOpenQc, pill, setPill }) {
+  const [showUndelivered, setShowUndelivered] = useState(false);
+  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  const rows = data.rows || [];
+  const inGroup = rows.filter(r => r.group === pill);
+  const waiting   = inGroup.filter(r => r.outcome === "waiting");
+  const resolved  = inGroup.filter(r => !["waiting", "not_delivered"].includes(r.outcome));
+  const undeliv   = inGroup.filter(r => r.outcome === "not_delivered");
+  const counts = Object.fromEntries(EMAIL_Q_PILLS.map(p => [p.key, rows.filter(r => r.group === p.key && r.outcome === "waiting").length]));
+  const open = (r) => onOpenQc({
+    url: r.open_url, token: null, company_name: r.company_name, client_email: r.to,
+    meta: `${EMAIL_KIND_LABEL[r.kind] || r.kind} · sent ${_fmtRelDays(r.sent_at)}`,
+  });
+  const scopeNote = data.scope === "enterprise"
+    ? `All companies under ${data.enterprise_name || "your enterprise"}`
+    : data.scope === "superadmin" ? "All companies on the platform" : "Your client companies";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-email-pills">
+          {EMAIL_Q_PILLS.map(p => {
+            const on = pill === p.key;
+            const n = counts[p.key];
+            return (
+              <button key={p.key} type="button" onClick={() => setPill(p.key)} data-testid={`v7-ip-email-pill-${p.key}`}
+                      className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+                        on ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                {p.label}
+                <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${
+                  on ? "bg-white/20 text-white" : n > 0 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="text-[11px] text-slate-400" data-testid="v7-ip-email-scope">{scopeNote} · last {data.days}d</div>
+      </div>
+
+      <QcSection title="Waiting on the client" count={waiting.length} empty="Nothing outstanding — every email in this group has been actioned.">
+        {waiting.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+      </QcSection>
+      <QcSection title="Resolved" count={resolved.length} empty="No resolved emails yet in this window.">
+        {resolved.slice(0, 25).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+      </QcSection>
+      {undeliv.length > 0 && (
+        <div>
+          <button type="button" onClick={() => setShowUndelivered(v => !v)} data-testid="v7-ip-email-undelivered-toggle"
+                  className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 hover:text-slate-600 inline-flex items-center gap-1">
+            {showUndelivered ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            Not delivered · {undeliv.length}
+          </button>
+          {showUndelivered && (
+            <ul className="mt-2 divide-y divide-slate-100 border border-slate-100 rounded-md">
+              {undeliv.slice(0, 40).map(r => <EmailQRow key={r.id} r={r} onOpen={open} />)}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const QC_PILLS = [
+  { key: "scheduled",   label: "Scheduled" },
+  { key: "in_progress", label: "In Progress" },
+  { key: "missed",      label: "Missed" },
+  { key: "no_response", label: "No Response" },
+  { key: "completed",   label: "Completed" },
+];
+
+function _fmtDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-US", {
+      weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    });
+  } catch { return "—"; }
+}
+
+// One row shared by all Scheduled QC pills: company / email line on the
+// left, a status string on the right, and the inline Open QC button.
+function _fmtShortWhen(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  } catch { return "—"; }
+}
+
+// Chips listing the specific questions a client parked ("don't have it
+// now") and when each reminder fires.
+function ParkedChips({ parked, testid, onJump }) {
+  if (!parked?.length) return null;
+  return (
+    <div className="w-full flex flex-wrap gap-1.5 mt-1.5" data-testid={`${testid}-parked`}>
+      {parked.map(p => (
+        <button key={p.item_id} type="button"
+              title={`${p.prompt} — open this question`}
+              onClick={(e) => { e.stopPropagation(); onJump?.(p); }}
+              data-testid={`${testid}-parked-${p.item_id}`}
+              className="inline-flex items-center gap-1.5 max-w-full text-[11px] px-2 py-0.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200 hover:bg-sky-100 hover:border-sky-300 transition-colors cursor-pointer">
+          <Clock size={10} className="shrink-0" />
+          <span className="truncate max-w-[380px]">{p.prompt || "Question"}</span>
+          <span className="text-sky-600 shrink-0">· {p.reminded ? "reminded" : "reminds"} {_fmtShortWhen(p.remind_at)}</span>
+          <ArrowUpRight size={10} className="shrink-0 text-sky-500" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function _fmtRelShort(iso) {
+  if (!iso) return "";
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) return `${Math.round(mins / 60)}h ago`;
+  return _fmtRelDays(iso);
+}
+
+// One-click re-ping for Missed / No Response rows.
+function NudgeButton({ r, testid, onNudged }) {
+  const [busy, setBusy] = useState(false);
+  const send = async (e) => {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/cockpit/scheduled-qc/${r.batch_id}/nudge`);
+      if (data.status === "sent") {
+        toast.success(`Reminder sent to ${data.to}`);
+        onNudged?.(r.batch_id, data.manual_nudge_at);
+      } else if (data.status === "skipped_test_recipient") {
+        toast.warning(`Not sent — ${data.to} is a test address`);
+      } else if (data.status === "skipped_pref_off") {
+        toast.warning("Not sent — client check-in emails are turned off in your settings");
+      } else {
+        toast.error(data.error || "Couldn't send the reminder");
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Couldn't send the reminder");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-0.5 shrink-0">
+      <button type="button" onClick={send} disabled={busy} data-testid={`${testid}-nudge`}
+              className="text-[11px] font-medium px-2 py-1 rounded-md border border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100 disabled:opacity-50 inline-flex items-center gap-1">
+        {busy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+        Send reminder
+      </button>
+      {r.manual_nudge_at && (
+        <span className="text-[10px] text-slate-400" data-testid={`${testid}-nudged-at`}>
+          Reminded {_fmtRelShort(r.manual_nudge_at)}{r.manual_nudge_count > 1 ? ` · ×${r.manual_nudge_count}` : ""}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function QcRow({ r, status, statusClass, sub, testid, onOpenQc, meta, children, extra }) {
+  return (
+    <li className="px-3 py-2 flex items-center justify-between gap-2 flex-wrap" data-testid={testid}>
+      <div className="min-w-0">
+        <div className="text-[13px] text-slate-900 truncate">{r.company_name}</div>
+        <div className="text-[11px] text-slate-500 truncate">{sub}</div>
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <div className={`text-[11px] font-medium text-right ${statusClass}`}>{status}</div>
+        {extra}
+        <OpenQcButton token={r.client_token} testid={`${testid}-open`}
+          onOpen={() => onOpenQc({ token: r.client_token, company_name: r.company_name,
+                                   client_email: r.client_email, meta })} />
+      </div>
+      {children}
+    </li>
+  );
+}
+
+function QcSection({ title, count, empty, children }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mb-2">
+        {title} · {count}
+      </div>
+      {count === 0
+        ? <div className="text-[12px] text-slate-400">{empty}</div>
+        : <ul className="divide-y divide-slate-100 border border-slate-100 rounded-md">{children}</ul>}
+    </div>
+  );
+}
+
+const _plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+
+function InProgressScheduledQc({ data, onNav, onOpenQc, onNudged, pill, setPill }) {
+  if (!data) {
+    return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  }
+  const {
+    scheduled = [], in_progress = [], missed = [], sent_awaiting = [],
+    expired_no_response = [], completed = [], last_completed = [],
+  } = data;
+  const neverDone  = last_completed.filter(r => r.never);
+  const pillCounts = {
+    scheduled:   scheduled.length,
+    in_progress: in_progress.length,
+    missed:      missed.length,
+    no_response: sent_awaiting.length + expired_no_response.length,
+    completed:   completed.length,
+  };
+  const items = (arr) => arr.slice(0, 25);
+  const badgeTone = (key, n, on) => {
+    if (on) return "bg-white/20 text-white";
+    if (n === 0) return "bg-slate-100 text-slate-500";
+    return { scheduled: "bg-indigo-100 text-indigo-700", in_progress: "bg-sky-100 text-sky-700",
+             missed: "bg-amber-100 text-amber-700", no_response: "bg-rose-100 text-rose-700",
+             completed: "bg-emerald-100 text-emerald-700" }[key];
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-1.5" data-testid="v7-ip-qc-pills">
+        {QC_PILLS.map(p => {
+          const on = pill === p.key;
+          const n  = pillCounts[p.key];
+          return (
+            <button key={p.key} type="button" onClick={() => setPill(p.key)}
+                    data-testid={`v7-ip-qc-pill-${p.key}`}
+                    className={`text-[12px] font-medium px-3 py-1 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+                      on ? "bg-indigo-600 border-indigo-600 text-white"
+                         : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+                    }`}>
+              {p.label}
+              <span className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold ${badgeTone(p.key, n, on)}`}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {pill === "scheduled" && (
+        <QcSection title="Client picked a time" count={scheduled.length}
+                   empty="No upcoming times — clients haven't scheduled a check-in yet.">
+          {items(scheduled).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-sched-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")}${b.note ? ` · ${b.note}` : ""}`}
+              status={_fmtDateTime(b.scheduled_for)} statusClass="text-indigo-700"
+              meta={`${_plural(b.item_count, "question")} · ${_fmtDateTime(b.scheduled_for)}`} />
+          ))}
+        </QcSection>
+      )}
+
+      {pill === "in_progress" && (
+        <QcSection title="Started · not finished" count={in_progress.length}
+                   empty="No check-ins are mid-flight right now.">
+          {items(in_progress).map(b => {
+            const done = (b.answered || 0) + (b.deferred || 0);
+            const bits = [`${b.client_email || "—"}`, `${done}/${b.item_count} done`];
+            if (b.snoozed_count) bits.push(`${_plural(b.snoozed_count, "question")} parked`);
+            if (b.pro_answered) bits.push(`${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}`);
+            const when = b.follow_up_at || b.next_snooze_at;
+            return (
+              <QcRow key={b.batch_id} r={b} testid={`v7-ip-inprog-${b.batch_id}`} onOpenQc={onOpenQc}
+                sub={bits.join(" · ")}
+                status={when ? `Follow-up ${_fmtDateTime(when)}` : `Last activity ${_fmtRelDays(b.updated_at)}`}
+                statusClass={when ? "text-sky-700" : "text-slate-500"}
+                meta={`${done}/${b.item_count} done`}>
+                <ParkedChips parked={b.parked} testid={`v7-ip-inprog-${b.batch_id}`}
+                  onJump={(p) => onOpenQc({ token: b.client_token, company_name: b.company_name,
+                                            client_email: b.client_email, item_id: p.item_id,
+                                            meta: `parked question · reminds ${_fmtShortWhen(p.remind_at)}` })} />
+              </QcRow>
+            );
+          })}
+        </QcSection>
+      )}
+
+      {pill === "missed" && (
+        <QcSection title="Scheduled time passed · no engagement" count={missed.length}
+                   empty="No missed check-ins — every scheduled slot was kept.">
+          {items(missed).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-missed-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · was ${_fmtDateTime(b.scheduled_for)}${
+                b.nudge_sent ? " · nudged" : b.reminder_sent ? " · reminded" : ""}`}
+              status={b.days_past === 0 ? "Missed today" : `Missed · ${b.days_past}d ago`}
+              statusClass={b.days_past >= 3 ? "text-rose-600" : "text-amber-600"}
+              meta={`missed ${_fmtDateTime(b.scheduled_for)}`}
+              extra={<NudgeButton r={b} testid={`v7-ip-missed-${b.batch_id}`} onNudged={onNudged} />} />
+          ))}
+        </QcSection>
+      )}
+
+      {pill === "no_response" && (<>
+        <QcSection title="Emailed · never opened or answered" count={sent_awaiting.length}
+                   empty="Every emailed check-in has been engaged with.">
+          {items(sent_awaiting).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-noresp-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · 0/${b.item_count} answered`}
+              status={`Sent ${_fmtRelDays(b.email_sent_at)}`}
+              statusClass={b.days_waiting >= 5 ? "text-rose-600" : b.days_waiting >= 3 ? "text-amber-600" : "text-slate-500"}
+              meta={`0/${b.item_count} answered`}
+              extra={<NudgeButton r={b} testid={`v7-ip-noresp-${b.batch_id}`} onNudged={onNudged} />} />
+          ))}
+        </QcSection>
+        <QcSection title="Link expired · never answered" count={expired_no_response.length}
+                   empty="No check-ins have lapsed unanswered in the last 60 days.">
+          {items(expired_no_response).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-expired-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${_plural(b.item_count, "question")} · sent ${_fmtDate(b.email_sent_at || b.scheduled_for)}`}
+              status={`Expired ${_fmtRelDays(b.expired_at)}`} statusClass="text-rose-600"
+              meta={`expired ${_fmtRelDays(b.expired_at)}`} />
+          ))}
+        </QcSection>
+        {neverDone.length > 0 && (
+          <QcSection title="Clients who have never completed a check-in" count={neverDone.length} empty="">
+            {items(neverDone).map((r, i) => (
+              <QcRow key={`${r.company_id}-${r.client_email}-${i}`} r={r} testid={`v7-ip-engagement-${i}`} onOpenQc={onOpenQc}
+                sub={r.client_email || "—"}
+                status={`First emailed ${_fmtRelDays(r.first_sent)}`} statusClass="text-rose-600"
+                meta="never completed" />
+            ))}
+          </QcSection>
+        )}
+      </>)}
+
+      {pill === "completed" && (
+        <QcSection title="Finished · newest first" count={completed.length}
+                   empty="No completed check-ins yet.">
+          {items(completed).map(b => (
+            <QcRow key={b.batch_id} r={b} testid={`v7-ip-done-${b.batch_id}`} onOpenQc={onOpenQc}
+              sub={`${b.client_email || "—"} · ${_plural(b.answered, "answer")}${b.deferred ? ` · ${b.deferred} to bookkeeper` : ""}${b.pro_answered ? ` · ${b.pro_answered} by ${(b.pro_names || []).join(", ") || "pro"}` : ""} · ${_plural(b.item_count, "question")}`}
+              status={`Completed ${_fmtDateTime(b.completed_at)}`} statusClass="text-emerald-700"
+              meta={`completed ${_fmtRelDays(b.completed_at)}`} />
+          ))}
+        </QcSection>
+      )}
+    </div>
+  );
+}
+
+function InProgressAutoRecon({ data, onNav }) {
+  if (!data) return <div className="text-center py-10 text-slate-400 text-sm">Loading…</div>;
+  const companies = data.companies || [];
+  if (!companies.length) return <_EmptyTab text="No auto-reconciliations in flight." />;
+  return (
+    <div className="space-y-3">
+      <div className="text-[11px] text-slate-500">
+        {data.waiting
+          ? <>Plaid 5-day settle · <b>{data.days_left} day{data.days_left === 1 ? "" : "s"} left</b> · eligible {data.eligible_at}.</>
+          : <>Settle period complete — next Plaid sync will auto-finalize eligible accounts.</>}
+      </div>
+      {companies.map(c => (
+        <div key={c.company_id} className="rounded-md border border-slate-100 p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+            <div className="text-sm font-medium text-slate-900">{c.company_name}</div>
+            <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+              {c.totals.done    > 0 && <span className="text-emerald-700 font-medium">{c.totals.done} done</span>}
+              {c.totals.waiting > 0 && <span className="text-cyan-700 font-medium">{c.totals.waiting} waiting</span>}
+              {c.totals.ready   > 0 && <span className="text-amber-700 font-medium">{c.totals.ready} ready</span>}
+              {c.totals.manual  > 0 && <span className="text-rose-700 font-medium">{c.totals.manual} manual</span>}
+            </div>
+          </div>
+          <ul className="space-y-1">
+            {c.rows.map(r => (
+              <li key={r.account_id}
+                  className="flex items-center gap-2 text-[12px] px-2 py-1 rounded border border-slate-100">
+                <ReconStatusIcon status={r.status} />
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-slate-800 truncate">{r.account_name}</div>
+                  <div className="text-[11px] text-slate-500 truncate">
+                    {r.txn_count} txn{r.txn_count === 1 ? "" : "s"} · {r.reason}
+                  </div>
+                </div>
+                {r.status === "ineligible_non_plaid" && (
+                  <button
+                    onClick={() => onNav(`/accounting/reconciliation?month=${data.month}&from=cockpit&ym=${data.month}`)}
+                    className="text-[11px] px-2 py-1 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 shrink-0"
+                    data-testid={`v7-ip-autorecon-manual-${r.account_id}`}
+                  >
+                    Reconcile →
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 
 function InProgressCockpit({ items, onNav }) {
   if (!items.length) return <_EmptyTab text="No cockpit follow-ups outstanding." />;
@@ -2159,12 +2636,18 @@ function StandardJudgmentRow({ m, onNav }) {
 }
 
 // -------- Client health card --------------------------------------
-function ClientHealthCard({ c, onNav }) {
+function ClientHealthCard({ c, onNav, kpi = null }) {
   const tier = c.recon_pct >= 95 ? "pro" : c.recon_pct >= 80 ? "ai" : "assistant";
   const t = TIER[tier];
   const state = c.recon_pct >= 95 ? "Close ready"
              : c.recon_pct >= 80 ? "AI working"
              : "Waiting on client";
+  const kpiTints = {
+    amber: "bg-amber-50 text-amber-800 border-amber-200",
+    purple: "bg-purple-50 text-purple-800 border-purple-200",
+    red: "bg-rose-50 text-rose-800 border-rose-200",
+    indigo: "bg-indigo-50 text-indigo-800 border-indigo-200",
+  };
   const openCockpit = () => {
     // Open Client Cockpit scoped to this company; leave a breadcrumb
     // hint so the destination page can render a "back to Today"
@@ -2180,6 +2663,13 @@ function ClientHealthCard({ c, onNav }) {
         <div className="text-sm font-semibold text-slate-900 truncate flex-1">{c.name}</div>
         <TierBadge tier={tier} />
       </div>
+      {kpi && (
+        <div className={`mt-2 inline-flex items-baseline gap-1.5 rounded-lg border px-2.5 py-1 ${kpiTints[kpi.tint] || "bg-slate-50 text-slate-800 border-slate-200"}`}
+             data-testid={`v7-client-card-${c.id}-kpi`}>
+          <span className="text-xl font-semibold leading-none font-mono-num">{kpi.count.toLocaleString()}</span>
+          <span className="text-[11px] font-medium">{kpi.label?.toLowerCase()}</span>
+        </div>
+      )}
       <div className="flex items-baseline gap-2 mt-1">
         <div className="text-2xl font-semibold text-slate-900">{c.recon_pct}%</div>
         <div className="text-[11px] text-slate-500">{state}</div>
