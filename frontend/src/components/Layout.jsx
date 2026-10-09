@@ -661,7 +661,7 @@ function AskAccountantHeaderButton() {
         data-testid="ask-accountant-header-btn"
         data-unread={hot ? "true" : "false"}
         onClick={() => setOpen(true)}
-        title={hot ? `${unread} new message${unread === 1 ? "" : "s"} from your accountant` : undefined}
+        title={hot ? `${unread} outstanding message${unread === 1 ? "" : "s"} from your accountant — your turn` : undefined}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md border bg-white text-xs font-medium transition-colors ${hot ? "border-red-500 text-slate-800 hover:bg-red-50" : "border-slate-300 text-slate-800 hover:bg-slate-50"}`}
       >
         <MessageSquare size={13} className={hot ? "text-red-600" : ""} /> Ask my accountant

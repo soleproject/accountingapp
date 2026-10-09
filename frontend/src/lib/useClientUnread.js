@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { isUnread } from "@/components/ClientMessagesCard";
+import { bucketOf } from "@/components/ClientMessagesCard";
 
 export const CLIENT_MESSAGES_CHANGED = "client-messages-changed";
 export const notifyClientMessagesChanged = () => window.dispatchEvent(new Event(CLIENT_MESSAGES_CHANGED));
 
-/** Count of unresolved threads with messages this client hasn't opened yet. Polls + refreshes on change events. */
+/** Count of "Outstanding" threads for the client (accountant spoke last, not resolved). Polls + refreshes on change events. */
 export function useClientUnread(companyId) {
   const { user } = useAuth();
   const [count, setCount] = useState(0);
   const load = useCallback(() => {
     if (!companyId || !user?.id) return;
     api.get(`/companies/${companyId}/client-messages`)
-      .then(r => setCount((r.data.messages || []).filter(m => m.status !== "resolved" && isUnread(m, user.id)).length))
+      .then(r => setCount((r.data.messages || []).filter(m => bucketOf(m, "client") === "outstanding").length))
       .catch(() => {});
   }, [companyId, user?.id]);
   useEffect(() => {

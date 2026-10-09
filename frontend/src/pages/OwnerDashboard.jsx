@@ -104,7 +104,7 @@ export default function OwnerDashboard() {
             return (
               <button key={t.key} onClick={() => navigate(t.path)} data-unread={hot ? "true" : "false"}
                 className={`px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors inline-flex items-center gap-1.5 ${tab === t.key ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"} ${hot ? "ring-1 ring-inset ring-red-500" : ""}`}
-                data-testid={`owner-tab-${t.key}`} title={hot ? `${unread} new message${unread === 1 ? "" : "s"}` : undefined}>
+                data-testid={`owner-tab-${t.key}`} title={hot ? `${unread} outstanding message${unread === 1 ? "" : "s"} — your turn` : undefined}>
                 {t.label}
                 {hot && <span className="inline-flex items-center gap-0.5 text-red-600" data-testid="owner-tab-messages-bell"><Bell size={13} className="fill-red-600" /><span className="text-[11px] font-bold">{unread}</span></span>}
               </button>
