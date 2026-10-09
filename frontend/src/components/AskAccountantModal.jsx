@@ -201,7 +201,7 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
         <input value={subject} onChange={e => setSubject(e.target.value)} maxLength={120}
           placeholder="Subject (optional) — e.g. 1099 for my contractor"
           className="mt-3 w-full h-10 rounded-xl border border-slate-300 px-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-subject" />
-        <textarea value={body} onChange={e => setBody(e.target.value)} rows={3} autoFocus
+        <textarea value={body} onChange={e => setBody(e.target.value)} rows={7} autoFocus
           placeholder={txn ? "What's your question about this transaction?" : "What do you need help with?"}
           className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-body" />
         <PendingAttachments pending={att.pending} remove={att.remove} testid="ask-accountant" />
