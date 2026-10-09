@@ -1630,8 +1630,8 @@ function _EmptyTab({ text }) {
 // questions, check-in items deferred to the bookkeeper). Reply inline.
 function InProgressClientMessages({ items, onNav, refetch }) {
   if (!items.length) return <_EmptyTab text="No messages from clients yet. Clients reach you here via “Ask my accountant”, a transaction's “Ask my accountant about this”, or a check-in's “send to my bookkeeper”." />;
-  const reply = async (m, text) => {
-    try { await api.post(`/client-messages/${m.id}/reply`, { text }); toast.success("Reply sent"); refetch?.(); }
+  const reply = async (m, text, _resolve, attachments = []) => {
+    try { await api.post(`/client-messages/${m.id}/reply`, { text, attachments }); toast.success("Reply sent"); refetch?.(); }
     catch { toast.error("Couldn't send reply"); }
   };
   return (

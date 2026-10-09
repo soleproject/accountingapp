@@ -145,7 +145,8 @@ function InboxRow({ m, perspective, unread, onOpen, testid }) {
   const last = (m.replies || [])[m.replies?.length - 1];
   const lastAuthorId = last ? last.by : m.from_user_id;
   const lastName = last ? last.by_name : sender;
-  const lastText = last ? last.text : m.body;
+  const attLabel = (x) => x.attachments?.length ? `📎 ${x.attachments.length === 1 ? x.attachments[0].name : `${x.attachments.length} files`}` : "";
+  const lastText = last ? (last.text || attLabel(last)) : (m.body || attLabel(m));
   const who = user?.id && lastAuthorId === user.id ? "You" : (lastName || "").split(" ")[0];
   const count = (m.replies || []).length;
   return (

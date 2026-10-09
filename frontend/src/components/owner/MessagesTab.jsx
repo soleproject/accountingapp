@@ -16,8 +16,8 @@ export default function MessagesTab({ companyId }) {
   }, [companyId]);
   useEffect(() => { load(); }, [load]);
 
-  const reply = async (m, text) => {
-    try { await api.post(`/client-messages/${m.id}/reply`, { text }); toast.success("Sent"); load(); }
+  const reply = async (m, text, _resolve, attachments = []) => {
+    try { await api.post(`/client-messages/${m.id}/reply`, { text, attachments }); toast.success("Sent"); load(); }
     catch { toast.error("Couldn't send"); }
   };
   const resolve = async (m) => {

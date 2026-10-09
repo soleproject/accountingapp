@@ -11,17 +11,34 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from db import db
 from auth import get_current_user
 from deps import require_company
 from routes.cockpit import require_firm_or_pro
+import storage as objstore
 
 router = APIRouter(prefix="/api", tags=["client-messages"])
 log = logging.getLogger(__name__)
 KINDS = ("ask_accountant", "txn_question", "checkin_deferred")
+ATTACH_MAX_BYTES = 15 * 1024 * 1024
+ATTACH_TYPES = ("image/", "application/pdf")
+
+
+def _attach_ref(rec: dict) -> dict:
+    return {"id": rec["id"], "name": rec["name"], "mime": rec["mime"], "size": rec["size"]}
+
+
+async def _resolve_attachments(ids: list[str], cid: str, user_id: str) -> list[dict]:
+    if not ids:
+        return []
+    rows = await db.client_message_files.find({"id": {"$in": ids[:10]}, "company_id": cid, "uploaded_by": user_id}, {"_id": 0}).to_list(10)
+    if len(rows) != len(set(ids[:10])):
+        raise HTTPException(400, "One or more attachments are invalid")
+    return [_attach_ref(r) for r in rows]
 
 
 def _now() -> str:
@@ -40,7 +57,7 @@ async def pro_for_company(cid: str) -> Optional[dict]:
 async def create_message(*, company_id: str, kind: str, body: str, from_user: dict | None = None,
                          from_name: str | None = None, from_email: str | None = None,
                          txn_id: str | None = None, item: dict | None = None, notify: bool = True,
-                         subject: str | None = None) -> dict:
+                         subject: str | None = None, attachments: list[dict] | None = None) -> dict:
     comp = await db.companies.find_one({"id": company_id}, {"_id": 0, "name": 1})
     txn = None
     if txn_id:
@@ -53,6 +70,7 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
         "from_user_id": (from_user or {}).get("id"), "from_name": from_name or (from_user or {}).get("name"),
         "from_email": from_email or (from_user or {}).get("email"),
         "txn": txn, "item": item, "status": "open", "replies": [], "created_at": _now(), "updated_at": _now(),
+        "attachments": attachments or [],
         "read_by": ({(from_user or {}).get("id"): _now()} if (from_user or {}).get("id") else {}),
     }
     await db.client_messages.insert_one(doc)
@@ -67,6 +85,8 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
                 ctx = f"<p style='color:#64748b;font-size:13px'>{escape(txn['merchant'] or '')} · {txn.get('amount')} · {txn.get('date') or ''}</p>" if txn else ""
                 if item:
                     ctx = f"<p style='color:#64748b;font-size:13px'>Check-in item: {escape(item.get('prompt') or '')}</p>"
+                if doc["attachments"]:
+                    ctx += f"<p style='color:#64748b;font-size:13px'>📎 {len(doc['attachments'])} attachment{'s' if len(doc['attachments']) != 1 else ''}</p>"
                 html = (f"<p><b>{escape(doc['from_name'] or 'Your client')}</b> ({escape(doc['company_name'] or '')}) {label}:</p>"
                         f"<blockquote style='border-left:3px solid #e2e8f0;margin:0;padding:8px 12px'>{escape(doc['body'])}</blockquote>{ctx}"
                         f"<p><a href='{public_base_url()}/cockpit?open=messages'>Reply in the Cockpit →</a></p>")
@@ -78,18 +98,59 @@ async def create_message(*, company_id: str, kind: str, body: str, from_user: di
 
 
 class MessageIn(BaseModel):
-    body: str = Field(..., min_length=2, max_length=4000)
+    body: str = Field("", max_length=4000)
     subject: Optional[str] = Field(None, max_length=120)
     kind: str = "ask_accountant"
     txn_id: Optional[str] = None
+    attachments: list[str] = []
 
 
 @router.post("/companies/{cid}/client-messages")
 async def post_message(cid: str, inp: MessageIn, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    if len(inp.body.strip()) < 2 and not inp.attachments:
+        raise HTTPException(422, "Write a message or attach a file")
+    atts = await _resolve_attachments(inp.attachments, cid, user["id"])
     kind = "txn_question" if inp.txn_id else (inp.kind if inp.kind in KINDS else "ask_accountant")
-    doc = await create_message(company_id=cid, kind=kind, body=inp.body, from_user=user, txn_id=inp.txn_id, subject=inp.subject)
+    doc = await create_message(company_id=cid, kind=kind, body=inp.body, from_user=user, txn_id=inp.txn_id, subject=inp.subject, attachments=atts)
     return {"ok": True, "message": doc}
+
+
+@router.post("/companies/{cid}/client-messages/attachments")
+async def upload_attachment(cid: str, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    mime = file.content_type or "application/octet-stream"
+    if not mime.startswith(ATTACH_TYPES):
+        raise HTTPException(415, "Only photos (JPG/PNG/HEIC) and PDFs are allowed")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > ATTACH_MAX_BYTES:
+        raise HTTPException(413, "File is larger than 15 MB")
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()[:12] if "." in (file.filename or "") else "bin"
+    fid = str(uuid.uuid4())
+    try:
+        result = objstore.put_object(f"{objstore.APP_NAME}/{cid}/client_messages/{fid}.{ext}", data, mime)
+    except objstore.StorageUnavailable as e:
+        raise HTTPException(503, f"Storage unavailable — try again shortly ({e})")
+    rec = {"id": fid, "company_id": cid, "storage_path": result["path"], "name": file.filename or f"{fid}.{ext}",
+           "mime": mime, "size": len(data), "uploaded_by": user["id"], "uploaded_at": _now()}
+    await db.client_message_files.insert_one(rec)
+    return _attach_ref(rec)
+
+
+@router.get("/companies/{cid}/client-messages/files/{fid}")
+async def download_attachment(cid: str, fid: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    rec = await db.client_message_files.find_one({"id": fid, "company_id": cid}, {"_id": 0})
+    if not rec:
+        raise HTTPException(404, "File not found")
+    try:
+        data, ct = objstore.get_object(rec["storage_path"])
+    except objstore.StorageUnavailable as e:
+        raise HTTPException(503, f"Storage unavailable — try again shortly ({e})")
+    return Response(content=data, media_type=rec.get("mime") or ct,
+                    headers={"Content-Disposition": f"inline; filename=\"{rec['name']}\"", "Cache-Control": "private, max-age=3600"})
 
 
 @router.get("/companies/{cid}/client-messages")
@@ -111,8 +172,9 @@ async def list_pro_messages(status: str = "open", user: dict = Depends(get_curre
 
 
 class ReplyIn(BaseModel):
-    text: str = Field(..., min_length=1, max_length=4000)
+    text: str = Field("", max_length=4000)
     resolve: bool = False
+    attachments: list[str] = []
 
 
 @router.post("/client-messages/{mid}/reply")
@@ -121,8 +183,11 @@ async def reply_message(mid: str, inp: ReplyIn, user: dict = Depends(get_current
     if not msg:
         raise HTTPException(404, "Message not found")
     await require_company(user, msg["company_id"])
+    if not inp.text.strip() and not inp.attachments:
+        raise HTTPException(422, "Write a message or attach a file")
+    atts = await _resolve_attachments(inp.attachments, msg["company_id"], user["id"])
     is_pro = user.get("role") in ("pro", "superadmin", "admin", "partner", "firm_staff")
-    reply = {"id": str(uuid.uuid4()), "by": user["id"], "by_name": user.get("name") or user.get("email"), "by_pro": is_pro, "text": inp.text.strip(), "at": _now()}
+    reply = {"id": str(uuid.uuid4()), "by": user["id"], "by_name": user.get("name") or user.get("email"), "by_pro": is_pro, "text": inp.text.strip(), "at": _now(), "attachments": atts}
     status = "resolved" if (inp.resolve and not is_pro) else ("replied" if is_pro else "open")
     await db.client_messages.update_one({"id": mid}, {"$push": {"replies": reply}, "$set": {"status": status, "updated_at": _now(), f"read_by.{user['id']}": _now()}})
     if is_pro and msg.get("from_email"):
@@ -130,7 +195,8 @@ async def reply_message(mid: str, inp: ReplyIn, user: dict = Depends(get_current
             from email_dispatcher import dispatch, public_base_url
             from email_templates import escape
             html = (f"<p><b>{escape(reply['by_name'] or 'Your accountant')}</b> replied to your message:</p>"
-                    f"<blockquote style='border-left:3px solid #e2e8f0;margin:0;padding:8px 12px'>{escape(reply['text'])}</blockquote>"
+                    f"<blockquote style='border-left:3px solid #e2e8f0;margin:0;padding:8px 12px'>{escape(reply['text']) or '<i>(attachment)</i>'}</blockquote>"
+                    + (f"<p style='color:#64748b;font-size:13px'>📎 {len(atts)} attachment{'s' if len(atts) != 1 else ''}</p>" if atts else "") +
                     f"<p style='color:#64748b;font-size:13px'>You asked: {escape(msg['body'][:200])}</p>"
                     f"<p><a href='{public_base_url()}/dashboard?messages=1'>View in the app →</a></p>")
             await dispatch(kind="client_message_reply", to=msg["from_email"], subject=f"Reply from {reply['by_name']}: {msg['body'][:50]}",

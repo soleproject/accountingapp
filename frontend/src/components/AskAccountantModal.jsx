@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
+import { useAttachments, AttachButton, PendingAttachments, AttachmentList } from "@/components/MessageAttachments";
 
 const KIND_LABEL = { txn_question: "About a transaction", checkin_deferred: "From a check-in", ask_accountant: "Message" };
 
@@ -45,11 +46,13 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(null); // "body" | reply id
+  const att = useAttachments(m.company_id);
   const send = async (resolve, override) => {
     const t = (override ?? text).trim();
-    if (!t) return;
+    const files = override ? [] : att.ready;
+    if (!t && !files.length) return;
     setBusy(true);
-    try { await onReply(m, t, resolve); setText(""); } finally { setBusy(false); }
+    try { await onReply(m, t, resolve, files); setText(""); if (!override) att.reset(); } finally { setBusy(false); }
   };
   const run = async (fn, ok) => {
     try { await fn(); toast.success(ok); setEditing(null); onChanged?.(); }
@@ -71,11 +74,11 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
       </div>
       {m.item?.prompt && <div className="text-[11px] text-slate-500 italic text-center mb-2 truncate">Check-in asked: {m.item.prompt}</div>}
       <div className="space-y-2" data-testid={`client-message-bubbles-${m.id}`}>
-        <Bubble mine={rootMine} name={m.from_name || m.from_email || "Client"} at={m.created_at} edited={!!m.edited_at} text={m.body}
+        <Bubble mine={rootMine} name={m.from_name || m.from_email || "Client"} at={m.created_at} edited={!!m.edited_at} text={m.body} atts={m.attachments} cid={m.company_id}
           editing={editing === "body"} onEdit={() => setEditing("body")} onDelete={deleteThread} onSave={editBody} onCancel={() => setEditing(null)} testid={`client-message-${m.id}`} />
         {hidden > 0 && <div className="text-center text-[11px] text-slate-400 py-1" data-testid={`client-message-hidden-${m.id}`}>… {hidden} earlier repl{hidden === 1 ? "y" : "ies"} — open the thread to see all</div>}
         {shown.map(r => (
-          <Bubble key={r.id} mine={mine(r.by)} name={r.by_name} at={r.at} edited={!!r.edited_at} text={r.text}
+          <Bubble key={r.id} mine={mine(r.by)} name={r.by_name} at={r.at} edited={!!r.edited_at} text={r.text} atts={r.attachments} cid={m.company_id}
             editing={editing === r.id} onEdit={() => setEditing(r.id)} onDelete={() => deleteReply(r)} onSave={(t) => editReply(r, t)} onCancel={() => setEditing(null)} testid={`client-message-reply-${r.id}`} />
         ))}
       </div>
@@ -90,13 +93,15 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
               ))}
             </div>
           )}
+        <PendingAttachments pending={att.pending} remove={att.remove} testid={`client-message-${m.id}`} />
         <div className="mt-2 flex items-center gap-2">
-          <input value={text} onChange={e => setText(e.target.value)} placeholder="Type a message…" className="flex-1 h-10 rounded-full border border-slate-300 bg-white px-4 text-[13px] focus:border-sky-500 focus:ring-2 focus:ring-sky-100 outline-none" data-testid={`client-message-reply-input-${m.id}`}
+          <AttachButton pick={att.pick} disabled={busy} testid={`client-message-${m.id}`} />
+          <input value={text} onChange={e => setText(e.target.value)} placeholder={att.pending.length ? "Add a note (optional)…" : "Type a message…"} className="flex-1 min-w-0 h-10 rounded-full border border-slate-300 bg-white px-4 text-[13px] focus:border-sky-500 focus:ring-2 focus:ring-sky-100 outline-none" data-testid={`client-message-reply-input-${m.id}`}
             onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(false); } }} />
-          <button onClick={() => send(false)} disabled={busy || !text.trim()} title={replyLabel} className="h-10 w-10 shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center disabled:opacity-40 transition-colors" data-testid={`client-message-reply-send-${m.id}`}>
+          <button onClick={() => send(false)} disabled={busy || att.busy || (!text.trim() && !att.ready.length)} title={replyLabel} className="h-10 w-10 shrink-0 rounded-full bg-sky-500 hover:bg-sky-600 text-white flex items-center justify-center disabled:opacity-40 transition-colors" data-testid={`client-message-reply-send-${m.id}`}>
             {busy ? <Loader2 size={15} className="animate-spin" /> : <Send size={15} />}
           </button>
-          {replyLabel === "Reply" && !hideResolve && <button onClick={() => send(true)} disabled={busy || !text.trim()} className="h-10 px-3 rounded-full border border-slate-300 text-xs font-semibold disabled:opacity-50 whitespace-nowrap" data-testid={`client-message-reply-resolve-${m.id}`}>Reply &amp; resolve</button>}
+          {replyLabel === "Reply" && !hideResolve && <button onClick={() => send(true)} disabled={busy || att.busy || (!text.trim() && !att.ready.length)} className="h-10 px-3 rounded-full border border-slate-300 text-xs font-semibold disabled:opacity-50 whitespace-nowrap" data-testid={`client-message-reply-resolve-${m.id}`}>Reply &amp; resolve</button>}
         </div>
         </>
       )}
@@ -124,14 +129,14 @@ export function fmtDay(at) {
 /** Thread topic: explicit subject, else merchant + first line of the opening message. */
 export function topicOf(m) {
   if (m.subject) return m.subject;
-  const first = (m.body || "").split("\n")[0].trim();
+  const first = (m.body || "").split("\n")[0].trim() || (m.attachments?.length ? `📎 ${m.attachments[0].name}` : "");
   return m.txn?.merchant ? `${m.txn.merchant} · ${first}` : first;
 }
 
 export const KIND_TAG = { txn_question: "Transaction", checkin_deferred: "Check-in", ask_accountant: "Question" };
 
 /** One chat bubble — mine on the right in light blue, theirs on the left in gray with an avatar initial. */
-function Bubble({ mine, name, at, edited, text, editing, onEdit, onDelete, onSave, onCancel, testid }) {
+function Bubble({ mine, name, at, edited, text, atts, cid, editing, onEdit, onDelete, onSave, onCancel, testid }) {
   const initial = (name || "?").trim().charAt(0).toUpperCase();
   return (
     <div className={`group flex items-end gap-2 ${mine ? "flex-row-reverse" : ""}`} data-testid={testid} data-mine={mine ? "true" : "false"}>
@@ -139,7 +144,8 @@ function Bubble({ mine, name, at, edited, text, editing, onEdit, onDelete, onSav
       <div className={`max-w-[78%] min-w-0 flex flex-col ${mine ? "items-end" : "items-start"}`}>
         {editing
           ? <div className="w-full min-w-[220px]"><InlineEditor initial={text} onSave={onSave} onCancel={onCancel} testid={testid} /></div>
-          : <div className={`px-3.5 py-2 text-[13px] leading-snug whitespace-pre-wrap break-words rounded-2xl ${mine ? "bg-sky-100 text-sky-950 rounded-br-md" : "bg-slate-100 text-slate-900 rounded-bl-md"}`} data-testid={`${testid}-text`}>{text}</div>}
+          : text ? <div className={`px-3.5 py-2 text-[13px] leading-snug whitespace-pre-wrap break-words rounded-2xl ${mine ? "bg-sky-100 text-sky-950 rounded-br-md" : "bg-slate-100 text-slate-900 rounded-bl-md"}`} data-testid={`${testid}-text`}>{text}</div> : null}
+        {atts?.length > 0 && <div className={text ? "mt-1.5" : ""}><AttachmentList atts={atts} cid={cid} mine={mine} testid={`${testid}-attachments`} /></div>}
         <div className={`mt-0.5 flex items-center gap-1 text-[10px] text-slate-400 ${mine ? "flex-row-reverse" : ""}`}>
           <span>{mine ? "You" : name} · {fmtWhen(at)}{edited ? " · edited" : ""}</span>
           {mine && !editing && <span className="opacity-70 sm:opacity-0 sm:group-hover:opacity-100 focus-within:opacity-100 transition-opacity"><OwnControls onEdit={onEdit} onDelete={onDelete} testid={testid} /></span>}
@@ -157,24 +163,26 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
   const [subject, setSubject] = useState("");
   const [busy, setBusy] = useState(false);
   const [data, setData] = useState(null);
+  const att = useAttachments(cid);
 
   const load = () => cid && api.get(`/companies/${cid}/client-messages`).then(r => setData(r.data)).catch(() => setData({ messages: [], pro: null }));
-  useEffect(() => { if (open) { load(); setBody(""); setSubject(""); } }, [open, cid]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { load(); setBody(""); setSubject(""); att.reset(); } }, [open, cid]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!open) return null;
 
+  const canSend = body.trim().length >= 2 || att.ready.length > 0;
   const send = async () => {
-    if (!body.trim()) return;
+    if (!canSend) return;
     setBusy(true);
     try {
-      await api.post(`/companies/${cid}/client-messages`, { body: body.trim(), subject: subject.trim() || null, txn_id: txn?.id || null, kind: txn ? "txn_question" : "ask_accountant" });
+      await api.post(`/companies/${cid}/client-messages`, { body: body.trim(), subject: subject.trim() || null, txn_id: txn?.id || null, kind: txn ? "txn_question" : "ask_accountant", attachments: att.ready });
       toast.success(data?.pro?.name ? `Sent to ${data.pro.name}` : "Sent to your accountant");
-      setBody(""); setSubject("");
+      setBody(""); setSubject(""); att.reset();
       load();
       if (txn) onClose?.();
     } catch (e) { toast.error(e?.response?.data?.detail || "Couldn't send"); }
     finally { setBusy(false); }
   };
-  const reply = async (m, text) => { await api.post(`/client-messages/${m.id}/reply`, { text }); load(); };
+  const reply = async (m, text, _resolve, attachments = []) => { await api.post(`/client-messages/${m.id}/reply`, { text, attachments }); load(); };
 
   return (
     <div className="fixed inset-0 z-[1200] bg-slate-900/50 flex items-end sm:items-center justify-center p-0 sm:p-6" onClick={onClose} data-testid="ask-accountant-modal">
@@ -197,8 +205,10 @@ export default function AskAccountantModal({ open, onClose, txn = null, companyI
         <textarea value={body} onChange={e => setBody(e.target.value)} rows={3} autoFocus
           placeholder={txn ? "What's your question about this transaction?" : "What do you need help with?"}
           className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-slate-900 focus:ring-2 focus:ring-slate-200 outline-none" data-testid="ask-accountant-body" />
-        <div className="mt-2 flex justify-end">
-          <button onClick={send} disabled={busy || body.trim().length < 2} className="h-10 px-4 rounded-full bg-slate-900 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50" data-testid="ask-accountant-send">
+        <PendingAttachments pending={att.pending} remove={att.remove} testid="ask-accountant" />
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2"><AttachButton pick={att.pick} disabled={busy} testid="ask-accountant" /><span className="text-[11px] text-slate-500 hidden sm:inline">Attach a receipt or PDF</span></div>
+          <button onClick={send} disabled={busy || att.busy || !canSend} className="h-10 px-4 rounded-full bg-slate-900 text-white text-sm font-semibold flex items-center gap-2 disabled:opacity-50" data-testid="ask-accountant-send">
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send
           </button>
         </div>
