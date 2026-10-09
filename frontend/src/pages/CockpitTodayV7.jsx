@@ -326,7 +326,7 @@ export default function CockpitTodayV7() {
                 />
                 <ClickableStat
                   testid="v7-stat-in-progress"
-                  label="In Progress"
+                  label="AI In Progress"
                   sublabel={inProgressTotal > 0 ? "click to open live work" : "nothing moving right now"}
                   value={inProgressTotal}
                   tint="indigo"
@@ -1264,7 +1264,7 @@ const IN_PROGRESS_TABS = [
 
 // Standalone work cards that share the In Progress panel chrome.
 const PANEL_MODES = {
-  inprogress: { tab: "ai_emails", title: "In Progress", icon: Clock, tint: "indigo",
+  inprogress: { tab: "ai_emails", title: "AI In Progress", icon: Clock, tint: "indigo",
                 sub: "Everything the AI has moving right now — emails it's waiting on, scheduled & live check-ins, running recons.", testid: "v7-in-progress-panel" },
   messages:   { tab: "messages", title: "Client Messages", icon: MessageSquare, tint: "emerald",
                 sub: "Questions your clients sent you — from “Ask my accountant”, a transaction, or a check-in they sent to their bookkeeper.", testid: "v7-client-messages-panel" },
