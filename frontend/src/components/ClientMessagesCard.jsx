@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArrowLeft, MessageCircle } from "lucide-react";
+import { ArrowLeft, MessageCircle, CheckCircle2 } from "lucide-react";
 import { MessageThread, fmtDay, fmtWhen, topicOf, KIND_TAG } from "@/components/AskAccountantModal";
 import { useAuth } from "@/lib/auth";
 
@@ -48,13 +48,21 @@ export function ClientMessagesCard({ messages, perspective, onReply, onResolve, 
   const replyLabel = perspective === "pro" ? "Reply" : "Reply back";
 
   if (focused) {
+    const canResolve = perspective === "client" && focused.status !== "resolved";
     return (
       <div data-testid={`${testidPrefix}-thread-focus`}>
-        <button onClick={() => setFocus(null)} className="text-[12px] text-slate-600 hover:text-slate-900 flex items-center gap-1 mb-2" data-testid={`${testidPrefix}-thread-back`}>
-          <ArrowLeft size={13} /> All threads
-        </button>
-        <ThreadHeader m={focused} perspective={perspective} onResolve={onResolve} onOpenCompany={onOpenCompany} testid={`${testidPrefix}-focus`} />
-        <MessageThread m={focused} onReply={onReply} canReply={focused.status !== "resolved"} replyLabel={replyLabel} hideResolve onChanged={onChangedWrap} />
+        <div className="flex items-center gap-2 mb-3">
+          <button onClick={() => setFocus(null)} className="h-8 px-3 rounded-full border border-slate-300 bg-white text-[12px] font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 flex items-center gap-1.5 transition-colors" data-testid={`${testidPrefix}-thread-back`}>
+            <ArrowLeft size={13} /> All threads
+          </button>
+          {canResolve && (
+            <button onClick={() => onResolve?.(focused)} className="h-8 px-3 rounded-full border border-emerald-200 bg-emerald-50 text-[12px] font-medium text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300 flex items-center gap-1.5 transition-colors" data-testid={`${testidPrefix}-focus-resolve`}>
+              <CheckCircle2 size={13} /> Mark resolved
+            </button>
+          )}
+        </div>
+        <ThreadHeader m={focused} perspective={perspective} onOpenCompany={onOpenCompany} testid={`${testidPrefix}-focus`} />
+        <MessageThread m={focused} onReply={onReply} canReply={focused.status !== "resolved"} replyLabel={replyLabel} hideResolve hideSubject onChanged={onChangedWrap} />
       </div>
     );
   }
@@ -125,19 +133,14 @@ function InboxRow({ m, perspective, yourTurn, onOpen, testid }) {
   );
 }
 
-function ThreadHeader({ m, perspective, onResolve, onOpenCompany, testid }) {
+function ThreadHeader({ m, perspective, onOpenCompany, testid }) {
   const sender = m.from_name || m.from_email || "Client";
   return (
-    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2">
-      <div className="min-w-0">
-        {perspective === "pro"
-          ? <button onClick={() => onOpenCompany?.(m)} className="text-[13px] font-semibold text-slate-900 hover:underline truncate block" data-testid={`${testid}-company`}>{m.company || m.company_name || "—"}</button>
-          : <div className="text-[13px] font-semibold text-slate-900 truncate" data-testid={`${testid}-topic`}>{topicOf(m)}</div>}
-        <div className="text-[11px] text-slate-500 truncate">Started by {sender} · {fmtWhen(m.created_at)}{perspective === "pro" ? ` — ${topicOf(m)}` : ""}</div>
-      </div>
-      {perspective === "client" && m.status !== "resolved" && (
-        <button onClick={() => onResolve?.(m)} className="text-[11px] text-slate-500 hover:text-emerald-700 shrink-0" data-testid={`${testid}-resolve`}>Mark resolved</button>
-      )}
+    <div className="border-b border-slate-100 pb-2 min-w-0">
+      {perspective === "pro"
+        ? <button onClick={() => onOpenCompany?.(m)} className="text-[13px] font-semibold text-slate-900 hover:underline truncate block" data-testid={`${testid}-company`}>{m.company || m.company_name || "—"}</button>
+        : <div className="text-[13px] font-semibold text-slate-900 truncate" data-testid={`${testid}-topic`}>{topicOf(m)}</div>}
+      <div className="text-[11px] text-slate-500 truncate">Started by {sender} · {fmtWhen(m.created_at)}{perspective === "pro" ? ` — ${topicOf(m)}` : ""}</div>
     </div>
   );
 }

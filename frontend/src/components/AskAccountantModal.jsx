@@ -37,7 +37,7 @@ function InlineEditor({ initial, onSave, onCancel, testid }) {
   );
 }
 
-export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hideResolve = false, maxReplies = null, onChanged }) {
+export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hideResolve = false, hideSubject = false, maxReplies = null, onChanged }) {
   const { user } = useAuth();
   const replies = m.replies || [];
   const hidden = maxReplies !== null && replies.length > maxReplies ? replies.length - maxReplies : 0;
@@ -63,7 +63,7 @@ export function MessageThread({ m, onReply, canReply, replyLabel = "Reply", hide
   const ctx = [KIND_LABEL[m.kind] || "Message", m.txn && `${m.txn.date} · ${m.txn.merchant} · ${fmtAmt(m.txn.amount)}${m.txn.category ? ` · ${m.txn.category}` : ""}`].filter(Boolean).join(" — ");
   return (
     <div className="py-3" data-testid={`client-message-${m.id}`}>
-      {m.subject && <div className="text-[13px] font-semibold text-slate-900 text-center mb-1" data-testid={`client-message-subject-${m.id}`}>{m.subject}</div>}
+      {m.subject && !hideSubject && <div className="text-[13px] font-semibold text-slate-900 text-center mb-1" data-testid={`client-message-subject-${m.id}`}>{m.subject}</div>}
       <div className="flex items-center justify-center gap-2 mb-2 flex-wrap">
         <span className="text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2.5 py-0.5 font-mono-num truncate max-w-full" data-testid={`client-message-context-${m.id}`}>{ctx}</span>
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${m.status === "resolved" ? "bg-emerald-50 text-emerald-700" : m.status === "replied" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700"}`}>{m.status}</span>
