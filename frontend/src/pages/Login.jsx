@@ -145,7 +145,7 @@ export default function Login() {
         u.role === "superadmin" ? "/admin"
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
-        : u.role === "pro" ? "/pro/clients"
+        : u.role === "pro" ? "/cockpit"
         : u.role === "client" ? "/owner"
         : (u.default_landing || "/dashboard")
       );
@@ -168,7 +168,7 @@ export default function Login() {
         u.role === "superadmin" ? "/admin"
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
-        : u.role === "pro" ? "/pro/clients"
+        : u.role === "pro" ? "/cockpit"
         : u.role === "client" ? "/owner"
         : (u.default_landing || "/dashboard")
       );
