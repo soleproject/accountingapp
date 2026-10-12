@@ -886,10 +886,13 @@ async def analyze_receipt_for_categorization(
     txn_desc: str | None = None,
     company_industry: str | None = None,
     company_name: str | None = None,
+    prompt_addendum: str | None = None,
 ) -> dict | None:
     """Read a business receipt with GPT-4o vision and propose a Chart-
     of-Accounts category for each line item. Returns None on failure
     — callers should fall back to asking the client to type a summary.
+    `prompt_addendum` lets a caller append flow-specific rules (Receipt
+    Upload uses it for its tax-inclusive policy).
     """
     if not attachment_data_url:
         return None
@@ -933,7 +936,7 @@ async def analyze_receipt_for_categorization(
         resp = await client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": _RECEIPT_CATEGORIZATION_PROMPT},
+                {"role": "system", "content": _RECEIPT_CATEGORIZATION_PROMPT + (prompt_addendum or "")},
                 {"role": "user", "content": [
                     {"type": "text", "text": context_hint},
                     {"type": "image_url",
@@ -972,14 +975,24 @@ async def analyze_receipt_for_categorization(
             continue
         if amt <= 0:
             continue
-        clean.append({
+        row = {
             "description":   str(it.get("description") or "")[:80] or "Item",
             "amount":        amt,
             "account_code":  str(it.get("account_code") or "")[:12] or None,
             "account_name":  str(it.get("account_name") or "")[:64] or None,
             "category_hint": str(it.get("category_hint") or it.get("line_kind") or "")[:80] or None,
             "kind":          (it.get("kind") or "item").lower()[:16],
-        })
+        }
+        if isinstance(it.get("taxable"), bool):
+            row["taxable"] = it["taxable"]
+        if it.get("recoverable") is True:
+            row["recoverable"] = True
+        try:
+            if it.get("tax") is not None and float(it["tax"]) > 0:
+                row["tax"] = round(float(it["tax"]), 2)
+        except (TypeError, ValueError):
+            pass
+        clean.append(row)
     if not clean:
         return None
     parsed["line_items"] = clean
