@@ -1522,7 +1522,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
               ) : null}
             </>
           )}
-              {analysis && (
+              {analysis && (<>
                 <ReceiptCategoryPreview
                   hideActions={mode === "ai"}
                   hideNarrative={mode === "ai"}
@@ -1590,7 +1590,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
                   onRescan={() => { setAnalysis(null); setLineItems([]); runScan(); }}
                 />
                 <TaxFoldNote detail={analysis?.categorization?.tax_detail || analysis?.tax_detail} />
-              )}
+              </>)}
           {!attachment && !(mode === "ai" && analysis) && (
             <button
               type="button"
