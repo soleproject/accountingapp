@@ -22,7 +22,7 @@ function Stat({ icon: Icon, label, value, sub, tone = "", testid }) {
 
 export default function Portfolio() {
   const nav = useNavigate();
-  const { switchCompany } = useCompany();
+  const { switchCompany, currentId } = useCompany();
   const fmtMoney = useMoneyFmt();
   const [period, setPeriod] = useState("ytd");
   const [d, setD] = useState(null);
@@ -31,8 +31,8 @@ export default function Portfolio() {
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/portfolio?period=${period}`).then((r) => setD(r.data)).catch(() => setD({ companies: [], totals: {} })).finally(() => setLoading(false));
-  }, [period]);
+    api.get(`/portfolio?period=${period}${currentId ? `&company_id=${currentId}` : ""}`).then((r) => setD(r.data)).catch(() => setD({ companies: [], totals: {} })).finally(() => setLoading(false));
+  }, [period, currentId]);
 
   const money = (v) => (v == null ? "—" : fmtMoney(Number(v)));
   const attn = (r) => (r.needs_review || 0) + (r.overdue_invoices || 0) + (r.overdue_bills || 0) + (r.unreconciled || 0);
@@ -56,7 +56,7 @@ export default function Portfolio() {
         <div className="flex-1 min-w-[240px]">
           <div className="text-[10px] uppercase tracking-widest font-bold text-slate-500 inline-flex items-center gap-1.5"><Building2 size={12} /> Portfolio</div>
           <h1 className="font-heading text-3xl mt-1">All my businesses</h1>
-          <p className="text-sm text-slate-500 mt-1">{d?.count ?? "—"} companies · {d?.period_label || ""}{d?.mixed_basis ? " · mixed cash/accrual basis — P&L totals are indicative" : ""}</p>
+          <p className="text-sm text-slate-500 mt-1" data-testid="portfolio-subtitle">{d?.count ?? "—"} {d?.count === 1 ? "company" : "companies"}{d?.owner_label ? ` owned by ${d.owner_label}` : ""} · {d?.period_label || ""}{d?.mixed_basis ? " · mixed cash/accrual basis — P&L totals are indicative" : ""}</p>
         </div>
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1" data-testid="portfolio-period">
           {PERIODS.map(([k, l]) => (
@@ -65,7 +65,7 @@ export default function Portfolio() {
         </div>
       </div>
 
-      {d && !d.eligible && !loading && (
+      {d && !d.eligible && !d.scoped && !loading && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm" data-testid="portfolio-ineligible">
           The portfolio view appears once you have two or more companies under your login. Add another from <button onClick={() => nav("/my-businesses")} className="underline font-semibold">My Businesses</button>.
         </div>
