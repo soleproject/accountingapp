@@ -1342,6 +1342,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
                 onRescan={() => {}}
                 onGroupClick={(key) => setDrillKey(key)}
               />
+              <TaxFoldNote detail={analysis?.categorization?.tax_detail || analysis?.tax_detail} />
 
               {/* Save + Rescan */}
               <div className="flex items-center gap-2 pt-1">
@@ -1588,6 +1589,7 @@ function RecModal({ currentId, accts, contacts, initial, onClose, linkTransactio
                   }}
                   onRescan={() => { setAnalysis(null); setLineItems([]); runScan(); }}
                 />
+                <TaxFoldNote detail={analysis?.categorization?.tax_detail || analysis?.tax_detail} />
               )}
           {!attachment && !(mode === "ai" && analysis) && (
             <button
@@ -1884,6 +1886,33 @@ function PaidFromResolver({ accts, busy, onPersonal, onPick, onClose }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/** Audit note under the category preview: sales tax was extracted but
+ *  folded into the cost of the goods/services (Receipt Upload policy). */
+function TaxFoldNote({ detail }) {
+  const [open, setOpen] = useState(false);
+  if (!detail || !(detail.amount > 0)) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2 text-[11px] text-blue-900" data-testid="receipt-tax-fold-note">
+      <button type="button" onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between gap-2 text-left">
+        <span>
+          Sales tax <span className="font-semibold font-mono-num">${Number(detail.amount).toFixed(2)}</span> included in item costs
+          {detail.method === "item_level" ? " (per-item tax from receipt)" : " (allocated proportionally to taxable items)"}
+          {detail.recoverable_kept_separate > 0 && ` · $${Number(detail.recoverable_kept_separate).toFixed(2)} recoverable tax kept separate`}
+        </span>
+        <span className="shrink-0 underline">{open ? "Hide" : "Details"}</span>
+      </button>
+      {open && (
+        <ul className="mt-1.5 space-y-0.5 text-blue-800" data-testid="receipt-tax-fold-allocation">
+          {(detail.allocation || []).map((a, i) => (
+            <li key={i} className="flex justify-between gap-3"><span className="truncate">{a.description}</span><span className="font-mono-num">+${Number(a.tax).toFixed(2)}</span></li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

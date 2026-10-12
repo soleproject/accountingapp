@@ -718,6 +718,7 @@ async def analyze_receipt_vision(
     from client_review_engine import (
         analyze_receipt_for_split, analyze_receipt_for_categorization,
     )
+    from receipt_tax import fold_sales_tax, RECEIPT_UPLOAD_TAX_RULES
 
     # Load the company's REAL Chart of Accounts so the AI can only
     # pick from accounts that actually exist. Historically this used
@@ -755,6 +756,7 @@ async def analyze_receipt_vision(
             attachment_data_url=inp.attachment_data_url, coa=coa,
             txn_amount=inp.amount, txn_desc=inp.merchant,
             company_industry=industry, company_name=company.get("name"),
+            prompt_addendum=RECEIPT_UPLOAD_TAX_RULES,
         ),
     )
     # Merge — categorization's line_items include account_code +
@@ -786,6 +788,13 @@ async def analyze_receipt_vision(
             "narrative":  cat.get("narrative") or analysis.get("narrative"),
             "totals":     cat.get("totals") or analysis.get("totals"),
         }
+        # Receipt Upload policy: sales tax is part of the cost of the
+        # goods/services. Fold it into the taxable lines (keeping the
+        # original tax picture under `tax_detail`) BEFORE the resolver
+        # runs so no tax expense account is ever picked or created.
+        fold_sales_tax(analysis["categorization"])
+    elif analysis.get("line_items"):
+        fold_sales_tax(analysis)
 
     # ── Post-process: resolve every AI line to a real account ──────
     # The AI's account_code / account_name is a suggestion. The AI-first
