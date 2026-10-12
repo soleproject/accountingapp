@@ -4,8 +4,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import { toast } from "sonner";
-import { Loader2, Sparkles, DollarSign, Building2 } from "lucide-react";
-import PlanComparisonCard from "@/components/PlanComparisonCard";
+import { Loader2, Sparkles, DollarSign } from "lucide-react";
 
 /**
  * Public signup page. Captures `?ref=<slug>` from the URL AND persists it
@@ -201,12 +200,9 @@ export default function Signup() {
       "min-h-screen w-full flex items-center justify-center bg-[#F5F6F8] p-6 " +
       (enterpriseMode ? "py-10" : "")
     }>
-      <div className={"w-full " + (enterpriseMode ? "max-w-3xl space-y-6" : "max-w-sm")}>
-        {enterpriseMode && (
-          <PlanComparisonCard variant="card" loggedIn={false} />
-        )}
+      <div className="w-full max-w-sm">
         <form onSubmit={submit} className={
-          "w-full space-y-5 " + (enterpriseMode ? "max-w-sm mx-auto bg-white rounded-xl border p-6 shadow-sm" : "")
+          "w-full space-y-5 " + (enterpriseMode ? "bg-white rounded-xl border p-6 shadow-sm" : "")
         } data-testid="signup-form">
         {firm ? (
           <div
@@ -222,13 +218,10 @@ export default function Signup() {
             ) : (
               <div className={
                 "w-16 h-16 rounded-lg flex items-center justify-center " +
-                (enterpriseMode ? "bg-indigo-600" :
-                 affiliateMode  ? "bg-emerald-600" :
-                                  "bg-blue-600")
+                (affiliateMode ? "bg-emerald-600" : "bg-blue-600")
               }>
-                {enterpriseMode ? <Building2 size={28} className="text-white" />
-                 : affiliateMode ? <DollarSign size={28} className="text-white" />
-                 :                 <Sparkles   size={28} className="text-white" />}
+                {affiliateMode ? <DollarSign size={28} className="text-white" />
+                 :               <Sparkles   size={28} className="text-white" />}
               </div>
             )}
             <div className="font-heading font-bold text-lg text-slate-900">
@@ -239,17 +232,16 @@ export default function Signup() {
           <div className="flex items-center gap-2 mb-6">
             <div className={
               "w-8 h-8 rounded-lg flex items-center justify-center " +
-              (enterpriseMode ? "bg-indigo-600" :
-               affiliateMode  ? "bg-emerald-600" :
-                                "bg-blue-600")
+              (affiliateMode ? "bg-emerald-600" : "bg-blue-600")
             }>
-              {enterpriseMode
-                ? <Building2 size={16} className="text-white" />
-                : affiliateMode
-                  ? <DollarSign size={16} className="text-white" />
-                  : <Sparkles   size={16} className="text-white" />}
+              {affiliateMode
+                ? <DollarSign size={16} className="text-white" />
+                : <Sparkles   size={16} className="text-white" />}
             </div>
-            <div className="font-heading font-bold">SmartBooks</div>
+            <div className="min-w-0">
+              <div className="font-heading font-bold text-slate-900 leading-tight">SmartBooks</div>
+              <div className="text-[10px] tracking-widest uppercase text-slate-500 leading-tight">Ledger</div>
+            </div>
           </div>
         )}
 
@@ -362,9 +354,8 @@ export default function Signup() {
           disabled={busy}
           className={
             "w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-white text-sm disabled:opacity-50 " +
-            (enterpriseMode ? "bg-indigo-600 hover:bg-indigo-700" :
-             affiliateMode  ? "bg-emerald-600 hover:bg-emerald-700" :
-                              "bg-slate-900 hover:bg-slate-800")
+            (affiliateMode ? "bg-emerald-600 hover:bg-emerald-700" :
+                             "bg-slate-900 hover:bg-slate-800")
           }
           data-testid="signup-submit"
         >
