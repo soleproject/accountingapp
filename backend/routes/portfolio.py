@@ -72,12 +72,27 @@ async def _company_row(c: dict, start: str, end: str) -> dict:
 
 
 @router.get("/portfolio")
-async def portfolio(period: str = Query("ytd"), user: dict = Depends(get_current_user)):
+async def portfolio(period: str = Query("ytd"), company_id: str | None = Query(None), user: dict = Depends(get_current_user)):
     period = period if period in PERIODS else "ytd"
     companies = await owned_companies(user)
+    owner_label = None
+    # Pros / firm staff see many owners' companies. On the portfolio page
+    # scope to the owner of the company currently selected in the switcher
+    # so an accountant never sees unrelated clients' books rolled together.
+    if company_id and user.get("role") != "client":
+        cur = await db.companies.find_one({"id": company_id}, {"_id": 0, "owner_user_id": 1})
+        if cur and any(c["id"] == company_id for c in companies):
+            oid = cur.get("owner_user_id")
+            if oid:
+                same = {d["id"] async for d in db.companies.find({"owner_user_id": oid}, {"_id": 0, "id": 1})}
+                companies = [c for c in companies if c["id"] in same]
+                owner = await db.users.find_one({"id": oid}, {"_id": 0, "name": 1, "email": 1}) or {}
+                owner_label = owner.get("name") or owner.get("email")
+            else:
+                companies = [c for c in companies if c["id"] == company_id]
     start, end, label = period_range(period)
     cache = get_cache()
-    key = cache.key("portfolio", user_id=user["id"], period=period, day=end, n=len(companies))
+    key = cache.key("portfolio", user_id=user["id"], period=period, day=end, n=len(companies), scope=company_id or "")
 
     async def compute():
         rows = await asyncio.gather(*[_company_row(c, start, end) for c in companies])
@@ -90,6 +105,7 @@ async def portfolio(period: str = Query("ytd"), user: dict = Depends(get_current
         attention = sum((r["needs_review"] or 0) + (r["overdue_invoices"] or 0) + (r["overdue_bills"] or 0) + (r["unreconciled"] or 0) for r in rows)
         return {
             "eligible": len(companies) >= 2, "count": len(companies), "period": period, "period_label": label, "start": start, "end": end,
+            "owner_label": owner_label, "scoped": bool(company_id and user.get("role") != "client"),
             "mixed_basis": len({r["basis"] for r in rows}) > 1,
             "totals": {"cash": tot("cash"), "ar": tot("ar"), "ar_overdue": tot("ar_overdue"), "ap": tot("ap"), "ap_overdue": tot("ap_overdue"),
                        "revenue": tot("revenue"), "expenses": tot("expenses"), "net_income": tot("net_income"),
