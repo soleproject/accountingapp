@@ -532,6 +532,7 @@ const isGroupActive = (loc, group, sticky = {}) =>
   group.items.some((it) => isItemActive(loc, it, sticky, group.key));
 
 function ProductAccordion({ user, product, Item, Group, showCollapsed, onOpenTodo2 }) {
+  const { companies } = useCompany();
   const rawModules = _visibleModules(user).filter(m => m.key !== "home");
   // Persisted user-chosen order (drag-and-drop). Defaults to the app's
   // natural order; missing/new modules append at the end.
