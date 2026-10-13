@@ -29,9 +29,9 @@ def _profile(**overrides):
 # ---------------------------------------------------------------------
 
 def test_group_sizes():
-    assert len(GROUP_1_ALWAYS_OWNER_COMP) == 7
+    assert len(GROUP_1_ALWAYS_OWNER_COMP) == 5
     assert len(GROUP_2_FLAG_ROUTED)       == 7
-    assert len(GROUP_3_PER_TXN_QUESTION)  == 7
+    assert len(GROUP_3_PER_TXN_QUESTION)  == 9
 
 
 def test_groups_are_disjoint():
@@ -49,8 +49,8 @@ def test_groups_are_disjoint():
 
 @pytest.mark.parametrize("pfc,grp", [
     ("ENTERTAINMENT_CASINOS_AND_GAMBLING",              "g1"),
-    ("ENTERTAINMENT_OTHER_ENTERTAINMENT",               "g1"),   # TCJA non-deductible
-    ("ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS", "g1"),
+    ("ENTERTAINMENT_OTHER_ENTERTAINMENT",               "g3"),   # business entertainment (non-deductible) vs personal
+    ("ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS", "g3"),
     ("GENERAL_MERCHANDISE_PET_SUPPLIES",                "g2"),
     ("LOAN_PAYMENTS_STUDENT_LOAN_PAYMENT",              "g2"),
     ("MEDICAL_VETERINARY_SERVICES",                     "g2"),

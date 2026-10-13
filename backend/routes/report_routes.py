@@ -118,6 +118,17 @@ async def rep_income(cid: str, start: Optional[str] = None, end: Optional[str] =
     )
 
 
+
+
+@router.get("/companies/{cid}/reports/book-to-tax")
+async def rep_book_to_tax(cid: str, start: Optional[str] = None, end: Optional[str] = None,
+                          basis: str = "accrual", user: dict = Depends(get_current_user)):
+    """Book-to-Tax Adjustments — separate from the P&L; never changes it."""
+    await require_company(user, cid)
+    s, e = _default_range()
+    from book_to_tax import compute_book_to_tax
+    return await compute_book_to_tax(cid, start or s, end or e, basis)
+
 @router.get("/companies/{cid}/reports/income-statement/pdf")
 async def rep_income_pdf(cid: str, request: Request, start: Optional[str] = None, end: Optional[str] = None,
                          basis: str = "accrual", user: dict = Depends(get_current_user)):

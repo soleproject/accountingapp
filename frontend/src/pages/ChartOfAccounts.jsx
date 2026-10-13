@@ -931,6 +931,9 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
   // blocked so the hierarchy stays a clean 2-level tree Pros can reason
   // about (e.g. Utilities > Electric, not Utilities > Electric > Sub-electric).
   const [parentId, setParentId] = useState(a.parent_account_id || "");
+  // Tax deductibility (expense accounts only) — feeds the Book-to-Tax
+  // report; never changes the P&L.
+  const [deductible, setDeductible] = useState(a.deductible_pct ?? 100);
 
   // Re-sync the local edit buffer if the row's props change under us
   // (e.g. after a bulk reload). Doesn't trip while the user is editing.
@@ -1024,6 +1027,9 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
       if (subtype.trim() !== (a.subtype || "")) {
         patch.subtype = subtype.trim();
         patch.detail_type = subtype.trim();
+      }
+      if (type === "expense" && Number(deductible) !== Number(a.deductible_pct ?? 100)) {
+        patch.deductible_pct = Number(deductible);
       }
       await api.patch(`/companies/${currentId}/accounts/${a.id}`, patch);
       toast.success("Account updated.");
@@ -1221,6 +1227,24 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
           )}
         </div>
       </div>
+      {type === "expense" && (
+        <div className="grid grid-cols-12 gap-3 items-center">
+          <div className="col-span-2 text-[10px] uppercase tracking-wide text-slate-500 self-center">Tax deductibility</div>
+          <div className="col-span-9">
+            <select
+              value={deductible}
+              onChange={(e) => setDeductible(Number(e.target.value))}
+              className="w-full border rounded px-2 py-1 text-sm bg-white focus:outline-none focus:border-slate-500"
+              data-testid={`coa-edit-deductible-${a.id}`}
+            >
+              <option value={100}>100% deductible (default)</option>
+              <option value={50}>50% deductible — business meals</option>
+              <option value={0}>0% — non-deductible (entertainment, penalties, political)</option>
+            </select>
+            <div className="text-[10px] text-slate-500 mt-1">Only affects the Book-to-Tax Adjustments report — the P&amp;L always shows the full amount.</div>
+          </div>
+        </div>
+      )}
     </div>
   ) : (
     <div
@@ -1254,6 +1278,12 @@ function AccountRow({ a, allAccounts, currentId, balance, showCodes = true, onSa
         title="View transactions & journal entries for this account"
       >
         {a.name}
+        {a.type === "expense" && a.deductible_pct != null && a.deductible_pct < 100 && (
+          <span className={`ml-2 text-[10px] font-semibold rounded px-1.5 py-0.5 border ${a.deductible_pct === 0 ? "text-rose-700 bg-rose-50 border-rose-200" : "text-amber-700 bg-amber-50 border-amber-200"}`}
+                title={`${a.deductible_pct}% tax deductible — see Book-to-Tax Adjustments report`} data-testid={`coa-deductible-badge-${a.id}`}>
+            {a.deductible_pct}% deductible
+          </span>
+        )}
         {a.created_by_ai && a.parent_account_id && (
           <span className="ml-2 text-[10px] uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
             auto

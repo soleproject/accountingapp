@@ -276,10 +276,12 @@ async def create_company(inp: CompanyCreate, request: Request, user: dict = Depe
     # get the FRS 102 Section 1A layout (Fixed Assets → Current Assets
     # → Creditors <1y → Creditors >1y → Capital & Reserves).
     from seed import coa_for
+    from deductibility import infer_deductible_pct
     for code, name, atype, subtype, detail_type in coa_for(inp.region):
         await db.accounts.insert_one({
             "id": str(uuid.uuid4()), "company_id": cid, "code": code, "name": name,
             "type": atype, "subtype": subtype, "detail_type": detail_type,
+            "deductible_pct": infer_deductible_pct(name, atype),
             "active": True, "balance": 0.0,
             "created_at": now, "updated_at": now,
         })

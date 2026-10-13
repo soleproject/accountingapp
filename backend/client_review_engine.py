@@ -854,6 +854,13 @@ RULES:
   Shipping = its own line (`category_hint`: "shipping / freight"), mapped to
   "Shipping & Delivery" / "Freight" / "Postage" if available,
   otherwise to the same account as the underlying goods.
+* Meals vs entertainment: NEVER lump them. Food & beverage →
+  `category_hint` "meals - business (50%)" (office snacks / company
+  party / food for the public → "meals - 100% deductible"). Event
+  tickets, golf, sporting events, concerts, theaters, club dues,
+  amusement → `category_hint` "entertainment - non-deductible". Food
+  bought AT an entertainment venue is a meals line ONLY when the
+  receipt prices it separately; otherwise it is all entertainment.
 * `line_items[].amount` MUST sum to `totals.grand_total` within
   $0.02. If the receipt has an obvious grand total, that wins;
   if not, sum the item extendeds.
