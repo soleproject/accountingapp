@@ -277,6 +277,14 @@ export default function CockpitTodayV7() {
                   >
                     + New Client
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => navigate("/pro/onboarding")}
+                    data-testid="v7-onboarding-link"
+                    className="text-[12px] text-slate-600 hover:text-slate-900 underline underline-offset-4 decoration-slate-300 hover:decoration-slate-600 mr-1"
+                  >
+                    Onboarding
+                  </button>
                   <TierBadge tier="ai" />
                   <TierBadge tier="assistant" />
                   <TierBadge tier="pro" />
