@@ -42,6 +42,7 @@ import ArAgingReport from "@/pages/ArAgingReport";
 import ApAgingReport from "@/pages/ApAgingReport";
 import SalesTaxReport from "@/pages/SalesTaxReport";
 import BookToTaxReport from "@/pages/BookToTaxReport";
+import TaxLineReport from "@/pages/TaxLineReport";
 import Projections from "@/pages/Projections";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import CrmOverview from "@/pages/CrmOverview";
@@ -344,6 +345,7 @@ function App() {
               <Route path="/reports/ap-aging" element={<ApAgingReport />} />
               <Route path="/reports/sales-tax-report" element={<SalesTaxReport />} />
               <Route path="/reports/book-to-tax" element={<BookToTaxReport />} />
+              <Route path="/reports/tax-lines" element={<TaxLineReport />} />
               <Route path="/reports/:kind" element={<ReportView />} />
               <Route path="/accounting/transactions" element={<Transactions />} />
               <Route path="/accounting/payroll" element={<ProductGuard product="accounting"><PayrollDashboard /></ProductGuard>} />
