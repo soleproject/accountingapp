@@ -64,24 +64,24 @@ PFC_COA_MAP: dict[str, dict] = {
     "ENTERTAINMENT_CASINOS_AND_GAMBLING":               {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "personal — needs review"},
     "ENTERTAINMENT_MUSIC_AND_AUDIO":                    {"coa": "Dues & Subscriptions",    "kind": "expense"},
-    "ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS": {"coa": "Entertainment",  "kind": "expense"},
+    "ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS": {"coa": "Entertainment - Non-Deductible",  "kind": "expense"},
     "ENTERTAINMENT_TV_AND_MOVIES":                      {"coa": "Dues & Subscriptions",    "kind": "expense"},
     "ENTERTAINMENT_VIDEO_GAMES":                        {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "likely personal"},
-    "ENTERTAINMENT_OTHER_ENTERTAINMENT":                {"coa": "Entertainment",           "kind": "expense"},
+    "ENTERTAINMENT_OTHER_ENTERTAINMENT":                {"coa": "Entertainment - Non-Deductible", "kind": "expense"},
 
     # ------------------------------------------------------------------
     # FOOD_AND_DRINK (7)
     # ------------------------------------------------------------------
     "FOOD_AND_DRINK_BEER_WINE_AND_LIQUOR":              {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "personal vs COGS for bar/restaurant — needs review"},
-    "FOOD_AND_DRINK_COFFEE":                            {"coa": "Meals",                   "kind": "expense"},
-    "FOOD_AND_DRINK_FAST_FOOD":                         {"coa": "Meals",                   "kind": "expense"},
+    "FOOD_AND_DRINK_COFFEE":                            {"coa": "Meals - Business (50%)",  "kind": "expense"},
+    "FOOD_AND_DRINK_FAST_FOOD":                         {"coa": "Meals - Business (50%)",  "kind": "expense"},
     "FOOD_AND_DRINK_GROCERIES":                         {"coa": "Uncategorized Expense",   "kind": "expense",
                                                           "note": "COGS for restaurants / personal for others — needs review"},
-    "FOOD_AND_DRINK_RESTAURANT":                        {"coa": "Meals",                   "kind": "expense"},
-    "FOOD_AND_DRINK_VENDING_MACHINES":                  {"coa": "Meals",                   "kind": "expense"},
-    "FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK":              {"coa": "Meals",                   "kind": "expense"},
+    "FOOD_AND_DRINK_RESTAURANT":                        {"coa": "Meals - Business (50%)",  "kind": "expense"},
+    "FOOD_AND_DRINK_VENDING_MACHINES":                  {"coa": "Meals - Business (50%)",  "kind": "expense"},
+    "FOOD_AND_DRINK_OTHER_FOOD_AND_DRINK":              {"coa": "Meals - Business (50%)",  "kind": "expense"},
 
     # ------------------------------------------------------------------
     # GENERAL_MERCHANDISE (14)

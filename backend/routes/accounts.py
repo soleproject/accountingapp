@@ -19,6 +19,7 @@ from pydantic import BaseModel, EmailStr, Field
 from pymongo.errors import DuplicateKeyError
 
 from db import db, now_iso, coerce
+from deductibility import infer_deductible_pct, effective_deductible_pct
 from auth import (
     hash_password, verify_password, create_token,
     get_current_user, require_role,
@@ -142,7 +143,13 @@ router = APIRouter(prefix="/api")
 async def list_accounts(cid: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     docs = await db.accounts.find({"company_id": cid}).sort("code", 1).to_list(2000)
-    return {"accounts": [coerce(d) for d in docs]}
+    out = []
+    for d in docs:
+        d = coerce(d)
+        if (d.get("type") or "").lower() == "expense":
+            d["deductible_pct"] = effective_deductible_pct(d)
+        out.append(d)
+    return {"accounts": out}
 
 
 @router.get("/companies/{cid}/accounts/balances")
@@ -451,6 +458,7 @@ async def create_account(cid: str, inp: AccountCreate, user: dict = Depends(get_
         "id": aid, "company_id": cid, "code": inp.code, "name": inp.name,
         "type": inp.type, "subtype": _st,
         "detail_type": _dt,
+        "deductible_pct": inp.deductible_pct if inp.deductible_pct in (100, 50, 0) else infer_deductible_pct(inp.name, inp.type),
         "active": True, "balance": 0.0,
         "created_at": now, "updated_at": now,
     }
@@ -1103,6 +1111,13 @@ async def update_account(cid: str, aid: str, payload: dict, user: dict = Depends
     if "subtype" in payload or "detail_type" in payload:
         from account_normalize import normalize_account_payload
         normalize_account_payload(payload, existing=before_acct or {})
+    if "deductible_pct" in payload:
+        try:
+            payload["deductible_pct"] = int(payload["deductible_pct"])
+        except (TypeError, ValueError):
+            payload["deductible_pct"] = None
+        if payload["deductible_pct"] not in (100, 50, 0):
+            raise HTTPException(400, "deductible_pct must be 100, 50 or 0")
     await db.accounts.update_one({"id": aid, "company_id": cid}, {"$set": payload})
     # Auto-update on QBO if this account was already mirrored.
     try:

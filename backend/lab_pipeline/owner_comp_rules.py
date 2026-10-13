@@ -3,8 +3,7 @@
 Handles the 21 PFC values that require distinguishing personal /
 Owner's Comp use from a deductible business expense. Three groups:
 
-  1. Always Owner's Comp (7 PFCs) — TCJA-non-deductible entertainment,
-     gambling, tobacco, hair & beauty, other personal care. Always
+  1. Always Owner's Comp (5 PFCs) — gambling, video games, tobacco, hair & beauty, other personal care. Always
      book to the ``Owner's Compensation`` equity account, no CPA
      question.
 
@@ -13,7 +12,7 @@ Owner's Comp use from a deductible business expense. Three groups:
      the row books to the business account (Supplies, Dues, etc.);
      otherwise Owner's Comp.
 
-  3. Per-transaction question (7 PFCs) — needs a CPA/client verdict
+  3. Per-transaction question (9 PFCs) — needs a CPA/client verdict
      on ``lab_feedback``. Feedback is keyed on
      ``(company_id, contact_id, pfc_detailed)`` so ONE answer
      ("always this way for Home Depot") auto-applies to every future
@@ -35,8 +34,6 @@ OWNER_COMP_ACCOUNT_NAME = "Owner's Compensation"
 GROUP_1_ALWAYS_OWNER_COMP = frozenset({
     "ENTERTAINMENT_CASINOS_AND_GAMBLING",
     "ENTERTAINMENT_VIDEO_GAMES",
-    "ENTERTAINMENT_OTHER_ENTERTAINMENT",              # TCJA non-deductible
-    "ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS",  # TCJA non-deductible
     "GENERAL_MERCHANDISE_TOBACCO_AND_VAPE",
     "PERSONAL_CARE_HAIR_AND_BEAUTY",
     "PERSONAL_CARE_OTHER_PERSONAL_CARE",
@@ -66,6 +63,11 @@ GROUP_3_PER_TXN_QUESTION: dict[str, tuple[str, str]] = {
     "MEDICAL_PRIMARY_CARE":                   ("Is this for an employee under your plan, or personal (self / family)?",              "Medical Expenses"),
     "MEDICAL_PHARMACIES_AND_SUPPLEMENTS":     ("Was this for the office first-aid / medicine cabinet, or personal medication?",       "Supplies & Materials"),
     "PERSONAL_CARE_LAUNDRY_AND_DRY_CLEANING": ("Was this for branded uniforms only (not wearable off-duty), or regular clothing?",     "Uniforms"),
+    # Entertainment is 0% deductible (TCJA) but is still a BUSINESS
+    # expense when it's for clients/prospects — book it to the
+    # non-deductible entertainment account, not Owner's Comp.
+    "ENTERTAINMENT_OTHER_ENTERTAINMENT":                          ("Was this entertaining clients / prospects / staff for the business, or personal?", "Entertainment - Non-Deductible"),
+    "ENTERTAINMENT_SPORTING_EVENTS_AMUSEMENT_PARKS_AND_MUSEUMS":  ("Was this entertaining clients / prospects / staff for the business, or personal?", "Entertainment - Non-Deductible"),
 }
 
 # Default profile — every flag defaults to FALSE (conservative).

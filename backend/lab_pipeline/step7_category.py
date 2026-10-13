@@ -41,6 +41,21 @@ from .owner_comp_rules import (
 )
 from .pfc_coa_defaults import PFC_COA_MAP
 
+
+def _find_coa(coa_by_name: dict, target: str):
+    """Exact name match, else tolerate a suffix on either side so
+    'Meals' finds 'Meals - Business (50%)' and vice-versa (legacy charts)."""
+    t = target.lower().strip()
+    hit = coa_by_name.get(t)
+    if hit:
+        return hit
+    base = t.split(" - ")[0].split(" (")[0].strip()
+    for name, acct in coa_by_name.items():
+        n = name.split(" - ")[0].split(" (")[0].strip()
+        if n == base:
+            return acct
+    return None
+
 log = logging.getLogger("axiom.lab.step7")
 
 _LLM_ACCOUNT_TYPES = frozenset({
@@ -373,7 +388,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
                 )
                 target = decision["target"]
                 if target:
-                    match = coa_by_name.get(target.lower())
+                    match = _find_coa(coa_by_name, target)
                     if match:
                         acct_id = match["id"]
                     else:
@@ -471,7 +486,7 @@ async def run_step7(company_id: str, *, run_llm: bool = True,
             if default and default.get("coa"):
                 target = default["coa"]
                 if not target.lower().startswith("uncategorized"):
-                    match = coa_by_name.get(target.lower())
+                    match = _find_coa(coa_by_name, target)
                     if match:
                         bank_id = row.get("bank_account_id")
                         if _is_owners_draw(match) and not personal_use.get(bank_id, False):

@@ -334,6 +334,7 @@ class AccountCreate(BaseModel):
     # we spawn the linked loans row so the Loans page mirrors the CoA.
     lender: Optional[str] = None
     principal: Optional[float] = None
+    deductible_pct: Optional[int] = None  # 100 / 50 / 0 — tax deductibility (expense accounts)
     rate: Optional[float] = None
     term_months: Optional[int] = None
     start_date: Optional[str] = None

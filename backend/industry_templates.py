@@ -52,7 +52,11 @@ _COMMON_FACILITIES_OPEX = [
 
 _COMMON_ADMIN_OPEX = [
     {"code": "6300", "name": "Software & Subscriptions", "type": "expense", "detail_type": "expense"},
-    {"code": "6400", "name": "Meals - Business", "type": "expense", "detail_type": "expense"},
+    # Meals vs entertainment stay separate: TCJA makes entertainment 0%
+    # deductible while business meals are 50% (some 100%).
+    {"code": "6400", "name": "Meals - Business (50%)", "type": "expense", "detail_type": "expense", "deductible_pct": 50},
+    {"code": "6405", "name": "Meals - 100% Deductible", "type": "expense", "detail_type": "expense", "deductible_pct": 100},
+    {"code": "6410", "name": "Entertainment - Non-Deductible", "type": "expense", "detail_type": "expense", "deductible_pct": 0},
     {"code": "6500", "name": "Travel", "type": "expense", "detail_type": "expense"},
     {"code": "6600", "name": "Office Supplies", "type": "expense", "detail_type": "expense"},
     {"code": "6700", "name": "Marketing & Advertising", "type": "expense", "detail_type": "expense"},
@@ -115,7 +119,9 @@ TEMPLATES: dict[str, dict] = {
             {"code": "6200", "name": "Rent", "type": "expense", "detail_type": "expense"},
             {"code": "6210", "name": "Utilities", "type": "expense", "detail_type": "expense"},
             {"code": "6300", "name": "Software & Subscriptions", "type": "expense", "detail_type": "expense"},
-            {"code": "6400", "name": "Meals - Business", "type": "expense", "detail_type": "expense"},
+            {"code": "6400", "name": "Meals - Business (50%)", "type": "expense", "detail_type": "expense", "deductible_pct": 50},
+            {"code": "6405", "name": "Meals - 100% Deductible", "type": "expense", "detail_type": "expense", "deductible_pct": 100},
+            {"code": "6410", "name": "Entertainment - Non-Deductible", "type": "expense", "detail_type": "expense", "deductible_pct": 0},
             {"code": "6500", "name": "Travel", "type": "expense", "detail_type": "expense"},
             {"code": "6600", "name": "Office Supplies", "type": "expense", "detail_type": "expense"},
             {"code": "6610", "name": "Office Equipment", "type": "expense", "detail_type": "expense"},
@@ -275,7 +281,6 @@ TEMPLATES: dict[str, dict] = {
          {"code": "5100", "name": "Creative Production Cost", "type": "expense", "detail_type": "cost_of_goods_sold"},
          {"code": "5200", "name": "Stock Media Licenses", "type": "expense", "detail_type": "cost_of_goods_sold"}],
         _COMMON_PAYROLL_OPEX, _COMMON_FACILITIES_OPEX, _COMMON_ADMIN_OPEX,
-        [{"code": "6420", "name": "Client Entertainment", "type": "expense", "detail_type": "expense"}],
         _UNCATEGORIZED_PAIR,
     ),
 

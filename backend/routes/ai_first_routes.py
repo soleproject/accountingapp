@@ -209,6 +209,7 @@ async def set_industry_template(
     # tooling (which checks either field) treats each row as fully
     # classified.
     from routes.accounts import _infer_detail_type
+    from tax_lines import rule_suggest as _rule_suggest
     to_insert = []
     template_codes_set = {a["code"] for a in tpl["accounts"]}
     for a in tpl["accounts"]:
@@ -231,6 +232,8 @@ async def set_industry_template(
             "detail_type": canonical_dt,
             "subtype": canonical_dt,
             "seeded_by_industry": slug,
+            "tax_line_key": _rule_suggest({**a, "type": canonical_type, "detail_type": canonical_dt}),
+            "tax_line_source": "rule",
             "created_at": now,
             "updated_at": now,
         })

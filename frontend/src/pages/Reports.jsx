@@ -32,6 +32,8 @@ const REPORTS = [
   // Tax + compliance.
   { key: "sales-tax",       title: "Sales Tax Liability", desc: "Sales tax collected vs. remitted and what you owe",    icon: Percent,        color: "#F97316", tint: "#FFEDD5", keywords: "sales tax remit gst vat" },
   { key: "sales-tax-report", title: "Sales Tax Report",   desc: "Taxable vs. non-taxable sales · weekly, monthly, quarterly, annually", icon: Percent, color: "#EA580C", tint: "#FFEDD5", keywords: "sales tax taxable nontaxable exempt period", to: "/reports/sales-tax-report" },
+  { key: "tax-lines",       title: "Tax Line Report", desc: "P&L regrouped by federal return line (Schedule C · 1120-S · 1065 · 1120) with unmapped & not-on-return buckets", icon: FileText, color: "#059669", tint: "#D1FAE5", keywords: "tax line schedule c 1120s return mapping prep for taxes", to: "/reports/tax-lines" },
+  { key: "book-to-tax",     title: "Book-to-Tax Adjustments", desc: "Book net income → add back non-deductible entertainment & 50% meals → taxable income", icon: Scale, color: "#7C3AED", tint: "#EDE9FE", keywords: "tax deductible entertainment meals m-1 adjustments schedule", to: "/reports/book-to-tax" },
   { key: "1099-summary",    title: "1099 Summary",      desc: "Contractors paid ≥ $600 · W-9 status · 1099-NEC prep",  icon: Receipt,        color: "#3B82F6", tint: "#DBEAFE", keywords: "contractor 1099 nec w9 tax" },
 
   // Product / analysis tabs (own routes).

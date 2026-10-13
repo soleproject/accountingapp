@@ -37,8 +37,9 @@ DEFAULT_COA = [
     ("4100", "Product Sales", "revenue", "operating_revenue", "income"),
     ("4200", "Interest Income", "revenue", "other_revenue", "other_income"),
     # Expenses
-    ("6000", "Meals", "expense", "operating_expense", "operating_expense"),
-    ("6010", "Entertainment", "expense", "operating_expense", "operating_expense"),
+    ("6000", "Meals - Business (50%)", "expense", "operating_expense", "operating_expense"),
+    ("6005", "Meals - 100% Deductible", "expense", "operating_expense", "operating_expense"),
+    ("6010", "Entertainment - Non-Deductible", "expense", "operating_expense", "operating_expense"),
     ("6100", "Travel", "expense", "operating_expense", "operating_expense"),
     ("6120", "Transportation", "expense", "operating_expense", "operating_expense"),
     ("6200", "Advertising & Marketing", "expense", "operating_expense", "operating_expense"),
@@ -370,7 +371,7 @@ async def seed():
     # Rules
     await db.rules.insert_many([
         {"id": str(uuid.uuid4()), "company_id": company_id, "match_type": "merchant_contains",
-         "match_value": "Starbucks", "account_code": "6000", "account_name": "Meals",
+         "match_value": "Starbucks", "account_code": "6000", "account_name": "Meals - Business (50%)",
          "created_by": "ai", "hits": 12, "created_at": now, "updated_at": now},
         {"id": str(uuid.uuid4()), "company_id": company_id, "match_type": "merchant_contains",
          "match_value": "Uber", "account_code": "6120", "account_name": "Transportation",
