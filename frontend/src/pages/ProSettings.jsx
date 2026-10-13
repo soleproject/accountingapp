@@ -1030,7 +1030,7 @@ function LockedSection({ isLocked, testId, children }) {
 
 // --- Sub-components -----------------------------------------------------
 
-export function LogoSlot({ variant, label, bg, url, refresh, square }) {
+export function LogoSlot({ variant, label, bg, url, refresh, square, compact }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
 
@@ -1068,9 +1068,9 @@ export function LogoSlot({ variant, label, bg, url, refresh, square }) {
   return (
     <div className="space-y-2" data-testid={`branding-slot-${variant}`}>
       <div className="text-xs text-slate-500">{label}</div>
-      <div className={`${bg} rounded-md border ${square ? "aspect-square" : "h-24"} flex items-center justify-center overflow-hidden`}>
+      <div className={`${bg} rounded-md border ${square && !compact ? "aspect-square" : "h-24"} flex items-center justify-center overflow-hidden`}>
         {url ? (
-          <img src={url} alt={label} className="max-h-[80%] max-w-[80%] object-contain" />
+          <img src={url} alt={label} className={`object-contain ${square && compact ? "h-16 w-16" : "max-h-[80%] max-w-[80%]"}`} />
         ) : (
           <span className="text-[11px] text-slate-400">None</span>
         )}

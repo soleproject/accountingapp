@@ -125,7 +125,7 @@ function LabelStep({ branding, labelRoot, reload, onNext }) {
             </div></label>
           <div className="grid grid-cols-2 gap-4">
             <LogoSlot variant="logo_light" label="Main logo" bg="bg-slate-50" url={logos.logo_light} refresh={reload} />
-            <LogoSlot variant="icon_light" label="Icon" bg="bg-slate-50" url={logos.icon_light} refresh={reload} square />
+            <LogoSlot variant="icon_light" label="Icon" bg="bg-slate-50" url={logos.icon_light} refresh={reload} square compact />
           </div>
         </div>
       )}
