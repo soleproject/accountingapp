@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, ChevronLeft, FileText, Sparkles, Info } from "lucide-react";
+import { ExportButtons } from "@/components/ExportButtons";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
@@ -60,7 +61,7 @@ export default function TaxLineReport() {
       {groups.map(g => (
         <div key={g.key} className="border-b border-slate-100">
           <div className="flex items-center justify-between px-4 py-2 text-sm" data-testid={`tax-line-${g.key}`}>
-            <span><span className="inline-block w-16 font-mono-num text-slate-500">Line {g.line}</span><span className="font-medium text-slate-800">{g.label}</span>
+            <span><span className="inline-block w-24 font-mono-num text-slate-500 whitespace-nowrap">{String(g.line).startsWith("Sch") ? g.line : `Line ${g.line}`}</span><span className="font-medium text-slate-800">{g.label}</span>
               {g.limit_pct && <span className="ml-2 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">{g.limit_pct}% limit</span>}</span>
             <span className="font-mono-num font-semibold">{fmt(g.return_amount)}{g.limit_pct && <span className="text-slate-400 font-normal text-xs ml-2">(book {fmt(g.book_amount)})</span>}</span>
           </div>
@@ -95,6 +96,7 @@ export default function TaxLineReport() {
           <input type="date" value={range.start} onChange={e => setRange(r => ({ ...r, start: e.target.value }))} className="border rounded-md px-2 py-1.5" data-testid="tax-line-start" />
           <input type="date" value={range.end} onChange={e => setRange(r => ({ ...r, end: e.target.value }))} className="border rounded-md px-2 py-1.5" data-testid="tax-line-end" />
           <select value={basis} onChange={e => setBasis(e.target.value)} className="border rounded-md px-2 py-1.5 bg-white" data-testid="tax-line-basis"><option value="accrual">Accrual</option><option value="cash">Cash</option></select>
+          <ExportButtons href={`/companies/${currentId}/reports/tax-lines/export?start=${range.start}&end=${range.end}&basis=${basis}&tax_year=${taxYear}`} testid="tax-line" />
           <button onClick={suggest} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-slate-900 text-white text-xs font-semibold disabled:opacity-50" data-testid="tax-line-suggest">
             {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Map unmapped with AI
           </button>
@@ -117,7 +119,8 @@ export default function TaxLineReport() {
           <Section title="Income" groups={d.income} total={d.total_income} testid="tax-line-income" />
           <Section title="Cost of goods sold" groups={d.cogs} total={d.total_cogs} testid="tax-line-cogs" />
           <Section title="Deductions" groups={d.deductions} total={d.total_deductions} testid="tax-line-deductions" />
-          <div className="flex justify-between px-4 py-3 bg-slate-900 text-white text-sm"><span className="font-semibold">Net per return lines</span><span className="font-mono-num font-semibold" data-testid="tax-line-return-net">{fmt(d.return_net)}</span></div>
+          <div className="flex justify-between px-4 py-3 bg-slate-900 text-white text-sm"><span className="font-semibold">Net per return lines (ordinary business income)</span><span className="font-mono-num font-semibold" data-testid="tax-line-return-net">{fmt(d.return_net)}</span></div>
+          <Section title="Schedule K — separately stated items (flow to K-1s, not ordinary income)" groups={d.schedule_k || []} total={d.total_schedule_k || 0} testid="tax-line-schedule-k" />
 
           <div className="px-4 py-2 text-[11px] uppercase tracking-wide text-rose-700 bg-rose-50 border-y border-rose-100 flex justify-between"><span>Unmapped — needs a decision ({d.unmapped.length})</span><span className="font-mono-num">{fmt(d.unmapped_total)}</span></div>
           {d.unmapped.length === 0 ? <div className="px-4 py-3 text-xs text-slate-400" data-testid="tax-line-unmapped-empty">All active accounts with activity are mapped.</div>

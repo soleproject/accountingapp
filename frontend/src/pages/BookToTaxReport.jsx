@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Loader2, ChevronLeft, Scale, Info } from "lucide-react";
+import { ExportButtons } from "@/components/ExportButtons";
 
 import { api } from "@/lib/api";
 import { useCompany, useMoneyFmt } from "@/lib/company";
@@ -49,6 +50,7 @@ export default function BookToTaxReport() {
             <option value="accrual">Accrual</option>
             <option value="cash">Cash</option>
           </select>
+          <ExportButtons href={`/companies/${currentId}/reports/book-to-tax/export?start=${range.start}&end=${range.end}&basis=${basis}`} testid="book-to-tax" />
         </div>
       </div>
 

@@ -43,6 +43,7 @@ import ApAgingReport from "@/pages/ApAgingReport";
 import SalesTaxReport from "@/pages/SalesTaxReport";
 import BookToTaxReport from "@/pages/BookToTaxReport";
 import TaxLineReport from "@/pages/TaxLineReport";
+import ProOnboarding from "@/pages/ProOnboarding";
 import Projections from "@/pages/Projections";
 import OwnerDashboard from "@/pages/OwnerDashboard";
 import CrmOverview from "@/pages/CrmOverview";
@@ -281,6 +282,7 @@ function App() {
               <Route path="/admin/entitlements" element={<AdminEntitlements />} />
               <Route path="/feedback/mine" element={<MyFeedback />} />
               <Route path="/pro/clients" element={<ProClients />} />
+              <Route path="/pro/onboarding" element={<ProOnboarding />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/estimates" element={<Estimates />} />
               <Route path="/estimates/new" element={<EstimateEditor />} />

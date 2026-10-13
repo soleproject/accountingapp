@@ -284,6 +284,8 @@ export default function Todo2CardList({ onExit, collapsed = false, returnPath = 
         { to: "/pro/clients",    label: "Clients",        icon: Users   },
         { to: "/cockpit/client", label: "Client Cockpit", icon: Activity },
         { to: "/pro/client-payments", label: "Client Payments", icon: Wallet },
+        // Calendar appears once the pro linked Google Calendar in onboarding.
+        ...(user?.pro_onboarding?.calendar_linked ? [{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck }] : []),
       ];
   // Collapse state per section — persisted to localStorage so it sticks
   // across reloads. Default: all sections open.

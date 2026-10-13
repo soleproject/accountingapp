@@ -134,7 +134,7 @@ export default function Signup() {
     if (!user || routingRef.current) return;
     const dest =
       user.role === "superadmin" ? "/admin"
-      : user.role === "pro"       ? "/cockpit"
+      : user.role === "pro"       ? "/pro/onboarding"
       : user.role === "affiliate" ? "/share"
       :                             "/dashboard";
     nav(dest, { replace: true });
@@ -184,7 +184,7 @@ export default function Signup() {
                          "Account created — let's set up your books.";
       toast.success(successMsg);
       nav(
-        enterpriseMode ? "/cockpit" :
+        enterpriseMode ? "/pro/onboarding" :
         affiliateMode  ? "/share"       :
                          "/onboarding"
       );
