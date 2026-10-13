@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from auth import get_current_user
@@ -121,6 +122,34 @@ async def set_account_tax_line(cid: str, aid: str, inp: MapIn, user: dict = Depe
 async def tax_line_report(cid: str, start: str, end: str, basis: str = "accrual", tax_year: Optional[int] = None,
                           user: dict = Depends(get_current_user)):
     await require_company(user, cid)
+    return await compute_tax_lines(cid, start, end, basis, tax_year)
+
+
+@router.get("/companies/{cid}/reports/tax-lines/export")
+async def tax_line_export(cid: str, start: str, end: str, basis: str = "accrual", tax_year: Optional[int] = None,
+                          fmt: str = Query("csv", pattern="^(csv|pdf)$"), user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    d = await compute_tax_lines(cid, start, end, basis, tax_year)
+    import tax_exports as X
+    name = f"tax_lines_{(d.get('form') or 'form')}_{d['tax_year']}.{fmt}"
+    body = X.tax_lines_pdf(d) if fmt == "pdf" else X.tax_lines_csv(d)
+    return Response(content=body, media_type="application/pdf" if fmt == "pdf" else "text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={name}"})
+
+
+@router.get("/companies/{cid}/reports/book-to-tax/export")
+async def book_to_tax_export(cid: str, start: str, end: str, basis: str = "accrual",
+                             fmt: str = Query("csv", pattern="^(csv|pdf)$"), user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    from book_to_tax import compute_book_to_tax
+    import tax_exports as X
+    d = await compute_book_to_tax(cid, start, end, basis)
+    body = X.book_to_tax_pdf(d) if fmt == "pdf" else X.book_to_tax_csv(d)
+    return Response(content=body, media_type="application/pdf" if fmt == "pdf" else "text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=book_to_tax_{start}_{end}.{fmt}"})
+
+
+async def compute_tax_lines(cid: str, start: str, end: str, basis: str = "accrual", tax_year: Optional[int] = None) -> dict:
     company, form = await _company_form(cid)
     ty = tax_year or int(start[:4])
     pl = await R.compute_income_statement(cid, start, end, basis)
@@ -158,9 +187,16 @@ async def tax_line_report(cid: str, start: str, end: str, basis: str = "accrual"
 
     def _sort(ls):
         return sorted(ls, key=lambda g: (str(g["line"] or "zzz").zfill(4), g["label"]))
+    # 1065 / 1120-S: Schedule K lines are separately-stated K-1 items, not
+    # part of ordinary business income — report them in their own section.
+    is_k = lambda g: str(g.get("line") or "").startswith("Sch K")  # noqa: E731
+    schedule_k = _sort([g for g in groups.values() if is_k(g)])
+    for g in schedule_k:
+        g["section"] = "schedule_k"
     income = _sort([g for g in groups.values() if g["section"] == "income"])
     cogs = _sort([g for g in groups.values() if g["section"] == "cogs"])
     deductions = _sort([g for g in groups.values() if g["section"] == "deduction"])
+    tot_k = round(sum(g["return_amount"] for g in schedule_k), 2)
     tot_inc = round(sum(g["return_amount"] for g in income), 2)
     tot_cogs = round(sum(g["return_amount"] for g in cogs), 2)
     tot_ded = round(sum(g["return_amount"] for g in deductions), 2)
@@ -168,7 +204,7 @@ async def tax_line_report(cid: str, start: str, end: str, basis: str = "accrual"
         "company_name": company.get("name"), "business_type": company.get("business_type"), "form": form,
         "form_label": TL.FORMS.get(form or ""), "supported": supported, "tax_year": ty, "catalog_year": TL.catalog_year(ty),
         "params": params, "period_start": start, "period_end": end, "basis": pl.get("basis") or basis,
-        "income": income, "cogs": cogs, "deductions": deductions,
+        "income": income, "cogs": cogs, "deductions": deductions, "schedule_k": schedule_k, "total_schedule_k": tot_k,
         "unmapped": unmapped, "not_on_return": not_on_return,
         "unmapped_total": round(sum(e["amount"] for e in unmapped), 2),
         "not_on_return_total": round(sum(e["amount"] for e in not_on_return), 2),
