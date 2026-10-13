@@ -212,7 +212,7 @@ function FirmStep({ firm, choice, setChoice }) {
       <p className="text-sm text-slate-600">Do you want to complete the onboarding for your firm's own books{firm?.name ? ` (${firm.name})` : ""} now? You can always do it later from Clients.</p>
       <div className="flex gap-2">
         <button onClick={() => setChoice("yes")} disabled={!firm?.id} className={`inline-flex items-center gap-1.5 h-10 px-4 rounded-full border text-sm font-semibold disabled:opacity-50 ${choice === "yes" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-700 hover:border-slate-500"}`} data-testid="pro-onboarding-firm-yes"><Building2 size={14} /> Yes, set up firm books</button>
-        <button onClick={() => setChoice("no")} className={`h-10 px-4 rounded-full border text-sm font-semibold ${choice === "no" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-700 hover:border-slate-500"}`} data-testid="pro-onboarding-firm-no">No, take me to Today</button>
+        <button onClick={() => setChoice("no")} className={`h-10 px-4 rounded-full border text-sm font-semibold ${choice === "no" ? "bg-slate-900 text-white border-slate-900" : "bg-white border-slate-300 text-slate-700 hover:border-slate-500"}`} data-testid="pro-onboarding-firm-no">No, take me to the Dashboard</button>
       </div>
       {!firm?.id && <p className="text-[11px] text-slate-400">No firm-books company found yet — it's created automatically on your first sign-in.</p>}
     </div>
