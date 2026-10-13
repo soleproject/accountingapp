@@ -68,6 +68,7 @@ KEYS: dict[str, dict] = {
     "officer_comp":        {"label": "Compensation of officers", "section": "deduction"},
     "bad_debts":           {"label": "Bad debts", "section": "deduction"},
     "charitable":          {"label": "Charitable contributions", "section": "deduction"},
+    "guaranteed_payments": {"label": "Guaranteed payments to partners", "section": "deduction"},
     "other_expenses":      {"label": "Other expenses", "section": "deduction"},
     "not_on_return":       {"label": "Not on return (non-deductible / owner personal)", "section": "not_on_return"},
     "balance_sheet":       {"label": "Balance sheet item (not a P&L line)", "section": "balance"},
@@ -83,7 +84,7 @@ CATALOG: dict[int, dict[str, dict[str, str | None]]] = {
             "legal_professional": "17", "office_expense": "18", "pension": "19", "rent_equipment": "20a", "rent_other": "20b",
             "repairs": "21", "supplies": "22", "taxes_licenses": "23", "travel": "24a", "meals": "24b", "utilities": "25",
             "wages": "26", "other_expenses": "27a", "officer_comp": "26", "bad_debts": "27a",
-            "charitable": None, "not_on_return": None, "balance_sheet": None,
+            "charitable": None, "guaranteed_payments": None, "not_on_return": None, "balance_sheet": None,
         },
         "1120s": {
             "gross_receipts": "1a", "returns_allowances": "1b", "cogs": "2", "other_income": "5", "interest_income": "Sch K 4",
@@ -92,13 +93,31 @@ CATALOG: dict[int, dict[str, dict[str, str | None]]] = {
             "advertising": "16", "pension": "17", "employee_benefits": "18", "other_expenses": "19",
             "car_truck": "19", "commissions_fees": "19", "contract_labor": "19", "insurance": "19", "legal_professional": "19",
             "office_expense": "19", "supplies": "19", "travel": "19", "meals": "19", "utilities": "19",
-            "charitable": "Sch K 12a", "not_on_return": None, "balance_sheet": None,
+            "charitable": "Sch K 12a", "guaranteed_payments": None, "not_on_return": None, "balance_sheet": None,
+        },
+        "1065": {
+            "gross_receipts": "1a", "returns_allowances": "1b", "cogs": "2", "other_income": "7", "interest_income": "Sch K 5",
+            "wages": "9", "officer_comp": "9", "guaranteed_payments": "10", "repairs": "11", "bad_debts": "12",
+            "rent_equipment": "13", "rent_other": "13", "taxes_licenses": "14", "interest_other": "15", "interest_mortgage": "15",
+            "depreciation": "16a", "pension": "18", "employee_benefits": "19", "other_expenses": "21",
+            "advertising": "21", "car_truck": "21", "commissions_fees": "21", "contract_labor": "21", "insurance": "21",
+            "legal_professional": "21", "office_expense": "21", "supplies": "21", "travel": "21", "meals": "21", "utilities": "21",
+            "charitable": "Sch K 13a", "not_on_return": None, "balance_sheet": None,
+        },
+        "1120": {
+            "gross_receipts": "1a", "returns_allowances": "1b", "cogs": "2", "interest_income": "5", "other_income": "10",
+            "officer_comp": "12", "wages": "13", "repairs": "14", "bad_debts": "15", "rent_equipment": "16", "rent_other": "16",
+            "taxes_licenses": "17", "interest_other": "18", "interest_mortgage": "18", "charitable": "19", "depreciation": "20",
+            "advertising": "22", "pension": "23", "employee_benefits": "24", "other_expenses": "26",
+            "car_truck": "26", "commissions_fees": "26", "contract_labor": "26", "insurance": "26", "legal_professional": "26",
+            "office_expense": "26", "supplies": "26", "travel": "26", "meals": "26", "utilities": "26",
+            "guaranteed_payments": None, "not_on_return": None, "balance_sheet": None,
         },
     },
 }
 PARAMS: dict[int, dict] = {2026: {"meals_pct": 50, "mileage_rate": 0.70, "sec179_cap": 1_250_000, "bonus_pct": 40,
                                   "verified_on": "2026-01-15", "status": "verified"}}
-SUPPORTED_FORMS = ("sched_c", "1120s")
+SUPPORTED_FORMS = ("sched_c", "1120s", "1065", "1120")
 
 
 def catalog_year(tax_year: int) -> int:
@@ -122,6 +141,7 @@ _RULES: list[tuple[str, str]] = [
     (r"not[\s-]?on[\s-]?return|non[\s-]?deductible|penalt|\bfines?\b|political|lobby|entertain", "not_on_return"),
     (r"owner'?s? (draw|comp|distribution)|distributions?|dividends?|retained", "not_on_return"),
     (r"charit|donation", "charitable"),
+    (r"guaranteed payment", "guaranteed_payments"),
     (r"officer|shareholder[- ]employee", "officer_comp"),
     (r"\bwages?\b|salar|payroll(?! tax)", "wages"),
     (r"payroll tax|\bfica\b|futa|suta|licen|property tax|taxes? & lic|franchise tax|sales tax paid", "taxes_licenses"),

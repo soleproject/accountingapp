@@ -31,7 +31,7 @@ async def tax_line_catalog(cid: str, form: Optional[str] = None, tax_year: int =
     return {"form": f, "form_label": TL.FORMS.get(f or ""), "supported": f in TL.SUPPORTED_FORMS,
             "business_type": company.get("business_type"), "tax_year": tax_year, "catalog_year": TL.catalog_year(tax_year),
             "params": TL.PARAMS.get(TL.catalog_year(tax_year)), "lines": TL.lines_for(f, tax_year) if f in TL.SUPPORTED_FORMS else [],
-            "keys": [{"key": k, **v} for k, v in TL.KEYS.items()], "forms": TL.FORMS}
+            "keys": [{"key": k, **v} for k, v in TL.KEYS.items()], "forms": TL.FORMS, "supported_forms": list(TL.SUPPORTED_FORMS)}
 
 
 class FormIn(BaseModel):

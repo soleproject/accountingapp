@@ -87,7 +87,7 @@ export default function TaxLineReport() {
         <div className="flex items-center gap-2 text-sm flex-wrap">
           <select value={cat?.form || ""} onChange={e => setForm(e.target.value)} className="border rounded-md px-2 py-1.5 bg-white" data-testid="tax-line-form" title="Tax form (from entity type — override here)">
             <option value="" disabled>Pick tax form…</option>
-            {Object.entries(cat?.forms || {}).map(([k, v]) => <option key={k} value={k}>{v}{["sched_c", "1120s"].includes(k) ? "" : " (coming soon)"}</option>)}
+            {Object.entries(cat?.forms || {}).map(([k, v]) => <option key={k} value={k}>{v}{(cat?.supported_forms || []).includes(k) ? "" : " (coming soon)"}</option>)}
           </select>
           <select value={taxYear} onChange={e => setTaxYear(Number(e.target.value))} className="border rounded-md px-2 py-1.5 bg-white" data-testid="tax-line-year">
             {[2024, 2025, 2026].map(y => <option key={y} value={y}>Tax year {y}</option>)}
@@ -110,7 +110,7 @@ export default function TaxLineReport() {
       : !d ? <div className="py-16 text-center text-slate-400 text-sm">Couldn't load the report.</div>
       : !d.supported ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900" data-testid="tax-line-unsupported">
-          {d.form ? <>Lines for <b>{d.form_label}</b> aren't published yet (Schedule C and 1120-S are live). Your mappings are saved and will populate automatically when they are.</> : <>No tax form could be inferred from the entity type — pick one above.</>}
+          {d.form ? <>Lines for <b>{d.form_label}</b> aren't published yet. Your mappings are saved and will populate automatically when they are.</> : <>No tax form could be inferred from the entity type — pick one above.</>}
         </div>
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
