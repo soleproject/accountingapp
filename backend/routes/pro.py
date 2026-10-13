@@ -1273,3 +1273,34 @@ async def list_insights_cost_alerts(
 
     rows.sort(key=lambda r: r["spent"], reverse=True)
     return {"period": period, "threshold_usd": threshold, "clients_over": rows}
+
+
+# ---------------------------------------------------------------------------
+# Enterprise / pro one-time onboarding wizard (private label → Google
+# Calendar → Firm Books). State lives on `users.pro_onboarding`.
+# ---------------------------------------------------------------------------
+class ProOnboardingIn(BaseModel):
+    private_label: Optional[bool] = None
+    calendar_linked: Optional[bool] = None
+    firm_books: Optional[str] = None  # "yes" | "no"
+    done: Optional[bool] = None
+
+
+@router.get("/pro/onboarding/status")
+async def pro_onboarding_status(user: dict = Depends(get_current_user)):
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "pro_onboarding": 1, "branding": 1}) or {}
+    gcal = await db.gmail_tokens.find_one({"user_id": user["id"]}, {"_id": 0, "user_id": 1})
+    firm = await db.companies.find_one({"owner_user_id": user["id"], "is_firm_books": True}, {"_id": 0, "id": 1, "name": 1, "onboarding_complete": 1})
+    return {"state": fresh.get("pro_onboarding") or {}, "calendar_connected": bool(gcal),
+            "branding": fresh.get("branding") or {}, "firm_books": firm}
+
+
+@router.post("/pro/onboarding")
+async def pro_onboarding_save(inp: ProOnboardingIn, user: dict = Depends(get_current_user)):
+    upd = {f"pro_onboarding.{k}": v for k, v in inp.model_dump(exclude_none=True).items()}
+    upd["pro_onboarding.updated_at"] = now_iso()
+    if inp.done:
+        upd["pro_onboarding.completed_at"] = now_iso()
+    await db.users.update_one({"id": user["id"]}, {"$set": upd})
+    fresh = await db.users.find_one({"id": user["id"]}, {"_id": 0, "pro_onboarding": 1})
+    return {"ok": True, "state": fresh.get("pro_onboarding")}

@@ -1520,6 +1520,9 @@ export default function Sidebar({ collapsed, onToggle }) {
         {user?.role === "pro" && (
           <Item item={{ to: "/pro/client-payments", label: "Client Payments", icon: CreditCard }} />
         )}
+        {user?.role === "pro" && user?.pro_onboarding?.calendar_linked && (
+          <Item item={{ to: "/crm/calendar", label: "Calendar", icon: CalendarCheck, exact: true }} />
+        )}
 
         {/* Communications — cross-client transcript archive of every
             batch review conversation. Widely available: firm staff see

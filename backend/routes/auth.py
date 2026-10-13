@@ -764,6 +764,7 @@ async def me(user: dict = Depends(get_current_user)):
         # read-only pill + signup CTA on every screen (see
         # `components/DemoVisitorPill.jsx`).
         "is_demo_visitor": bool(user.get("is_demo_visitor")),
+        "pro_onboarding": user.get("pro_onboarding") or None,
         **access,
     }}
 

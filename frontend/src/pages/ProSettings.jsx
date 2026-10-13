@@ -1030,7 +1030,7 @@ function LockedSection({ isLocked, testId, children }) {
 
 // --- Sub-components -----------------------------------------------------
 
-function LogoSlot({ variant, label, bg, url, refresh, square }) {
+export function LogoSlot({ variant, label, bg, url, refresh, square }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
 
