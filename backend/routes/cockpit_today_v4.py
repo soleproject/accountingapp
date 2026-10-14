@@ -751,6 +751,37 @@ async def today_v4(
     if txns_prev > 0:
         pct_change = round((txns_total - txns_prev) / txns_prev * 100, 1)
 
+    # ---- 1b. WEEKLY RESOLVED BUCKETS (real this-week / last-week) ----
+    wk_this_dt = (now - timedelta(days=7)).isoformat()
+    wk_last_dt = (now - timedelta(days=14)).isoformat()
+    wk_this_d = (now - timedelta(days=7)).date().isoformat()
+    wk_last_d = (now - timedelta(days=14)).date().isoformat()
+
+    async def _week_bucket(d_lo, d_hi, dt_lo, dt_hi):
+        d_rng = {"$gte": d_lo, **({"$lt": d_hi} if d_hi else {})}
+        dt_rng = {"$gte": dt_lo, **({"$lt": dt_hi} if dt_hi else {})}
+        txn = await db.transactions.count_documents({
+            "company_id": {"$in": accessible}, "date": d_rng,
+            "needs_review": False, "ai_source": {"$exists": True, "$nin": [None, ""]},
+        })
+        receipts = await db.receipts.count_documents({
+            "company_id": {"$in": accessible}, "created_at": dt_rng,
+        })
+        questions = await db.client_messages.count_documents({
+            "company_id": {"$in": accessible},
+            "replies": {"$elemMatch": {"by_pro": True, "at": dt_rng}},
+        })
+        w9s = await db.agent_findings.count_documents({
+            "company_id": {"$in": accessible}, "kind": "w9_auto_captured", "created_at": dt_rng,
+        })
+        return {"txn": txn, "receipts": receipts, "questions": questions, "w9s": w9s,
+                "total": txn + receipts + questions + w9s}
+
+    weekly = {
+        "this_week": await _week_bucket(wk_this_d, None, wk_this_dt, None),
+        "last_week": await _week_bucket(wk_last_d, wk_this_d, wk_last_dt, wk_this_dt),
+    }
+
     activity = {
         "txns_processed": {
             "value": txns_total,
@@ -764,6 +795,7 @@ async def today_v4(
         },
         "rules_learned": rules_learned,
         "w9_captured": w9_captured,
+        "weekly": weekly,
         "time_saved_donut": time_saved_donut,
         "velocity_series": velocity_series,
     }
