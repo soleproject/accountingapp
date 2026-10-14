@@ -59,7 +59,6 @@ function greetingFor() {
   return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
 }
 
-function daysAgo(n) { return new Date(Date.now() - n * 24 * 3600 * 1000); }
 
 // --- derive same shape as v6 but expose the bits v7 needs ------
 function derive(data) {
@@ -73,34 +72,11 @@ function derive(data) {
 
   const waitingCount = waiting.reduce((s, w) => s + (w.count || 0), 0);
 
-  // Weekly buckets from velocity_series (30d)
-  const thisWeekStart = daysAgo(6), lastWeekStart = daysAgo(13);
-  const inThisWeek = (dstr) => new Date(dstr + "T00:00:00Z") >= thisWeekStart;
-  const inLastWeek = (dstr) => {
-    const d = new Date(dstr + "T00:00:00Z");
-    return d >= lastWeekStart && d < thisWeekStart;
-  };
-  const thisWeekTxns = (activity.txns_processed.sparkline || []).filter(d => inThisWeek(d.date)).reduce((s, d) => s + d.count, 0);
-  const lastWeekTxns = (activity.txns_processed.sparkline || []).filter(d => inLastWeek(d.date)).reduce((s, d) => s + d.count, 0);
-
+  const wk = activity.weekly || {};
   const acc = {
-    thisWeek: {
-      total: 0,
-      txn:  activity.auto_posted.count,
-      receipts: 18,
-      questions: active.reduce((s, b) => s + (b.answered || 0), 0),
-      w9s: activity.w9_captured,
-    },
-    lastWeek: {
-      total: 0,
-      txn:  Math.round(lastWeekTxns * 0.85),
-      receipts: Math.round(lastWeekTxns * 0.03),
-      questions: Math.round(lastWeekTxns * 0.02),
-      w9s: Math.max(0, activity.w9_captured - 2),
-    },
+    thisWeek: { total: 0, txn: 0, receipts: 0, questions: 0, w9s: 0, ...(wk.this_week || {}) },
+    lastWeek: { total: 0, txn: 0, receipts: 0, questions: 0, w9s: 0, ...(wk.last_week || {}) },
   };
-  acc.thisWeek.total = acc.thisWeek.txn + acc.thisWeek.receipts + acc.thisWeek.questions + acc.thisWeek.w9s;
-  acc.lastWeek.total = acc.lastWeek.txn + acc.lastWeek.receipts + acc.lastWeek.questions + acc.lastWeek.w9s;
 
   // Human-assistant items (same rules as v6, shared with /cockpit/assistant)
   const assistantItems = deriveAssistantItems(data);
