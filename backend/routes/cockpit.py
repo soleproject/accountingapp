@@ -1282,6 +1282,17 @@ async def cockpit_requests(
     return {"items": out, "counts": counts}
 
 
+@router.post("/demo/reset-wf-mortgage/{cid}")
+async def cockpit_demo_reset_wf_mortgage(cid: str, user: dict = Depends(get_current_user)):
+    """Pro-only: re-mint the Wells Fargo $2,145.67 mortgage split check-in item."""
+    accessible = await require_firm_or_pro(user)
+    if (user.get("role") or "").lower() not in _FIRM_ROLES or cid not in accessible:
+        raise HTTPException(404, "Company not found or you don't have access.")
+    from demo_reset import reset_wf_mortgage_item
+    return await reset_wf_mortgage_item(cid)
+
+
+
 @router.post("/requests/{qid}/resend")
 async def cockpit_resend(qid: str, user: dict = Depends(get_current_user)):
     """Resend the magic-link email for an open question."""

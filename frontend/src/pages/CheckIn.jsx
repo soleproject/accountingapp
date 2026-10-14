@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import axios from "axios";
-import { Loader2, Inbox, Camera, Mic, Check, Upload } from "lucide-react";
+import { Loader2, Inbox, Camera, Mic, Check, Upload, RotateCcw } from "lucide-react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useCompany } from "@/lib/company";
 import ClientReviewPage from "@/pages/ClientReviewPage";
 
+const PRO_ROLES = new Set(["superadmin", "pro", "admin", "partner"]);
 const API = `${process.env.REACT_APP_BACKEND_URL}/api/client-review`;
 const PHOTO_TYPES = new Set([3, 4, 9]);
 const TELL_TYPES = new Set([1, 8, 10, 13, 14]);
@@ -43,10 +46,23 @@ function ActionPill({ type }) {
 
 export default function CheckIn() {
   const { currentId, current } = useCompany();
+  const { user } = useAuth();
+  const isPro = PRO_ROLES.has((user?.role || "").toLowerCase());
   const [token, setToken] = useState(null);
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeItem, setActiveItem] = useState(null);
+  const [resetting, setResetting] = useState(false);
+
+  const resetDemo = async () => {
+    setResetting(true);
+    try {
+      await api.post(`/cockpit/demo/reset-wf-mortgage/${currentId}`);
+      toast.success("Mortgage split question reset — ready to demo.");
+      await load();
+    } catch (e) { toast.error(e?.response?.data?.detail || "Couldn't reset demo item"); }
+    finally { setResetting(false); }
+  };
 
   const load = useCallback(async () => {
     if (!currentId) return;
@@ -81,7 +97,16 @@ export default function CheckIn() {
         {items.length > 0 && <div className="text-xs text-slate-500 font-medium shrink-0" data-testid="checkin-progress">{done} of {items.length} done</div>}
       </div>
       {items.length > 0 && <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-2"><div className="h-full bg-emerald-500 rounded-full" style={{ width: `${Math.round(100 * done / items.length)}%` }} /></div>}
-      {current?.name && <div className="text-xs text-slate-500 mt-1">{current.name}</div>}
+      {current?.name && <div className="flex items-center justify-between gap-2 mt-1">
+        <div className="text-xs text-slate-500">{current.name}</div>
+        {isPro && (
+          <button type="button" onClick={resetDemo} disabled={resetting}
+            className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 hover:text-slate-900 disabled:opacity-50"
+            data-testid="checkin-reset-demo">
+            {resetting ? <Loader2 size={11} className="animate-spin" /> : <RotateCcw size={11} />} Reset demo
+          </button>
+        )}
+      </div>}
 
       {!token || items.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-12 text-center mt-6" data-testid="checkin-empty">
