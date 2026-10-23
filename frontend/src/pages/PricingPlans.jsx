@@ -244,6 +244,9 @@ export default function PricingPlans() {
   const [codeOpen, setCodeOpen] = useState(false);
   const [code, setCode] = useState("");
   const [codeErr, setCodeErr] = useState(false);
+  // Affiliate custom pricing — when set, the grid collapses to a single
+  // Advanced card at the affiliate's price (see routes/affiliate_pricing.py).
+  const [customPricing, setCustomPricing] = useState(null);
   useEffect(() => {
     if (!currentId) { setSponsored(false); return; }
     let cancelled = false;
@@ -262,6 +265,10 @@ export default function PricingPlans() {
         // here go to Billing, where the Stripe portal handles plan changes.
         const alreadyPaid = !!r.data?.stripe_subscription_id
           && (state === "active" || !["canceled", "past_due", "unpaid", "pending"].includes(state));
+        if (r.data?.custom_pricing) {
+          setCustomPricing(r.data.custom_pricing);
+          setCadence(r.data.custom_pricing.cadence === "annual" ? "annual" : "monthly");
+        }
         if (r.data?.trial_eligible === false) {
           setReturning({ previous_product: r.data.previous_product, previous_plan_label: r.data.previous_plan_label, canceled_at: r.data.canceled_at,
                          canceled: state === "canceled" || !!r.data.canceled_at });
@@ -301,6 +308,7 @@ export default function PricingPlans() {
         cadence,                                  // "monthly" | "annual" — from cadence toggle
         origin_url: window.location.origin,
         trial_period_days: returning ? undefined : (plan.trialDays || undefined),
+        custom_pricing: plan.custom ? true : undefined,
       });
       if (r.data?.checkout_url) {
         window.location.href = r.data.checkout_url;
@@ -415,8 +423,17 @@ export default function PricingPlans() {
             <Crown size={20} className="text-amber-500" fill="currentColor" />
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight" data-testid="pricing-headline">
-            {returning ? (returning.canceled ? "Welcome back — pick up where you left off." : "Choose your plan") : "Select a plan to start your 7-day free trial"}
+            {customPricing
+              ? (customPricing.trial && !returning ? `Your plan is ready — start your ${customPricing.trial_days}-day free trial` : "Your plan is ready")
+              : returning ? (returning.canceled ? "Welcome back — pick up where you left off." : "Choose your plan") : "Select a plan to start your 7-day free trial"}
           </h1>
+          {customPricing && (
+            <p className="mt-2 text-sm text-slate-600 max-w-xl" data-testid="pricing-custom-sub">
+              {customPricing.affiliate_name ? <><b>{customPricing.affiliate_name}</b> arranged </> : "You've been set up with "}
+              the <b>{customPricing.tier_label}</b> plan at a custom rate of <b>${(customPricing.monthly_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/mo</b>
+              {cadence === "annual" ? <> — or <b>${(customPricing.annual_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/year</b> (2 months free)</> : null}.
+            </p>
+          )}
           {returning && (
             <p className="mt-2 text-sm text-slate-600 max-w-xl" data-testid="pricing-returning-sub">
               {returning.previous_plan_label && returning.canceled ? <>Your <b>{returning.previous_plan_label}</b> plan was canceled{returning.canceled_at ? ` on ${new Date(returning.canceled_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}. Reactivate it or choose a different plan — billing starts today.</>
@@ -479,6 +496,22 @@ export default function PricingPlans() {
             at ≥lg so the four plans stay in a single row on any
             reasonable desktop viewport. AI Bookkeeper card scales up
             2% at ≥lg so the eye lands there first. */}
+        {customPricing ? (
+          <div className="max-w-md mx-auto" data-testid="pricing-custom-grid">
+            {[customPlan(customPricing)].map((p) => (
+              <PlanCard
+                key={p.id}
+                plan={p}
+                cadence={cadence}
+                showDetail={showDetail}
+                loading={loadingPlanId === p.id}
+                anyLoading={loadingPlanId !== null}
+                onSelect={startCheckout}
+                returning={returning}
+              />
+            ))}
+          </div>
+        ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-5 items-stretch">
           {PLANS.map((p) => (
             <PlanCard
@@ -493,10 +526,26 @@ export default function PricingPlans() {
             />
           ))}
         </div>
+        )}
 
       </div>
     </div>
   );
+}
+
+function customPlan(cp) {
+  const base = PLANS.find((p) => p.stripeProduct === (cp.tier || "advanced")) || PLANS[PLANS.length - 1];
+  return {
+    ...base,
+    id: "custom",
+    name: cp.tier_label || base.name,
+    tagline: cp.affiliate_name ? `Custom rate arranged by ${cp.affiliate_name}` : "Your custom rate",
+    monthly: cp.monthly_cents / 100,
+    annual: cp.annual_cents / 100,
+    highlight: true,
+    trialDays: cp.trial ? cp.trial_days : 0,
+    custom: true,
+  };
 }
 
 
@@ -581,7 +630,7 @@ function PlanCard({ plan, cadence, showDetail, loading, anyLoading, onSelect, re
       {popular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
           <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 shadow-lg">
-            <Star size={10} fill="currentColor" /> Most Popular
+            <Star size={10} fill="currentColor" /> {plan.custom ? "Your plan" : "Most Popular"}
           </div>
         </div>
       )}

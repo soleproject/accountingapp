@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { TodayTab } from "@/components/affiliate/TodayTab";
 import { PipelineTab } from "@/components/affiliate/PipelineTab";
 import { ToolkitTab } from "@/components/affiliate/ToolkitTab";
+import { ClientsTab } from "@/components/affiliate/ClientsTab";
 import { useAuth } from "@/lib/auth";
 import AddCompanyModal from "@/components/AddCompanyModal";
 import { QRCodeSVG } from "qrcode.react";
@@ -29,13 +30,16 @@ export default function Share() {
   const [data, setData] = useState(null);
   const [center, setCenter] = useState(null);
   const [toolkit, setToolkit] = useState(null);
+  const [customPricing, setCustomPricing] = useState(null);
 
   const load = () =>
     api.get("/share").then(r => setData(r.data)).catch(() => setData({}));
   const loadCenter = () => api.get("/affiliate/center").then(r => setCenter(r.data)).catch(() => setCenter({ today: [], pipeline: [], counts: {}, stats: {} }));
   const loadToolkit = () => api.get("/affiliate/toolkit").then(r => setToolkit(r.data)).catch(() => setToolkit(null));
 
-  useEffect(() => { load(); loadCenter(); loadToolkit(); }, []);
+  const loadEligibility = () => api.get("/affiliate/custom-pricing/eligibility").then(r => setCustomPricing(r.data)).catch(() => setCustomPricing(null));
+
+  useEffect(() => { load(); loadCenter(); loadToolkit(); loadEligibility(); }, []);
 
   if (!data) return (
     <div className="p-10 text-center text-slate-400 text-sm">
@@ -78,6 +82,7 @@ export default function Share() {
         {[
           { id: "today",    label: "Today" },
           { id: "pipeline", label: "Pipeline" },
+          ...(customPricing?.enabled ? [{ id: "clients", label: "Clients" }] : []),
           { id: "toolkit",  label: "Toolkit" },
           { id: "links",    label: "My links" },
           { id: "payouts",  label: "Payouts" },
@@ -100,6 +105,7 @@ export default function Share() {
 
       {tab === "today"    && <TodayTab center={center} toolkit={toolkit} onChanged={loadCenter} onGoto={setTab} />}
       {tab === "pipeline" && <PipelineTab center={center} toolkit={toolkit} onChanged={loadCenter} slug={data.slug} EnterReferral={EnterReferralTab} />}
+      {tab === "clients"  && customPricing?.enabled && <ClientsTab eligibility={customPricing} />}
       {tab === "toolkit"  && <ToolkitTab toolkit={toolkit} />}
       {tab === "links"    && <OverviewTab data={data} onChanged={load} links={center?.links} />}
       {tab === "payouts"  && <PayoutsTab />}

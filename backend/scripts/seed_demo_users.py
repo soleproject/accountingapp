@@ -56,6 +56,13 @@ DEMO_USERS = [
         "subdomain":    "axiompartners",
         "primary_color": "#c026d3",
     },
+    {
+        # NMI merchant-services reviewer — lands on /admin/merchant-review.
+        "email":    "underwriter@axiom.ai",
+        "name":     "Dana Underwood",
+        "password": "uw123",
+        "role":     "underwriter",
+    },
 ]
 
 

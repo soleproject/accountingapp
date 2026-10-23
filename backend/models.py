@@ -24,6 +24,8 @@ class SignupIn(BaseModel):
     ref: str | None = None
     # White-label host slug the signup form resolved (acme.accountingapp.ai → "acme").
     firm_slug: str | None = None
+    # Affiliate custom-pricing invite token (see routes/affiliate_pricing.py).
+    invite: str | None = None
     # Enterprise (firm) name — only used when ``role='pro'`` on the
     # ``/signup/enterprise`` path. When provided, we auto-provision an
     # Enterprise record owned by the new Pro user right after signup
