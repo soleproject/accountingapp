@@ -383,6 +383,14 @@ async def _credit_referral_share(
     if gross_cents <= 0:
         return
     share_cents, share_bps = _lookup_payout_cents(gross_cents)
+    custom_pricing_id = None
+    if invoice.get("subscription"):
+        _priced = await db.affiliate_priced_clients.find_one({"stripe_subscription_id": invoice["subscription"]})
+        if _priced:
+            from routes.affiliate_pricing import custom_share_cents
+            share_cents, share_bps = custom_share_cents(_priced, gross_cents)
+            referrer_id = _priced["referrer_user_id"]
+            custom_pricing_id = _priced["id"]
     # Idempotency guard — one earnings row per (payment, referrer).
     dup = await db.referral_earnings.find_one({
         "platform_payment_id": payment_id, "referrer_user_id": referrer_id,
@@ -398,6 +406,7 @@ async def _credit_referral_share(
         "gross_cents": gross_cents,
         "share_bps": share_bps,
         "share_cents": share_cents,
+        **({"custom_pricing_id": custom_pricing_id} if custom_pricing_id else {}),
         "currency": (invoice.get("currency") or "usd").lower(),
         # "accrued" until an admin marks it paid_out. No Stripe Connect
         # automation yet — this is a manual reconciliation ledger.
@@ -709,6 +718,14 @@ async def _handle_checkout_completed(session: dict) -> dict:
             }},
         )
         await _send_checkout_welcome(company_id, snap)
+        _cp = (session.get("metadata") or {}).get("custom_pricing_id")
+        if _cp:
+            await db.affiliate_priced_clients.update_one(
+                {"id": _cp},
+                {"$set": {"company_id": company_id, "stripe_subscription_id": stripe_subscription_id,
+                          "status": "trialing" if snap.get("sub_status") == "trialing" else "paying",
+                          "updated_at": now_iso()}})
+            await db.companies.update_one({"id": company_id}, {"$set": {"billing_product": "advanced"}})
 
     # White-label upgrade — the pro paid to unlock branding. Flip the
     # gate on the target user (identified by metadata.pro_user_id, which
@@ -1400,6 +1417,9 @@ class CheckoutSessionIn(BaseModel):
     # Stripe Price ID via `_price_id`. Defaults to monthly when the
     # caller omits it, matching the historical Add-Client behavior.
     cadence: Optional[str] = None
+    # Affiliate custom pricing — bill the affiliate-set amount via inline
+    # price_data instead of a catalog Price (routes/affiliate_pricing.py).
+    custom_pricing: Optional[bool] = None
 
 
 @router.post("/companies/{cid}/billing/checkout-session")
@@ -1436,8 +1456,21 @@ async def create_company_checkout_session(
     if cadence not in ("monthly", "annual"):
         cadence = "monthly"
 
-    price_id = _price_id(product, discount, cadence)
-    if not price_id:
+    priced = None
+    if inp.custom_pricing:
+        from routes.affiliate_pricing import for_company as _priced_for_company, _price_data as _custom_price_data, TIER as _CUSTOM_TIER
+        priced = await _priced_for_company(company)
+        if not priced:
+            raise HTTPException(400, "No custom price is set up for this company.")
+        product = _CUSTOM_TIER
+        discount = False
+        firm_doc = await db.users.find_one({"$or": [{"branding.signin_subdomain": priced.get("firm_slug")}, {"branding.subdomain": priced.get("firm_slug")}]}, {"branding": 1}) if priced.get("firm_slug") else None
+        firm_label = ((firm_doc or {}).get("branding") or {}).get("firm_name") or "SmartTally"
+        line_item = {"price_data": _custom_price_data(priced["monthly_cents"], cadence, firm_label), "quantity": 1}
+    else:
+        line_item = None
+    price_id = None if priced else _price_id(product, discount, cadence)
+    if not price_id and not priced:
         expected_var = f"STRIPE_PRICE_{product.upper()}_{cadence.upper()}"
         raise HTTPException(
             400,
@@ -1471,10 +1504,10 @@ async def create_company_checkout_session(
 
         session = stripe.checkout.Session.create(
             mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
+            line_items=[line_item or {"price": price_id, "quantity": 1}],
             success_url=success_url,
             cancel_url=cancel_url,
-            allow_promotion_codes=True,
+            allow_promotion_codes=not priced,
             metadata={
                 "company_id": cid,
                 "company_name": company.get("name") or "",
@@ -1482,9 +1515,10 @@ async def create_company_checkout_session(
                 "billing_cadence": cadence,
                 "billing_discount": "true" if discount else "false",
                 "initiated_by_user_id": user["id"],
+                **({"custom_pricing_id": priced["id"]} if priced else {}),
             },
             subscription_data={
-                "metadata": {"company_id": cid},
+                "metadata": {"company_id": cid, **({"custom_pricing_id": priced["id"]} if priced else {})},
                 # When a trial is requested, pass Stripe the day count.
                 # Stripe surfaces "First N days free" on the Checkout page,
                 # still collects the card upfront (default for trials in
@@ -1495,6 +1529,7 @@ async def create_company_checkout_session(
                 **(
                     {"trial_period_days": int(inp.trial_period_days)}
                     if inp.trial_period_days and int(inp.trial_period_days) > 0 and _trial_eligible(company)
+                    and (priced is None or priced.get("trial"))
                     else {}
                 ),
             },
@@ -1511,6 +1546,8 @@ async def create_company_checkout_session(
             "billing_last_session_id": session.id,
             "billing_state": company.get("billing_state") or "pending",
             "updated_at": now_iso(),
+            **({"billing_product": product, "billing_cadence": cadence, "billing_payer": "client_card",
+                "custom_pricing_id": priced["id"]} if priced else {}),
         }},
     )
     return {
@@ -1867,6 +1904,17 @@ async def end_trial_now(cid: str, user: dict = Depends(get_current_user)):
             "current_period_end": snap.get("sub_current_period_end")}
 
 
+async def _custom_pricing_for_state(c: dict) -> Optional[dict]:
+    from routes.affiliate_pricing import for_company, TIER_LABEL, TRIAL_DAYS, _annual_cents
+    doc = await for_company(c)
+    if not doc or doc.get("status") == "canceled":
+        return None
+    aff = await db.users.find_one({"id": doc["referrer_user_id"]}, {"name": 1})
+    return {"monthly_cents": doc["monthly_cents"], "annual_cents": _annual_cents(doc["monthly_cents"]),
+            "cadence": doc.get("cadence") or "monthly", "trial": bool(doc.get("trial")), "trial_days": TRIAL_DAYS,
+            "tier": doc.get("tier"), "tier_label": TIER_LABEL, "affiliate_name": (aff or {}).get("name")}
+
+
 @router.get("/companies/{cid}/billing/state")
 async def get_company_billing_state(
     cid: str,
@@ -1933,6 +1981,7 @@ async def get_company_billing_state(
         "plan_amount_cents": c.get("sub_amount_cents"),
         "plan_cadence": c.get("billing_cadence"),
         "plan_label": PLAN_LABELS.get(c.get("billing_product") or "", c.get("billing_product")),
+        "custom_pricing": await _custom_pricing_for_state(c),
         # Returning-customer signals for the pricing page copy + trial gate.
         "trial_eligible": _trial_eligible(c),
         "previous_product": c.get("billing_product") if not _trial_eligible(c) else None,

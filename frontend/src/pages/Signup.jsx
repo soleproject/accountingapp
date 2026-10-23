@@ -51,6 +51,8 @@ export default function Signup() {
   const [password, setPassword] = useState("");
   const [ref, setRef] = useState("");
   const [refWho, setRefWho] = useState(null);  // {name, firm_name} once resolved
+  const inviteToken = params.get("invite") || "";
+  const [invite, setInvite] = useState(null);   // affiliate custom-pricing invite
   const [busy, setBusy] = useState(false);
 
   // White-label branding — same resolution chain as Login so a firm's
@@ -117,6 +119,16 @@ export default function Signup() {
     }
   }, [params]);
 
+  useEffect(() => {
+    if (!inviteToken) return;
+    let cancelled = false;
+    api.get(`/public/custom-pricing/invite/${encodeURIComponent(inviteToken)}`)
+      .then(r => { if (!cancelled) { setInvite(r.data); if (r.data?.ref && !ref) { setRef(r.data.ref); setRefCookie(r.data.ref); } } })
+      .catch(() => { if (!cancelled) setInvite(null); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteToken]);
+
   // Resolve the slug to a display name so the banner reads "Referred by
   // Priya Patel (PriyaBooks)" instead of the raw slug. 404s silently
   // hide the banner rather than showing broken attribution.
@@ -165,6 +177,7 @@ export default function Signup() {
         enterprise_name: enterpriseMode ? firmName.trim() : undefined,
         ref: ref || undefined,
         firm_slug: firmSlug || undefined,
+        invite: inviteToken || undefined,
       });
       routingRef.current = true;
       localStorage.setItem("axiom_token", r.data.token);
@@ -260,7 +273,15 @@ export default function Signup() {
           </p>
         </div>
 
-        {ref && (
+        {invite && (
+          <div className="text-xs text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-md px-3 py-2 leading-relaxed" data-testid="signup-invite-badge">
+            {invite.affiliate_name ? <><span className="font-semibold">{invite.affiliate_name}</span> set you up with </> : "You've been set up with "}
+            the <span className="font-semibold">{invite.tier_label}</span> plan at{" "}
+            <span className="font-semibold">${(invite.monthly_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/mo</span>
+            {invite.trial ? <> — {invite.trial_days}-day free trial included.</> : "."}
+          </div>
+        )}
+        {ref && !invite && (
           <div
             className="text-xs text-cyan-800 bg-cyan-50 border border-cyan-100 rounded-md px-3 py-2 leading-relaxed"
             data-testid="signup-ref-badge"

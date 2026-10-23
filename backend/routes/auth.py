@@ -217,7 +217,20 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
         _sfs = None
     if _sfs:
         doc["signup_firm_slug"] = _sfs
+    # Affiliate custom-pricing invite — bind the referrer/firm even when
+    # the ?ref cookie was lost, then link the priced-client row.
+    _priced = None
+    if inp.role == "client":
+        _priced = await db.affiliate_priced_clients.find_one(
+            {"invite_token": inp.invite} if inp.invite else {"email": inp.email.lower(), "status": "invited"})
+    if _priced and not _priced.get("user_id"):
+        doc.setdefault("referred_by_user_id", _priced["referrer_user_id"])
+        if _priced.get("firm_slug") and not doc.get("signup_firm_slug"):
+            doc["signup_firm_slug"] = _priced["firm_slug"]
     await db.users.insert_one(doc)
+    if _priced:
+        from routes.affiliate_pricing import attach_signup
+        await attach_signup(uid, inp.email, _priced.get("invite_token"))
     token = create_token(uid, inp.role)
 
     # Fire-and-forget: spawn the Enterprise record + fire the welcome
