@@ -1,0 +1,43 @@
+{
+  "summary": "Tested SmartTally affiliate custom pricing end-to-end. Backend: 12/12 pytest pass (eligibility, create validations 400/409/409/200, list + 403, resend, PATCH 200/400/404, public invite 200/404, signup with invite -> referred_by + signup_firm_slug + priced doc signed_up, company billing/state custom_pricing, checkout-session monthly+annual -> checkout.stripe.com, custom_pricing with no priced doc -> 400). Frontend: Clients tab shown for affiliate.smarttally and hidden for pro; add client $180 -> 'Invite sent', row 'you keep $50.00/mo' Invited; edit to $200 -> row $200.00; resend -> 'Invite re-sent'; edit below floor -> error toast. Invite signup badge shows Sam Seller/Advanced/$200.00; after signup /welcome/pricing shows single custom card ($200, Your plan, correct headline/sub), annual toggle shows $166.67/mo billed $2,000/year, Start 7-day free trial redirected to checkout.stripe.com. Jamie shows $165 custom card. Core feature works; issues below are logic edge cases from code review plus minor UX.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "Stripe webhook _handle_checkout_completed + _credit_referral_share (custom_share_cents)", "issue": "Cadence mismatch: client can choose annual at checkout while priced doc keeps cadence='monthly' (doc cadence is never updated on checkout completion). custom_share_cents uses doc.cadence to compute floor -> floor=13000 vs gross=monthly*10, so affiliate would be credited (annual - $130) instead of (annual - $1300). Over-payout of ~$1,170/yr per client. Fix: stamp the chosen billing_cadence (session.metadata.billing_cadence) onto affiliate_priced_clients.cadence in checkout completion, or derive floor from the invoice's price interval.", "priority": "HIGH"},
+      {"endpoint": "PATCH /api/affiliate/custom-pricing/clients/{id} (_update_subscription_price)", "issue": "Same root cause: for a subscription bought annually but doc.cadence='monthly', price change swaps the sub item to a monthly price_data (interval switch + wrong amount), and companies.sub_amount_cents set to monthly. Use the live subscription item's recurring.interval instead of doc.cadence.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/auth/signup (invite)", "issue": "Invite token is not checked against the signup email — anyone with the link can sign up with a different email and consume the priced invite. Consider requiring email match (or at least logging)."},
+      {"endpoint": "_send_invite", "issue": "Signup link query params (email, name) are not URL-encoded — emails with '+' or names with '&' produce broken links. Use urllib.parse.urlencode."},
+      {"endpoint": "POST /api/auth/signup", "issue": "doc.setdefault('referred_by_user_id', ...) keeps a pre-existing ref-cookie referrer over the invite's affiliate; _credit_referral_share override by stripe_subscription_id mitigates this only after webhook stamps sub id."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ClientsTab AddClientForm", "issue": "Price input has min=130 so browser native validation ('Value must be greater than or equal to 130.') blocks submit; the custom $130 minimum error toast never shows. Functionally acceptable, but if toast is required add noValidate to the form.", "selector": "[data-testid='add-client-price']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/signup?invite=...", "issues": ["Subtitle 'Free to start — you can upgrade any time.' contradicts the custom paid-plan invite badge; header brand shows 'SmartBooks LEDGER' rather than SmartTally on platform host."]},
+      {"screen": "/welcome/pricing (custom)", "issues": ["pricing-custom-sub always says '$X/mo' even when Annual toggle selected (card correctly shows annual) — fine but could mention annual total.", "Header brand inconsistent: new invited client sees 'SmartTally', Jamie (same signup_firm_slug smarttally) sees 'SmartBooks Team'."]},
+      {"screen": "Post-login for unpaid invited client", "issues": ["Login lands on /owner rather than /welcome/pricing — verify the pricing gate redirects invited unpaid clients."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_affiliate_custom_pricing.py", "/app/test_reports/pytest/pytest_custom_pricing.xml"],
+  "action_items": [
+    "HIGH: Persist chosen checkout cadence to affiliate_priced_clients on checkout.session.completed (or derive from subscription interval) so custom_share_cents floor and PATCH price updates use the actual billing interval",
+    "URL-encode invite link params in _send_invite",
+    "Optionally enforce invite email == signup email",
+    "Optional: noValidate on add-client form so the $130 toast shows; fix signup subtitle copy for invites"
+  ],
+  "critical_code_review_comments": [
+    "custom_share_cents and _update_subscription_price both rely on doc.cadence which is set by the affiliate at invite time, but the client chooses cadence freely at checkout",
+    "_refresh_status does DB writes inside a GET list call per row — fine at 500 rows but N+1 queries",
+    "ClientRow price input state is not reset from props after reload (stale value if price changed elsewhere)"
+  ],
+  "updated_files": ["/app/backend/tests/test_affiliate_custom_pricing.py"],
+  "success_rate": {"backend": "100% (12/12 tests); 2 HIGH code-review logic bugs untestable without completing payment", "frontend": "~95% (all requested flows pass; $130 toast pre-empted by native validation)"},
+  "seed_data_creation": "Created priced clients + users: qa.custom.af700f3b@example.com (pytest, signed up, company TEST_QA Custom Co) and qa.custom.ui18102@example.com / Test1234! (UI, $200, signed up, company TEST_QA UI Biz). Stripe test checkout sessions created, none paid.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run pytest tests/test_affiliate_custom_pricing.py (creates new unique invite each run; uses 1 signup — rate limit 5/min). Invite token from mongo affiliate_priced_clients.invite_token. Clients tab testids: share-tab-clients, affiliate-add-client-btn, add-client-*, priced-client-{edit,save,resend,price-input}-<id>. Pricing: pricing-custom-grid, pricing-card-custom, pricing-cadence-annual, pricing-select-custom."
+}

@@ -269,7 +269,9 @@ export default function Signup() {
               ? "Full firm dashboard, unlimited team members, and AI-powered books for every client. No card required to start."
               : affiliateMode
                 ? "No subscription required. Share your link, earn on every paying signup — for as long as they pay."
-                : "Free to start — you can upgrade any time."}
+                : invite
+                  ? (invite.trial ? `Your ${invite.tier_label} plan starts with a ${invite.trial_days}-day free trial.` : `Your ${invite.tier_label} plan is ready to activate.`)
+                  : "Free to start — you can upgrade any time."}
           </p>
         </div>
 

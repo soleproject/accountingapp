@@ -430,7 +430,8 @@ export default function PricingPlans() {
           {customPricing && (
             <p className="mt-2 text-sm text-slate-600 max-w-xl" data-testid="pricing-custom-sub">
               {customPricing.affiliate_name ? <><b>{customPricing.affiliate_name}</b> arranged </> : "You've been set up with "}
-              the <b>{customPricing.tier_label}</b> plan at a custom rate of <b>${(customPricing.monthly_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/mo</b>.
+              the <b>{customPricing.tier_label}</b> plan at a custom rate of <b>${(customPricing.monthly_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/mo</b>
+              {cadence === "annual" ? <> — or <b>${(customPricing.annual_cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}/year</b> (2 months free)</> : null}.
             </p>
           )}
           {returning && (

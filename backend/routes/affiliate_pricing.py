@@ -105,8 +105,9 @@ async def _send_invite(doc: dict, affiliate: dict, firm: dict | None) -> None:
     firm_name = ((firm or {}).get("branding") or {}).get("firm_name") or (firm or {}).get("firm_name") or "SmartTally"
     slug = _firm_slug(firm)
     base = public_base_url(slug).rstrip("/")
-    link = (f"{base}/signup?invite={doc['invite_token']}&email={doc['email']}&name={doc['name']}"
-            f"&ref={affiliate.get('referral_slug') or ''}")
+    from urllib.parse import urlencode
+    link = f"{base}/signup?" + urlencode({"invite": doc["invite_token"], "email": doc["email"], "name": doc["name"],
+                                          "ref": affiliate.get("referral_slug") or ""})
     monthly = f"${doc['monthly_cents'] / 100:,.2f}"
     annual = f"${_annual_cents(doc['monthly_cents']) / 100:,.2f}"
     aff_name = affiliate.get("name") or "Your advisor"
@@ -220,14 +221,14 @@ async def update_priced_client(pid: str, inp: PriceUpdateIn, user: dict = Depend
     if sub_id and doc["status"] in ("trialing", "paying"):
         proration = "none" if doc["status"] == "trialing" else "create_prorations"
         try:
-            await asyncio.to_thread(_update_subscription_price, sub_id, inp.monthly_cents, doc.get("cadence") or "monthly", proration)
+            doc["cadence"] = await asyncio.to_thread(_update_subscription_price, sub_id, inp.monthly_cents, doc.get("cadence") or "monthly", proration)
         except stripe.error.StripeError as e:
             raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
         if doc.get("company_id"):
             await db.companies.update_one({"id": doc["company_id"]}, {"$set": {
                 "sub_amount_cents": inp.monthly_cents if doc.get("cadence") != "annual" else _annual_cents(inp.monthly_cents),
                 "updated_at": _now()}})
-    await db.affiliate_priced_clients.update_one({"id": pid}, {"$set": {"monthly_cents": int(inp.monthly_cents), "updated_at": _now()}})
+    await db.affiliate_priced_clients.update_one({"id": pid}, {"$set": {"monthly_cents": int(inp.monthly_cents), "cadence": doc.get("cadence") or "monthly", "updated_at": _now()}})
     doc["monthly_cents"] = int(inp.monthly_cents)
     return {"ok": True, "client": _public(doc), "proration": proration}
 
@@ -239,11 +240,14 @@ def _price_data(monthly_cents: int, cadence: str, firm_name: str = "SmartTally")
             "product_data": {"name": f"{TIER_LABEL} ({firm_name})", "metadata": {"billing_product": TIER}}}
 
 
-def _update_subscription_price(sub_id: str, monthly_cents: int, cadence: str, proration: str) -> None:
+def _update_subscription_price(sub_id: str, monthly_cents: int, cadence: str, proration: str) -> str:
     sub = stripe.Subscription.retrieve(sub_id)
     item = sub["items"]["data"][0]
+    live_interval = ((item.get("price") or {}).get("recurring") or {}).get("interval")
+    cadence = "annual" if live_interval == "year" else "monthly" if live_interval == "month" else cadence
     stripe.Subscription.modify(sub_id, items=[{"id": item["id"], "price_data": _price_data(monthly_cents, cadence)}],
                                proration_behavior=proration)
+    return cadence
 
 
 # ---------------------------------------------------------------- public + hooks

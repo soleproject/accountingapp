@@ -73,6 +73,7 @@ function AddClientForm({ floor, eligibility, onClose, onDone }) {
 
   const submit = async (e) => {
     e.preventDefault();
+    if (!name.trim() || !/^\S+@\S+\.\S+$/.test(email)) { toast.error("Enter the client's name and a valid email"); return; }
     if (cents < eligibility.floor_cents) { toast.error(`Price must be at least $${floor}/mo`); return; }
     setBusy(true);
     try {
@@ -84,7 +85,7 @@ function AddClientForm({ floor, eligibility, onClose, onDone }) {
   };
 
   return (
-    <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 mb-6 space-y-4" data-testid="affiliate-add-client-form">
+    <form onSubmit={submit} noValidate className="rounded-2xl border border-slate-200 bg-slate-50 p-5 mb-6 space-y-4" data-testid="affiliate-add-client-form">
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="block"><span className="text-xs font-semibold text-slate-600">Client name</span>
           <input value={name} onChange={e => setName(e.target.value)} required minLength={2} className="mt-1 w-full h-10 rounded-lg border border-slate-300 px-3 text-sm bg-white" placeholder="Jamie Rivera" data-testid="add-client-name" /></label>

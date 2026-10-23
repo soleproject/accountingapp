@@ -221,10 +221,14 @@ async def signup(request: Request, inp: Annotated[SignupIn, Body()]):
     # the ?ref cookie was lost, then link the priced-client row.
     _priced = None
     if inp.role == "client":
-        _priced = await db.affiliate_priced_clients.find_one(
-            {"invite_token": inp.invite} if inp.invite else {"email": inp.email.lower(), "status": "invited"})
+        _priced = await db.affiliate_priced_clients.find_one({"email": inp.email.lower(), "status": "invited"})
+        if not _priced and inp.invite:
+            _by_tok = await db.affiliate_priced_clients.find_one({"invite_token": inp.invite})
+            # Token must belong to this email — a forwarded link can't consume someone else's price.
+            if _by_tok and (_by_tok.get("email") or "").lower() == inp.email.lower():
+                _priced = _by_tok
     if _priced and not _priced.get("user_id"):
-        doc.setdefault("referred_by_user_id", _priced["referrer_user_id"])
+        doc["referred_by_user_id"] = _priced["referrer_user_id"]
         if _priced.get("firm_slug") and not doc.get("signup_firm_slug"):
             doc["signup_firm_slug"] = _priced["firm_slug"]
     await db.users.insert_one(doc)

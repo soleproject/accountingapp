@@ -724,6 +724,7 @@ async def _handle_checkout_completed(session: dict) -> dict:
                 {"id": _cp},
                 {"$set": {"company_id": company_id, "stripe_subscription_id": stripe_subscription_id,
                           "status": "trialing" if snap.get("sub_status") == "trialing" else "paying",
+                          "cadence": "annual" if (snap.get("sub_interval") == "year" or (session.get("metadata") or {}).get("billing_cadence") == "annual") else "monthly",
                           "updated_at": now_iso()}})
             await db.companies.update_one({"id": company_id}, {"$set": {"billing_product": "advanced"}})
 
