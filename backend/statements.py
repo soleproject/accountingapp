@@ -692,7 +692,7 @@ async def _process_veryfi_result(
             continue
         candidates.append({
             "date": ln_date,
-            "description": f"{ln['description']} (Veryfi)",
+            "description": f"{ln['description']} ({'AI Review' if veryfi_data.get('engine') == 'ai_review' else 'Veryfi'})",
             "merchant": ln["merchant"],
             "merchant_name": ln["merchant"],
             "amount": ln["amount"],
@@ -706,6 +706,10 @@ async def _process_veryfi_result(
             # fired and every Veryfi row fell through to the LLM.
             "veryfi_category": ln.get("veryfi_category"),
             "veryfi_vendor":   ln.get("veryfi_vendor"),
+            "check_number":    ln.get("check_number"),
+            "reference":       ln.get("reference"),
+            "cardholder":      ln.get("cardholder"),
+            "source_engine":   "ai_review" if veryfi_data.get("engine") == "ai_review" else "veryfi",
             # Layer 4 dup-guard flags flow through too.
             "probable_duplicate": ln.get("probable_duplicate"),
             "dup_reason":         ln.get("dup_reason"),
@@ -934,7 +938,7 @@ async def list_imports(cid: str, limit: int = 50, offset: int = 0) -> dict:
     total = await db.statement_imports.count_documents({"company_id": cid})
     cursor = (
         db.statement_imports
-        .find({"company_id": cid}, {"veryfi_raw": 0})
+        .find({"company_id": cid}, {"veryfi_raw": 0, "ai_doc": 0, "ai_rows": 0})
         .sort("created_at", DESCENDING)
         .skip(offset)
         .limit(limit)
@@ -964,7 +968,7 @@ async def _lazy_backfill_opening_balances(cid: str) -> None:
 
 async def get_import_detail(cid: str, import_id: str) -> dict:
     """Return the import row + the transactions promoted from it."""
-    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"ai_doc": 0})
     if not doc:
         raise HTTPException(404, "Import not found")
     doc = coerce(doc)
@@ -1612,9 +1616,12 @@ async def _categorize_and_insert_veryfi_lines(
             # by Veryfi" badge and admins can audit accuracy.
             "veryfi_category": cand.get("veryfi_category"),
             "veryfi_vendor":   cand.get("veryfi_vendor"),
+            **({"check_number": cand["check_number"]} if cand.get("check_number") else {}),
+            **({"reference": cand["reference"]} if cand.get("reference") else {}),
+            **({"cardholder": cand["cardholder"]} if cand.get("cardholder") else {}),
             **post,
             "human_reviewed": False,
-            "source": "veryfi",
+            "source": cand.get("source_engine") or "veryfi",
             "statement_import_id": import_id,
             "splits": [], "linked_invoice_id": None,
             "linked_bill_id": None, "linked_payment_id": None,
@@ -1870,3 +1877,172 @@ async def reprocess_import(
         "new_account_name": bank_acct["name"],
         "new_account_type": bank_acct.get("type"),
     }
+
+
+# ============================================================================
+# AI Review engine (GPT-4o) — opt-in alternative to Veryfi
+# ============================================================================
+async def upload_statement_ai(
+    cid: str,
+    file: UploadFile,
+    account_id: str | None,
+    categorize_fn,
+    is_period_closed_fn,
+    account_kind_hint: str | None = None,
+) -> dict:
+    """Insert the import row, kick off GPT-4o extraction in the background
+    and return immediately. When the extracted totals tie to the statement
+    summary the import posts automatically; otherwise it parks in
+    ``needs_review`` until the user approves or rejects."""
+    import asyncio
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(400, "Empty file")
+    if len(file_bytes) > MAX_BYTES:
+        raise HTTPException(400, "File too large (max 25 MB)")
+    import_id = str(uuid.uuid4())
+    now = now_iso()
+    await db.statement_imports.insert_one({
+        "id": import_id, "company_id": cid, "filename": file.filename or "statement.pdf",
+        "size": len(file_bytes), "method": "ai_review", "status": "processing", "ai_stage": "queued",
+        "transaction_count": None, "period_start": None, "period_end": None,
+        "account_id": account_id, "account_name": None, "account_kind_hint": account_kind_hint,
+        "veryfi_document_id": None, "created_at": now, "updated_at": now,
+    })
+    asyncio.create_task(_run_ai_import(
+        cid, import_id, file_bytes, file.filename or "statement.pdf",
+        file.content_type or "application/pdf", account_id, account_kind_hint,
+        categorize_fn, is_period_closed_fn,
+    ))
+    return {"import_id": import_id, "status": "processing", "method": "ai_review"}
+
+
+async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, account_id,
+                         account_kind_hint, categorize_fn, is_period_closed_fn):
+    import statement_ai_engine
+
+    async def _progress(stage: str, **kw):
+        await db.statement_imports.update_one(
+            {"id": import_id}, {"$set": {"ai_stage": stage, "ai_pages": kw.get("pages"), "updated_at": now_iso()}})
+
+    try:
+        doc = await statement_ai_engine.analyze_statement(
+            file_bytes, filename, content_type, account_kind_hint, _progress)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("ai_review import failed cid=%s import=%s", cid, import_id)
+        await db.statement_imports.update_one(
+            {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {e}", "updated_at": now_iso()}})
+        return
+    review = doc["ai_review"]
+    await db.statement_imports.update_one({"id": import_id}, {"$set": {
+        "ai_doc": doc, "ai_review": {k: v for k, v in review.items() if k != "rows"},
+        "ai_rows": review["rows"], "ai_stage": "reconciled",
+        "period_start": doc.get("period_start_date"), "period_end": doc.get("period_end_date"),
+        "transaction_count": len(doc.get("transactions") or []), "updated_at": now_iso()}})
+    if not review["reconciliation"]["ties"]:
+        await db.statement_imports.update_one(
+            {"id": import_id}, {"$set": {"status": "needs_review", "ai_stage": "needs_review", "updated_at": now_iso()}})
+        return
+    await _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categorize_fn, is_period_closed_fn)
+
+
+async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categorize_fn, is_period_closed_fn):
+    try:
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "processing", "ai_stage": "posting", "updated_at": now_iso()}})
+        result = await _process_veryfi_result(
+            cid, import_id, doc, account_id,
+            categorize_fn=categorize_fn, is_period_closed_fn=is_period_closed_fn,
+            account_kind_hint=account_kind_hint)
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {"method": "ai_review", "ai_stage": "done", "updated_at": now_iso()}})
+        return result
+    except HTTPException as e:
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "failed", "error": str(e.detail), "updated_at": now_iso()}})
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.exception("ai_review posting failed import=%s", import_id)
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "failed", "error": f"Posting: {e}", "updated_at": now_iso()}})
+        raise HTTPException(500, f"Posting failed: {e}")
+
+
+async def approve_ai_import(cid: str, import_id: str, categorize_fn, is_period_closed_fn) -> dict:
+    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    if not row:
+        raise HTTPException(404, "Import not found")
+    if row.get("status") != "needs_review" or not row.get("ai_doc"):
+        raise HTTPException(400, "This import is not waiting for review.")
+    await db.statement_imports.update_one({"id": import_id}, {"$set": {"ai_approved_at": now_iso()}})
+    return await _post_ai_doc(cid, import_id, row["ai_doc"], row.get("account_id"), row.get("account_kind_hint"),
+                              categorize_fn, is_period_closed_fn)
+
+
+async def reject_ai_import(cid: str, import_id: str) -> dict:
+    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    if not row:
+        raise HTTPException(404, "Import not found")
+    if row.get("status") != "needs_review":
+        raise HTTPException(400, "This import is not waiting for review.")
+    await db.statement_imports.update_one(
+        {"id": import_id}, {"$set": {"status": "rejected", "ai_stage": "rejected", "updated_at": now_iso()}})
+    return {"ok": True, "status": "rejected"}
+
+
+def _ai_rows_for_export(row: dict, txns: list[dict]) -> list[dict]:
+    rows = row.get("ai_rows")
+    if rows:
+        return rows
+    out = []
+    for t in txns:
+        amt = float(t.get("amount") or 0)
+        out.append({"post_date": t.get("date"), "trans_date": t.get("date"), "description": t.get("description"),
+                    "reference": t.get("reference"), "check_number": t.get("check_number"), "amount": abs(amt),
+                    "direction": "deposit" if amt > 0 else "withdrawal", "cardholder": None, "type": None})
+    return out
+
+
+async def export_import_xlsx(cid: str, import_id: str) -> tuple[bytes, str]:
+    """All / Withdrawals / Deposits workbook for an import."""
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    if not row:
+        raise HTTPException(404, "Import not found")
+    txns = [coerce(t) async for t in db.transactions.find({"company_id": cid, "statement_import_id": import_id}).sort("date", 1).limit(5000)]
+    rows = _ai_rows_for_export(row, txns)
+    wb = Workbook()
+    bold = Font(bold=True)
+
+    def _sheet(ws, data, split_cols):
+        hdr = ["Post Date", "Transaction Date", "Description", "Reference", "Check #"]
+        hdr += ["Withdrawals / Purchases ($)", "Deposits / Payments ($)"] if split_cols else ["Amount ($)"]
+        hdr += ["Cardholder", "Type"]
+        ws.append(hdr)
+        for c in ws[1]:
+            c.font = bold
+        for r in data:
+            base = [r.get("post_date"), r.get("trans_date"), r.get("description"), r.get("reference"), r.get("check_number")]
+            if split_cols:
+                base += [r["amount"] if r["direction"] == "withdrawal" else 0, r["amount"] if r["direction"] == "deposit" else 0]
+            else:
+                base += [r["amount"]]
+            ws.append(base + [r.get("cardholder"), r.get("type")])
+        for col, w in zip("ABCDEFGHI", (12, 16, 48, 14, 10, 16, 16, 22, 12)):
+            ws.column_dimensions[col].width = w
+
+    ws = wb.active; ws.title = "All Transactions"; _sheet(ws, rows, True)
+    _sheet(wb.create_sheet("Withdrawals"), [r for r in rows if r["direction"] == "withdrawal"], False)
+    _sheet(wb.create_sheet("Deposits"), [r for r in rows if r["direction"] == "deposit"], False)
+    summ = (row.get("ai_review") or {}).get("summary")
+    if summ:
+        ws2 = wb.create_sheet("Summary", 0)
+        tot = summ.get("totals") or {}
+        for k, v in [("Bank", summ.get("bank_name")), ("Account type", summ.get("account_type")),
+                     ("Account", summ.get("account_number_masked")), ("Period", f"{summ.get('period_start')} → {summ.get('period_end')}"),
+                     ("Beginning Balance", summ.get("beginning_balance")), ("Deposits / Payments Received", tot.get("deposits")),
+                     ("Withdrawals / Purchases", tot.get("withdrawals")), ("Fees", tot.get("fees")), ("Interest", tot.get("interest")),
+                     ("Ending Balance", summ.get("ending_balance"))]:
+            ws2.append([k, v])
+        ws2.column_dimensions["A"].width = 30; ws2.column_dimensions["B"].width = 20
+    buf = BytesIO(); wb.save(buf)
+    name = _re.sub(r"[^A-Za-z0-9._-]+", "_", (row.get("filename") or "statement").rsplit(".", 1)[0]) + "_transactions.xlsx"
+    return buf.getvalue(), name
