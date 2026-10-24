@@ -57,9 +57,12 @@ function MiniCalendar() {
   );
 }
 
-export const PracticeRightRail = () => (
+export const PracticeRightRail = ({ onHide }) => (
   <aside className="space-y-4" data-testid="practice-right-rail">
-    <div className="text-right text-[11px] font-bold uppercase tracking-wider text-[#1E88E5]">» Hide Sidebar</div>
+    <div className="text-right">
+      <button type="button" onClick={onHide} data-testid="practice-hide-sidebar-btn"
+              className="text-[11px] font-bold uppercase tracking-wider text-[#1E88E5] hover:underline">» Hide Sidebar</button>
+    </div>
     <div className="rounded-md border border-slate-200 bg-white p-4 text-center relative overflow-hidden" data-testid="practice-refer-card">
       <div className="text-xs font-bold uppercase tracking-wide text-slate-800">Refer a friend, get rewarded!</div>
       <button type="button" data-testid="practice-refer-btn"

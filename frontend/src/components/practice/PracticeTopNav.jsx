@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Scale, Play, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
-  Settings, CreditCard, LogOut, Calculator, Check,
+  Settings, CreditCard, LogOut, Calculator, Check, ChevronsLeft,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
@@ -61,7 +61,7 @@ function ProfileMenu({ user }) {
             );
           })}
           <div className="my-1 border-t border-slate-200" />
-          <button type="button" className={item} data-testid="practice-menu-settings" onClick={() => setOpen(false)}>
+          <button type="button" className={item} data-testid="practice-menu-settings" onClick={() => { setOpen(false); nav("/practice/settings"); }}>
             <Settings size={15} className="text-slate-500" /> Settings
           </button>
           <button type="button" className={item} data-testid="practice-menu-subscription" onClick={() => setOpen(false)}>
@@ -76,7 +76,7 @@ function ProfileMenu({ user }) {
   );
 }
 
-export const PracticeTopNav = ({ user }) => (
+export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => (
   <header className="bg-[#1E88E5] text-white" data-testid="practice-topnav">
     <div className="flex items-center gap-3 px-4 h-14">
       <div className="flex items-center gap-2 pr-2" data-testid="practice-brand">
@@ -121,6 +121,12 @@ export const PracticeTopNav = ({ user }) => (
         <span className="h-5 w-9 rounded-full bg-white/90 relative"><span className="absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-[#1E88E5]" /></span>
         Privacy
       </label>
+      {railHidden && (
+        <button type="button" onClick={onShowRail} title="Show Sidebar" data-testid="practice-show-sidebar-btn"
+                className="shrink-0 ml-1 p-1 rounded hover:bg-white/15" aria-label="Show Sidebar">
+          <ChevronsLeft size={18} />
+        </button>
+      )}
     </div>
   </header>
 );

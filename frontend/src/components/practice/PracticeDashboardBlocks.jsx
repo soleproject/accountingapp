@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import {
   Scale, Wallet, BadgeDollarSign, Receipt, UserPlus, Briefcase, CalendarDays,
   ClipboardList, FileText, Phone, MessageSquare, Clock, FileSignature,
@@ -54,12 +55,13 @@ export const PracticeQuickCreate = () => (
 );
 
 const STEPS = [
-  { label: "Setup your profile", done: true }, { label: "Add your logo" }, { label: "Create a matter" },
+  { label: "Setup your profile", done: true, to: "/practice/settings" }, { label: "Add your logo" }, { label: "Create a matter" },
   { label: "Track time" }, { label: "Generate an invoice" }, { label: "Create your first task" },
   { label: "Sync your calendar" }, { label: "Sync documents and files" }, { label: "Accept credit cards" },
 ];
 
 export const PracticeGetStarted = () => {
+  const nav = useNavigate();
   const pct = Math.round((STEPS.filter(s => s.done).length / STEPS.length) * 100);
   return (
     <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-get-started">
@@ -70,6 +72,7 @@ export const PracticeGetStarted = () => {
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {STEPS.map(s => (
           <button key={s.label} type="button" data-testid={`practice-step-${s.label.toLowerCase().replace(/\s+/g, "-")}`}
+                  onClick={() => s.to && nav(s.to)}
                   className="flex items-center gap-3 rounded border border-slate-300 bg-white px-4 py-3.5 text-left hover:border-[#1E88E5] transition-colors">
             {s.done ? <CircleCheck size={20} className="text-[#43A047] shrink-0" /> : <Circle size={20} className="text-slate-400 shrink-0" />}
             <span className={`text-[15px] font-semibold ${s.done ? "text-slate-800" : "text-[#1E88E5]"}`}>{s.label}</span>
