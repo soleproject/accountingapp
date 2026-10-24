@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { Row, input, Toggle, Section } from "@/components/practice/forms";
 import { RichNotes } from "@/components/practice/RichNotes";
+import { ContactPicker } from "@/components/practice/ContactPicker";
 
 const LW = "210px";
 const W = "max-w-xl";
@@ -73,10 +74,8 @@ export default function PracticeNewMatter() {
         <Section title="About" testId="practice-matter-about-card">
           <div className={W}>
             <Row label="Contact" required labelWidth={LW}>
-              <select className={input} value={f.contact_id} onChange={set("contact_id")} data-testid="practice-matter-contact">
-                <option value="">Select Contact...</option>
-                {contacts.map(c => <option key={c.id} value={c.id}>{c.display_name}</option>)}
-              </select>
+              <ContactPicker value={f.contact_id} onChange={(id) => setF(p => ({ ...p, contact_id: id }))} contacts={contacts}
+                             onCreated={(c) => setContacts(list => [c, ...list])} />
             </Row>
             <Row label="Matter Name" required labelWidth={LW}><input className={input} placeholder="Add Name..." value={f.name} onChange={set("name")} data-testid="practice-matter-name" /></Row>
             <Row label="Notes" labelWidth={LW}><RichNotes key={id || "new"} value={f.notes} onChange={set("notes")} testId="practice-matter-notes" /></Row>

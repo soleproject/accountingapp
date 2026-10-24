@@ -64,10 +64,10 @@ function DetailsCard({ form, set, userName }) {
   );
 }
 
-export default function PracticeNewContact() {
-  const nav = useNavigate();
+export const ContactForm = ({ onSaved, onCancel, compact = false }) => {
   const { user } = useAuth();
   const [withCompany, setWithCompany] = useState(false);
+  const [showMore, setShowMore] = useState(!compact);
   const [people, setPeople] = useState([{ ...EMPTY_PERSON }]);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
@@ -86,14 +86,51 @@ export default function PracticeNewContact() {
         contacts: withCompany ? people : [people[0]], number: form.number || null,
         tags: form.tags.split(",").map(t => t.trim()).filter(Boolean),
       };
-      await api.post("/practice/contacts", payload);
+      const r = await api.post("/practice/contacts", payload);
       toast.success("Contact saved");
-      nav("/practice/contacts");
+      onSaved(r.data);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not save contact");
     } finally { setBusy(false); }
   };
 
+  return (
+    <div className="space-y-4" data-testid="practice-contact-form">
+      {!withCompany && (
+        <GreenButton onClick={() => setWithCompany(true)} testId="practice-add-company-btn" className="!py-1 !text-xs"><Plus size={12} /> Add a company</GreenButton>
+      )}
+      {withCompany && <CompanyCard form={form} set={set} />}
+      {(withCompany ? people : [people[0]]).map((p, i) => (
+        <PersonCard key={i} idx={i} person={p} onChange={setPerson(i)} narrow={compact}
+                    title={!withCompany ? "Contact" : i === 0 ? "Primary Contact" : `Contact ${i + 1}`} />
+      ))}
+      {withCompany && (
+        <GreenButton onClick={() => setPeople(a => [...a, { ...EMPTY_PERSON }])} testId="practice-add-another-contact-btn" className="!py-1 !text-xs">
+          <Plus size={12} /> Add another contact to this company
+        </GreenButton>
+      )}
+      {showMore ? <DetailsCard form={form} set={set} userName={user?.name || ""} /> : (
+        <button type="button" onClick={() => setShowMore(true)} className="text-sm font-semibold text-[#1E88E5] hover:underline" data-testid="practice-contact-show-more">Show more information...</button>
+      )}
+      <div className="flex items-center gap-2">
+        <div className="inline-flex rounded overflow-hidden">
+          <button type="button" onClick={save} disabled={busy} data-testid="practice-contact-save-btn"
+                  className="inline-flex items-center gap-1.5 bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60">
+            <Check size={14} /> {busy ? "Saving…" : "Save"}
+          </button>
+          {!compact && <button type="button" className="bg-[#43A047] border-l border-white/40 px-2 text-white" data-testid="practice-contact-save-more-btn"><ChevronDown size={14} /></button>}
+        </div>
+        <button type="button" onClick={onCancel} data-testid="practice-contact-cancel-btn"
+                className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+          <X size={14} /> Cancel
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export default function PracticeNewContact() {
+  const nav = useNavigate();
   return (
     <PracticeShell>
       <div className="space-y-4" data-testid="practice-new-contact">
@@ -101,33 +138,7 @@ export default function PracticeNewContact() {
           <UserPlus size={30} className="text-slate-600" strokeWidth={1.5} />
           <h1 className="text-3xl font-bold text-slate-800">New Contact</h1>
         </div>
-        {!withCompany && (
-          <GreenButton onClick={() => setWithCompany(true)} testId="practice-add-company-btn" className="!py-1 !text-xs"><Plus size={12} /> Add a company</GreenButton>
-        )}
-        {withCompany && <CompanyCard form={form} set={set} />}
-        {(withCompany ? people : [people[0]]).map((p, i) => (
-          <PersonCard key={i} idx={i} person={p} onChange={setPerson(i)}
-                      title={!withCompany ? "Contact" : i === 0 ? "Primary Contact" : `Contact ${i + 1}`} />
-        ))}
-        {withCompany && (
-          <GreenButton onClick={() => setPeople(a => [...a, { ...EMPTY_PERSON }])} testId="practice-add-another-contact-btn" className="!py-1 !text-xs">
-            <Plus size={12} /> Add another contact to this company
-          </GreenButton>
-        )}
-        <DetailsCard form={form} set={set} userName={user?.name || ""} />
-        <div className="flex items-center gap-2">
-          <div className="inline-flex rounded overflow-hidden">
-            <button type="button" onClick={save} disabled={busy} data-testid="practice-contact-save-btn"
-                    className="inline-flex items-center gap-1.5 bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60">
-              <Check size={14} /> {busy ? "Saving…" : "Save"}
-            </button>
-            <button type="button" className="bg-[#43A047] border-l border-white/40 px-2 text-white" data-testid="practice-contact-save-more-btn"><ChevronDown size={14} /></button>
-          </div>
-          <button type="button" onClick={() => nav("/practice/contacts")} data-testid="practice-contact-cancel-btn"
-                  className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-            <X size={14} /> Cancel
-          </button>
-        </div>
+        <ContactForm onSaved={() => nav("/practice/contacts")} onCancel={() => nav("/practice/contacts")} />
       </div>
     </PracticeShell>
   );
