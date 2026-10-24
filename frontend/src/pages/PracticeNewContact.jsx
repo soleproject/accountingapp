@@ -95,13 +95,13 @@ export const ContactForm = ({ onSaved, onCancel, compact = false }) => {
   };
 
   return (
-    <div className="space-y-4" data-testid="practice-contact-form">
+    <div className={compact ? "space-y-3" : "space-y-4"} data-testid="practice-contact-form">
       {!withCompany && (
         <GreenButton onClick={() => setWithCompany(true)} testId="practice-add-company-btn" className="!py-1 !text-xs"><Plus size={12} /> Add a company</GreenButton>
       )}
       {withCompany && <CompanyCard form={form} set={set} />}
       {(withCompany ? people : [people[0]]).map((p, i) => (
-        <PersonCard key={i} idx={i} person={p} onChange={setPerson(i)} narrow={compact}
+        <PersonCard key={i} idx={i} person={p} onChange={setPerson(i)} narrow={compact} showAll={showMore}
                     title={!withCompany ? "Contact" : i === 0 ? "Primary Contact" : `Contact ${i + 1}`} />
       ))}
       {withCompany && (

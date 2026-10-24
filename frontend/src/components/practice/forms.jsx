@@ -1,8 +1,8 @@
 export const input = "w-full h-10 rounded border border-slate-300 px-3 text-[15px] text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 
-export const Row = ({ label, required, hint, help, labelWidth = "230px", children }) => (
-  <div className="grid items-start gap-4 py-2.5" style={{ gridTemplateColumns: `${labelWidth} 1fr` }}>
-    <div className="text-[13px] font-semibold uppercase tracking-wide text-slate-800 pt-2.5 flex items-center gap-1">
+export const Row = ({ label, required, hint, help, labelWidth = "230px", dense = false, children }) => (
+  <div className={`grid items-start gap-4 ${dense ? "py-1" : "py-2.5"}`} style={{ gridTemplateColumns: `${labelWidth} 1fr` }}>
+    <div className={`text-[13px] font-semibold uppercase tracking-wide text-slate-800 flex items-center gap-1 ${dense ? "pt-2" : "pt-2.5"}`}>
       {help && <span className="text-slate-400">?</span>}{label}{required && <span className="text-red-500">*</span>}
     </div>
     <div>{children}{hint && <p className="mt-1.5 text-xs text-slate-500">{hint}</p>}</div>

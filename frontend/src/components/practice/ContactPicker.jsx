@@ -5,9 +5,10 @@ import { ContactForm } from "@/pages/PracticeNewContact";
 function NewContactModal({ onSaved, onClose }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto py-8 px-4" data-testid="practice-new-contact-modal">
-      <div className="w-full max-w-3xl rounded bg-white shadow-2xl">
-        <div className="h-10 bg-[#1E88E5] rounded-t flex items-center justify-end px-3">
-          <button type="button" onClick={onClose} className="text-white" data-testid="practice-new-contact-modal-close"><X size={16} /></button>
+      <div className="w-full max-w-2xl rounded bg-white shadow-2xl">
+        <div className="h-10 bg-[#1E88E5] rounded-t flex items-center justify-between px-4 text-white">
+          <span className="inline-flex items-center gap-1 text-sm font-semibold"><Plus size={14} /> New Contact</span>
+          <button type="button" onClick={onClose} data-testid="practice-new-contact-modal-close"><X size={16} /></button>
         </div>
         <div className="p-4 bg-slate-50 rounded-b">
           <ContactForm compact onSaved={onSaved} onCancel={onClose} />
