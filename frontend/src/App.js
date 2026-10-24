@@ -179,6 +179,7 @@ import PracticeHome from "@/pages/PracticeHome";
 import PracticeSettings from "@/pages/PracticeSettings";
 import PracticeContacts from "@/pages/PracticeContacts";
 import PracticeNewContact from "@/pages/PracticeNewContact";
+import PracticeContactDetail from "@/pages/PracticeContactDetail";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -252,6 +253,7 @@ function App() {
             <Route path="/practice/settings" element={<Protected><PracticeSettings /></Protected>} />
             <Route path="/practice/contacts" element={<Protected><PracticeContacts /></Protected>} />
             <Route path="/practice/contacts/new" element={<Protected><PracticeNewContact /></Protected>} />
+            <Route path="/practice/contacts/:id" element={<Protected><PracticeContactDetail /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

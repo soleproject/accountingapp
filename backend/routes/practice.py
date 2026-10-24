@@ -109,7 +109,18 @@ async def create_contact(inp: PracticeContactIn, user: dict = Depends(_guard)):
     if not inp.contacts or not (inp.contacts[0].first_name or inp.contacts[0].last_name or inp.company_name):
         raise HTTPException(400, "Enter a first name, last name, or company.")
     now = datetime.now(timezone.utc).isoformat()
-    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "created_at": now, "updated_at": now}
+    count = await db.practice_contacts.count_documents({"owner_id": user["id"]})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(),
+           "internal_id": int(inp.number) if (inp.number or "").isdigit() else count + 1,
+           "created_at": now, "updated_at": now}
     await db.practice_contacts.insert_one(doc)
     doc.pop("_id", None)
+    return {**doc, "display_name": _display_name(doc)}
+
+
+@router.get("/contacts/{contact_id}")
+async def get_contact(contact_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_contacts.find_one({"id": contact_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Contact not found")
     return {**doc, "display_name": _display_name(doc)}
