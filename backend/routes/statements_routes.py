@@ -156,7 +156,7 @@ async def statements_reprocess(
 
 
 
-@router.post("/companies/{cid}/statements/imports/{import_id}/approve")
+@router.post("/companies/{cid}/statements/imports/{import_id}/approve", dependencies=[Depends(require_feature("statements_ai"))])
 async def statements_approve(cid: str, import_id: str, user: dict = Depends(get_current_user)):
     """Post an AI Review import that was held because its totals didn't tie."""
     await require_company(user, cid)
@@ -165,18 +165,17 @@ async def statements_approve(cid: str, import_id: str, user: dict = Depends(get_
         cid, import_id, categorize_fn=categorize_transaction, is_period_closed_fn=is_period_closed)
 
 
-@router.post("/companies/{cid}/statements/imports/{import_id}/reject")
+@router.post("/companies/{cid}/statements/imports/{import_id}/reject", dependencies=[Depends(require_feature("statements_ai"))])
 async def statements_reject(cid: str, import_id: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     import statements
     return await statements.reject_ai_import(cid, import_id)
 
 
-@router.get("/companies/{cid}/statements/imports/{import_id}/export.xlsx")
+@router.get("/companies/{cid}/statements/imports/{import_id}/export.xlsx", dependencies=[Depends(require_feature("statements_ai"))])
 async def statements_export_xlsx(cid: str, import_id: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)
     import statements
-    from fastapi.responses import Response
     data, name = await statements.export_import_xlsx(cid, import_id)
     return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})

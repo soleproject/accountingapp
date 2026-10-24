@@ -1,0 +1,41 @@
+{
+  "summary": "AI Review (GPT-4o) statement engine tested end-to-end. Backend 9/9 pytest pass: live upload of mercury_2024-10-06.pdf (engine=ai_review, liability) -> 200 processing/ai_review; ai_stage progressed summary->transactions->posting->done; status completed, 166 txns, Mercury account, period 2024-09-07..2024-10-06; detail has 166 txns summing 79.91 (155 neg / 11 pos), reconciliation.ties=true, ai_rows=166, no ai_doc key, references present (00020009), source ai_review. Export.xlsx sheets [Summary, All Transactions, Withdrawals, Deposits] with 167/156/12 rows. Needs-review gate on Mongo clones: approve completed->400, approve held->200 completed 166, re-approve->400 'not waiting for review', reject->200 rejected with 0 txns, re-reject->400. engine=veryfi routes to Veryfi (method veryfi, completed). Frontend: heldtest-ui row (needs review pill, AI Review method, red Review btn) -> detail page shows ai-review-panel with all expected summary values, 'off by $42.50', 'Totals don't tie', Approve/Reject buttons, 166 extracted rows; Export Excel triggers download mercury_held_demo_transactions.xlsx. Pre-upload modal engine switch works, highlights AI Review, persists in localStorage across modal reopen, FormData sends engine=ai_review + account_kind_hint=liability, row shows 'AI Review in progress…'; completion toast '166 txns posted (AI Review, totals tie ✓)' and completed row verified, delete via trash + confirm works. NOTE: the frontend upload's completion was verified with a mocked upload response + Mongo-flipped status (not a 3rd live GPT call) because the 2-run GPT budget got used by the backend suite (pytest-xdist ran the upload fixture in 2 workers -> 2 live uploads, both produced identical 166-txn results).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "_run_ai_import (statements.py ~L1941)", "issue": "transaction_count is set to len(doc['transactions']) which is always [] (rows live under accounts[].transactions), so a genuinely held needs_review import shows 0 transactions in the imports list and in the toast/upload row. The seeded heldtest-ui only shows 166 because it was seeded that way. Use len(review['rows']) or sum of accounts[].transactions."},
+      {"endpoint": "POST /imports/{id}/approve", "issue": "Check-then-post is not atomic: two concurrent approves (double click / two tabs) both pass the status=='needs_review' check and post twice. Use find_one_and_update({id, status:'needs_review'}, {$set:{status:'processing'}}) as a claim."},
+      {"endpoint": "POST /imports/{id}/approve", "issue": "If posting fails the row goes to 'failed' and can never be re-approved (approve requires needs_review). Consider allowing retry from failed when ai_doc exists."},
+      {"endpoint": "POST /imports/{id}/approve|reject|export.xlsx", "issue": "Not gated by require_feature('statements_ai') unlike /upload."},
+      {"endpoint": "upload_statement_ai", "issue": "asyncio.create_task result not retained — background task can be garbage-collected mid-run; keep a reference in a module-level set. Also a backend restart mid-extraction leaves the row stuck in 'processing' forever."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "StatementImportDetail (held import)", "issues": ["Header says '0 transactions' while the imports list says 166 and the panel lists 166 extracted rows — label as '0 posted · 166 extracted' to avoid confusion"]},
+      {"screen": "Import Statements page", "issues": ["Subtitle still says 'let Veryfi OCR pull the transactions' — doesn't mention the AI Review option"]},
+      {"screen": "Pre-upload modal", "issues": ["Bank / Cash card keeps an indigo highlighted border even when Credit Card / Loan radio is selected — ambiguous which is chosen"]},
+      {"screen": "Uploads list (needs_review result)", "issues": ["In _startSplitPoll a needs_review AI import maps the upload entry to status 'completed' (green txns chip) even though nothing posted"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_statement_ai_review.py", "/app/test_reports/pytest/pytest_ai_review.xml"],
+  "action_items": [
+    "Fix transaction_count for held AI imports (use extracted row count)",
+    "Make approve atomic to prevent double posting",
+    "Show held uploads as 'needs review' (not completed) in the uploads list; clarify '0 transactions' header on held detail",
+    "Optional: feature-gate approve/reject/export; retain background task refs"
+  ],
+  "critical_code_review_comments": [
+    "statements.py is 2048 lines — split the AI Review section into its own module",
+    "approve_ai_import race condition (non-atomic status check)",
+    "transaction_count uses doc['transactions'] which _build_doc always sets to []"
+  ],
+  "updated_files": ["/app/backend/tests/test_statement_ai_review.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Created 2 TEST_AIReview companies (deleted afterwards), Mongo clones TEST_held_* (deleted), TEST_ui_upload_mock import in Michael Co 3b LLC (deleted via UI). heldtest-ui left untouched in needs_review.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run the AI suite with -p no:xdist (pytest.ini enables xdist; otherwise each worker uploads = extra GPT cost). Live AI upload takes ~60s and gives 166 txns deterministically. Company delete requires ?confirm=<name>. Frontend upload completion can be tested without GPT by routing /statements/upload to a pre-inserted processing row and flipping status in Mongo."
+}

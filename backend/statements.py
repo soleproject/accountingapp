@@ -1909,12 +1909,17 @@ async def upload_statement_ai(
         "account_id": account_id, "account_name": None, "account_kind_hint": account_kind_hint,
         "veryfi_document_id": None, "created_at": now, "updated_at": now,
     })
-    asyncio.create_task(_run_ai_import(
+    task = asyncio.create_task(_run_ai_import(
         cid, import_id, file_bytes, file.filename or "statement.pdf",
         file.content_type or "application/pdf", account_id, account_kind_hint,
         categorize_fn, is_period_closed_fn,
     ))
+    _AI_TASKS.add(task)
+    task.add_done_callback(_AI_TASKS.discard)
     return {"import_id": import_id, "status": "processing", "method": "ai_review"}
+
+
+_AI_TASKS: set = set()
 
 
 async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, account_id,
@@ -1929,7 +1934,7 @@ async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, acc
         doc = await statement_ai_engine.analyze_statement(
             file_bytes, filename, content_type, account_kind_hint, _progress)
     except Exception as e:  # noqa: BLE001
-        logger.exception("ai_review import failed cid=%s import=%s", cid, import_id)
+        logging.getLogger(__name__).exception("ai_review import failed cid=%s import=%s", cid, import_id)
         await db.statement_imports.update_one(
             {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {e}", "updated_at": now_iso()}})
         return
@@ -1938,7 +1943,7 @@ async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, acc
         "ai_doc": doc, "ai_review": {k: v for k, v in review.items() if k != "rows"},
         "ai_rows": review["rows"], "ai_stage": "reconciled",
         "period_start": doc.get("period_start_date"), "period_end": doc.get("period_end_date"),
-        "transaction_count": len(doc.get("transactions") or []), "updated_at": now_iso()}})
+        "transaction_count": len(review["rows"]), "updated_at": now_iso()}})
     if not review["reconciliation"]["ties"]:
         await db.statement_imports.update_one(
             {"id": import_id}, {"$set": {"status": "needs_review", "ai_stage": "needs_review", "updated_at": now_iso()}})
@@ -1959,18 +1964,20 @@ async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categ
         await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "failed", "error": str(e.detail), "updated_at": now_iso()}})
         raise
     except Exception as e:  # noqa: BLE001
-        logger.exception("ai_review posting failed import=%s", import_id)
+        logging.getLogger(__name__).exception("ai_review posting failed import=%s", import_id)
         await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "failed", "error": f"Posting: {e}", "updated_at": now_iso()}})
         raise HTTPException(500, f"Posting failed: {e}")
 
 
 async def approve_ai_import(cid: str, import_id: str, categorize_fn, is_period_closed_fn) -> dict:
-    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    # Atomic claim: only one approve wins; a failed post can be retried.
+    row = await db.statement_imports.find_one_and_update(
+        {"id": import_id, "company_id": cid, "status": {"$in": ["needs_review", "failed"]}, "ai_doc": {"$exists": True}},
+        {"$set": {"status": "processing", "ai_stage": "posting", "ai_approved_at": now_iso(), "updated_at": now_iso()}})
     if not row:
-        raise HTTPException(404, "Import not found")
-    if row.get("status") != "needs_review" or not row.get("ai_doc"):
+        if not await db.statement_imports.find_one({"id": import_id, "company_id": cid}):
+            raise HTTPException(404, "Import not found")
         raise HTTPException(400, "This import is not waiting for review.")
-    await db.statement_imports.update_one({"id": import_id}, {"$set": {"ai_approved_at": now_iso()}})
     return await _post_ai_doc(cid, import_id, row["ai_doc"], row.get("account_id"), row.get("account_kind_hint"),
                               categorize_fn, is_period_closed_fn)
 

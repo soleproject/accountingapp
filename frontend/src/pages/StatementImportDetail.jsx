@@ -76,7 +76,9 @@ export default function StatementImportDetail() {
             {doc.filename}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            {(doc.transactions || []).length} transactions
+            {doc.status === "needs_review"
+              ? <>0 posted · {(doc.ai_rows || []).length} extracted</>
+              : <>{(doc.transactions || []).length} transactions</>}
             {total > 0 && (<> · total ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>)}
           </p>
         </div>

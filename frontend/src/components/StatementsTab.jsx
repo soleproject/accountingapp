@@ -272,7 +272,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
           clearInterval(iv);
           if (parent.method === "ai_review") {
             setUploading(u => u.map(x => x.importId === parentImportId
-              ? { ...x, status: parent.status === "failed" ? "failed" : "completed", error: parent.error || null,
+              ? { ...x, status: parent.status === "failed" ? "failed" : parent.status === "needs_review" ? "needs_review" : "completed", error: parent.error || null,
                   transactionCount: parent.transaction_count, accountName: parent.account_name }
               : x));
             if (parent.status === "needs_review") {
@@ -349,7 +349,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
   };
 
   const activeUploads   = uploading.filter(x => x.status === "processing" || x.status === "queued" || x.status === "splitting" || x.status === "ai_processing");
-  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed");
+  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed" || x.status === "needs_review");
 
   return (
     <div className="space-y-4" data-testid="statements-tab">
@@ -646,6 +646,11 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
             <Loader2 size={12} className="animate-spin" /> processing
           </span>
+        )}
+        {entry.status === "needs_review" && (
+          <Link to={`/connections/imports/${entry.importId}`} className="text-xs text-rose-700 font-semibold inline-flex items-center gap-1 hover:underline" data-testid="stmt-upload-needs-review">
+            Totals don't tie · Review before posting →
+          </Link>
         )}
         {entry.status === "ai_processing" && (
           <span className="text-xs text-indigo-700 inline-flex items-center gap-1" data-testid="stmt-upload-ai-processing">
