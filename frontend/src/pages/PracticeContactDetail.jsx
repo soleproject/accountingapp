@@ -5,6 +5,7 @@ import { Users, User, Pencil, Trash2, Archive, Play, Plus, Star, ChevronDown, Ch
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { PracticeStatTiles } from "@/components/practice/PracticeDashboardBlocks";
+import { pushRecent } from "@/components/practice/PracticeRightRail";
 
 const TABS = ["About", "Matters", "Activities", "Notes", "Messages", "Invoices", "Payments", "Time", "Expenses", "Flat Fees", "Relationships", "Intakes", "Files"];
 const slug = (s) => s.toLowerCase().replace(/\s+/g, "-");
@@ -65,7 +66,7 @@ export default function PracticeContactDetail() {
   const [tab, setTab] = useState("About");
 
   useEffect(() => {
-    api.get(`/practice/contacts/${id}`).then(r => setC(r.data))
+    api.get(`/practice/contacts/${id}`).then(r => { setC(r.data); pushRecent({ label: r.data.display_name, to: `/practice/contacts/${id}` }); })
       .catch(() => { toast.error("Contact not found"); nav("/practice/contacts"); });
   }, [id, nav]);
 

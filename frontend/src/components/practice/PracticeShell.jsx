@@ -7,7 +7,7 @@ import { PracticeRightRail } from "@/components/practice/PracticeRightRail";
 
 const KEY = "practice_sidebar_hidden";
 
-export const PracticeShell = ({ children, withRail = false }) => {
+export const PracticeShell = ({ children, withRail = true }) => {
   const { user } = useAuth();
   const [railHidden, setRailHidden] = useState(() => localStorage.getItem(KEY) === "1");
   if (user?.role !== "superadmin") return <Navigate to="/" replace />;

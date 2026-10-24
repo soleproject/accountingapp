@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Play, Calculator, MessageSquare, Filter, ChevronDown } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { ChevronLeft, ChevronRight, Play, Calculator, MessageSquare, Filter, ChevronDown, Users } from "lucide-react";
 
 export const PracticeRecentActivity = () => (
   <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-recent-activity">
@@ -57,6 +58,33 @@ function MiniCalendar() {
   );
 }
 
+const RECENT_KEY = "practice_recent";
+export const pushRecent = (item) => {
+  const cur = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]").filter(r => r.to !== item.to);
+  localStorage.setItem(RECENT_KEY, JSON.stringify([item, ...cur].slice(0, 8)));
+};
+
+function RecentCard() {
+  const nav = useNavigate();
+  const items = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+  if (!items.length) return null;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-recent-card">
+      <div className="text-xs font-bold uppercase tracking-wider text-slate-700">Recent</div>
+      <ul className="mt-3 space-y-1.5">
+        {items.map(r => (
+          <li key={r.to}>
+            <button type="button" onClick={() => nav(r.to)} data-testid="practice-recent-item"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1E88E5] hover:underline">
+              <Users size={12} className="text-slate-500" />{r.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export const PracticeRightRail = ({ onHide }) => (
   <aside className="space-y-4" data-testid="practice-right-rail">
     <div className="text-right">
@@ -85,5 +113,6 @@ export const PracticeRightRail = ({ onHide }) => (
       <div className="text-xs font-bold uppercase tracking-wider text-slate-700">Your Agenda</div>
       <div className="mt-3 text-center text-xs font-bold uppercase tracking-wide text-slate-800">Nothing due this week.</div>
     </div>
+    <RecentCard />
   </aside>
 );
