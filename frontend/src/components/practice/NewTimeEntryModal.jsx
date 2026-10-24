@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, X, Check, Move, Play, Calendar } from "lucide-react";
+import { Plus, X, Check, Move, Play, Calendar, Square } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
@@ -39,7 +40,23 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     billable: true, billed_by: user?.name || "", hourly_rate: 0, private_notes: "",
   });
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));
-  const hours = parseHours(f.hours_raw);
+  const nav = useNavigate();
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(null);
+  useEffect(() => {
+    if (!running) return;
+    const base = elapsed; startRef.current = Date.now();
+    const t = setInterval(() => {
+      const secs = base + Math.floor((Date.now() - startRef.current) / 1000);
+      setElapsed(secs);
+      setF(p => ({ ...p, hours_raw: fmtHours(secs) }));
+    }, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running]);
+  const timerUsed = elapsed > 0 || running;
+  const hours = timerUsed ? elapsed / 3600 : parseHours(f.hours_raw);
   const total = f.billable && hours ? hours * Number(f.hourly_rate || 0) : 0;
 
   useEffect(() => {
@@ -57,11 +74,12 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   const save = async () => {
     if (!f.contact_id) return toast.error("Select a contact.");
     if (!f.matter_id) return toast.error("Select a matter.");
-    if (!hours) return toast.error("Enter hours like 1h 10m, 1:10 or 1.2h");
+    if (hours === null || (!timerUsed && !hours)) return toast.error("Enter hours like 1h 10m, 1:10 or 1.2h");
+    setRunning(false);
     setBusy(true);
     try {
-      const r = await api.post("/practice/time-entries", { ...f, task_id: task?.id || null, hours, hourly_rate: Number(f.hourly_rate || 0), total });
-      toast.success("Time entry saved");
+      const r = await api.post("/practice/time-entries", { ...f, task_id: task?.id || null, hours: Math.round(hours * 10000) / 10000, hourly_rate: Number(f.hourly_rate || 0), total });
+      toast.info("Item saved successfully.", { action: { label: "Go to time entry", onClick: () => nav("/practice/time-entries") }, duration: 6000 });
       onSaved(r.data);
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save time entry"); } finally { setBusy(false); }
   };
@@ -90,8 +108,11 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
                             options={items} newLabel="New Item" onNew={() => setNewItem(true)} />
             </Row>
             <Row label="Hours" required>
-              <input className={inp} placeholder="Format: 1h 10m, 1:10, 1.2h" value={f.hours_raw} onChange={set("hours_raw")} data-testid="practice-te-hours" />
-              <button type="button" className="mt-1.5 w-full h-8 rounded bg-[#1E88E5] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5" data-testid="practice-te-start-timer"><Play size={12} className="fill-white" /> Start Timer</button>
+              <input className={inp} placeholder="Format: 1h 10m, 1:10, 1.2h" value={f.hours_raw} readOnly={timerUsed} onChange={set("hours_raw")} data-testid="practice-te-hours" />
+              <button type="button" onClick={() => setRunning(r => !r)} className="mt-1.5 w-full h-8 rounded bg-[#1E88E5] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5" data-testid="practice-te-start-timer">
+                {running ? <><Square size={11} className="fill-white" /> Pause Timer</> : <><Play size={12} className="fill-white" /> {elapsed > 0 ? "Resume Timer" : "Start Timer"}</>}
+              </button>
+              {timerUsed && <div className="mt-1 text-center text-3xl font-light text-slate-700 tabular-nums" data-testid="practice-te-timer-display">{fmtClock(elapsed)}</div>}
             </Row>
             <Row label="Date"><div className="relative"><input type="date" className={inp} value={f.date} onChange={set("date")} data-testid="practice-te-date" /><Calendar size={14} className="absolute right-9 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none hidden" /></div></Row>
             <Row label="Description" help><textarea rows={4} className={`${inp} !h-auto py-2`} value={f.description} onChange={set("description")} data-testid="practice-te-description" /></Row>
@@ -136,6 +157,9 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     </div>
   );
 };
+
+const fmtClock = (s) => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, "0")).join(":");
+const fmtHours = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return m ? `${h}h ${m}m` : `${h}h`; };
 
 export function parseHours(raw) {
   const s = (raw || "").trim().toLowerCase();

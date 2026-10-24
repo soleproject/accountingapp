@@ -307,7 +307,7 @@ class PracticeTimeEntryIn(BaseModel):
     matter_id: str
     task_id: Optional[str] = None
     item: str = ""
-    hours: float = Field(..., gt=0)
+    hours: float = Field(..., ge=0)
     hours_raw: str = ""
     date: str
     description: str = ""
@@ -422,3 +422,13 @@ async def list_items(user: dict = Depends(_guard)):
 @router.post("/items")
 async def create_item(inp: PracticeItemIn, user: dict = Depends(_guard)):
     return await _simple_create(db.practice_items, inp, user)
+
+
+@router.get("/time-entries/all")
+async def list_time_entries_full(user: dict = Depends(_guard)):
+    docs = await db.practice_time_entries.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]

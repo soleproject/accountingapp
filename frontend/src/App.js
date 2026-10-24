@@ -184,6 +184,7 @@ import PracticeMatters from "@/pages/PracticeMatters";
 import PracticeNewMatter from "@/pages/PracticeNewMatter";
 import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
 import PracticeCalendar from "@/pages/PracticeCalendar";
+import PracticeTimeEntries from "@/pages/PracticeTimeEntries";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -263,6 +264,7 @@ function App() {
             <Route path="/practice/matters/:id" element={<Protected><PracticeMatterDetail /></Protected>} />
             <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
             <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
+            <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />
