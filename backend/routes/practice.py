@@ -372,3 +372,53 @@ async def _counts(user_id: str, **match) -> dict:
         "activities": await db.practice_tasks.count_documents(q),
         "time": await db.practice_time_entries.count_documents(q),
     }
+
+
+class PracticeTaxIn(BaseModel):
+    name: str
+    rate: float = Field(..., ge=0)
+    description: str = ""
+    compound: bool = False
+
+
+class PracticeItemIn(BaseModel):
+    name: str
+    code: str = ""
+    description: str = ""
+    price: float = Field(0, ge=0)
+    use_item_price: bool = False
+    tax1_id: Optional[str] = None
+    tax2_id: Optional[str] = None
+
+
+async def _simple_list(coll, user):
+    return await coll.find({"owner_id": user["id"]}, {"_id": 0}).sort("name", 1).to_list(500)
+
+
+async def _simple_create(coll, inp, user):
+    if not inp.name.strip():
+        raise HTTPException(400, "Name is required.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "created_at": datetime.now(timezone.utc).isoformat()}
+    await coll.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/taxes")
+async def list_taxes(user: dict = Depends(_guard)):
+    return await _simple_list(db.practice_taxes, user)
+
+
+@router.post("/taxes")
+async def create_tax(inp: PracticeTaxIn, user: dict = Depends(_guard)):
+    return await _simple_create(db.practice_taxes, inp, user)
+
+
+@router.get("/items")
+async def list_items(user: dict = Depends(_guard)):
+    return await _simple_list(db.practice_items, user)
+
+
+@router.post("/items")
+async def create_item(inp: PracticeItemIn, user: dict = Depends(_guard)):
+    return await _simple_create(db.practice_items, inp, user)

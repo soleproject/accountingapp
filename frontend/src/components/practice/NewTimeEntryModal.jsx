@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { toISO } from "@/components/practice/DateTimePicker";
 import { SearchSelect, DEFAULT_ITEMS, MiniModal } from "@/components/practice/SearchSelect";
+import { NewItemModal } from "@/components/practice/NewItemModal";
 
 const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const Row = ({ label, required, help, sub, children }) => (
@@ -28,7 +29,8 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [items, setItems] = useState(DEFAULT_ITEMS);
+  const [customItems, setCustomItems] = useState([]);
+  const items = [...DEFAULT_ITEMS, ...customItems.map(i => ({ id: i.id, label: i.name, code: i.code, price: i.price, use_item_price: i.use_item_price }))];
   const [newMatter, setNewMatter] = useState(null);
   const [newItem, setNewItem] = useState(null);
   const [f, setF] = useState({
@@ -44,7 +46,13 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {});
     api.get("/practice/matters", { params: { status: "All" } }).then(r => setMatters(r.data)).catch(() => {});
     api.get("/practice/profile").then(r => setF(p => ({ ...p, hourly_rate: r.data.hourly_rate || 0 }))).catch(() => {});
+    api.get("/practice/items").then(r => setCustomItems(r.data)).catch(() => {});
   }, []);
+  const pickItem = (id) => {
+    const it = items.find(i => i.id === id);
+    setF(p => ({ ...p, item: id, ...(it?.use_item_price ? { hourly_rate: it.price } : {}) }));
+  };
+  const matter = matters.find(m => m.id === f.matter_id);
 
   const save = async () => {
     if (!f.contact_id) return toast.error("Select a contact.");
@@ -78,8 +86,8 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           </Card>
           <Card title="Time Entries">
             <Row label="Item" help>
-              <SearchSelect value={f.item} onChange={set("item")} placeholder="Select Item..." testId="practice-te-item" clearable
-                            options={items} newLabel="New Item" onNew={() => setNewItem({ label: "", code: "" })} />
+              <SearchSelect value={f.item} onChange={pickItem} placeholder="Select Item..." testId="practice-te-item" clearable
+                            options={items} newLabel="New Item" onNew={() => setNewItem(true)} />
             </Row>
             <Row label="Hours" required>
               <input className={inp} placeholder="Format: 1h 10m, 1:10, 1.2h" value={f.hours_raw} onChange={set("hours_raw")} data-testid="practice-te-hours" />
@@ -91,7 +99,10 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           <Card title="Billing">
             <Row label="Billable" help><Toggle value={f.billable} onChange={set("billable")} testId="practice-te-billable" /></Row>
             <Row label="Billed By"><select className={inp} value={f.billed_by} onChange={set("billed_by")} data-testid="practice-te-billed-by"><option>{user?.name}</option></select></Row>
-            <Row label="Hourly Rate" sub="USD" help><input type="number" step="0.01" className={inp} value={f.hourly_rate} onChange={set("hourly_rate")} data-testid="practice-te-rate" /></Row>
+            <Row label="Hourly Rate" sub="USD" help>
+              <input type="number" step="0.01" className={inp} value={f.hourly_rate} onChange={set("hourly_rate")} data-testid="practice-te-rate" />
+              {matter && (matter.matter_rate === "User Hourly Rate" || !matter.matter_rate) && <p className="mt-1 text-xs text-slate-500" data-testid="practice-te-rate-hint">This matter is set to the default user rate.</p>}
+            </Row>
             <Row label="Total" sub="USD"><input readOnly className={`${inp} bg-slate-50`} value={total.toFixed(2)} data-testid="practice-te-total" /></Row>
             <Row label="Private Notes" help><input className={inp} placeholder="Add private notes..." value={f.private_notes} onChange={set("private_notes")} data-testid="practice-te-private-notes" /></Row>
           </Card>
@@ -121,21 +132,7 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           </div>
         </MiniModal>
       )}
-      {newItem && (
-        <MiniModal title="New Item" onClose={() => setNewItem(null)} testId="practice-te-new-item-modal">
-          <input autoFocus className={inp} placeholder="Item name..." value={newItem.label} onChange={e => setNewItem(p => ({ ...p, label: e.target.value }))} data-testid="practice-te-new-item-name" />
-          <input className={inp} placeholder="Code (optional, e.g. A112)" value={newItem.code} onChange={e => setNewItem(p => ({ ...p, code: e.target.value }))} data-testid="practice-te-new-item-code" />
-          <div className="flex gap-2">
-            <button type="button" data-testid="practice-te-new-item-save" className="rounded bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"
-                    onClick={() => {
-                      if (!newItem.label.trim()) return toast.error("Item name is required.");
-                      const it = { id: newItem.label.trim(), label: newItem.label.trim(), code: newItem.code.trim() };
-                      setItems(l => [...l, it]); setF(p => ({ ...p, item: it.id })); setNewItem(null);
-                    }}>Save</button>
-            <button type="button" onClick={() => setNewItem(null)} className="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-700">Cancel</button>
-          </div>
-        </MiniModal>
-      )}
+      {newItem && <NewItemModal onClose={() => setNewItem(false)} onSaved={(it) => { setCustomItems(l => [...l, it]); setNewItem(false); setF(p => ({ ...p, item: it.id, ...(it.use_item_price ? { hourly_rate: it.price } : {}) })); }} />}
     </div>
   );
 };
