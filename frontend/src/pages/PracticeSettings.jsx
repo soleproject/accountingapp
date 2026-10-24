@@ -29,18 +29,18 @@ const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 function SettingsNav() {
   return (
-    <nav className="space-y-3" data-testid="practice-settings-nav">
+    <nav className="space-y-4" data-testid="practice-settings-nav">
       {GROUPS.map(g => (
         <div key={g.title}>
-          <div className="text-xs font-semibold text-slate-700 mb-1">{g.title}</div>
+          <div className="text-sm font-semibold text-slate-700 mb-1.5">{g.title}</div>
           <div className="rounded border border-slate-200 bg-white overflow-hidden">
             {g.items.map(([label, Icon]) => {
               const active = label === "Personal Settings";
               return (
                 <button key={label} type="button" data-testid={`practice-settings-nav-${slug(label)}`}
-                        className={`w-full flex items-center gap-3 px-3 py-1.5 text-xs text-left transition-colors ${
+                        className={`w-full flex items-center gap-4 px-4 py-2.5 text-sm text-left transition-colors ${
                           active ? "bg-[#1E88E5] text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
-                  <Icon size={12} className={active ? "text-white" : "text-[#1E88E5]"} />{label}
+                  <Icon size={15} className={active ? "text-white" : "text-[#1E88E5]"} />{label}
                 </button>
               );
             })}
@@ -48,12 +48,12 @@ function SettingsNav() {
         </div>
       ))}
       <div>
-        <div className="text-xs font-semibold text-slate-700 mb-1">Mobile Apps</div>
+        <div className="text-sm font-semibold text-slate-700 mb-1.5">Mobile Apps</div>
         <div className="space-y-2">
           {["Google Play", "App Store"].map(s => (
-            <div key={s} className="w-32 rounded-md bg-black text-white px-3 py-1.5 leading-tight" data-testid={`practice-settings-${slug(s)}-badge`}>
-              <div className="text-[8px] uppercase">{s === "Google Play" ? "Android app on" : "Available on the"}</div>
-              <div className="text-sm font-semibold">{s}</div>
+            <div key={s} className="w-40 rounded-md bg-black text-white px-3 py-2 leading-tight" data-testid={`practice-settings-${slug(s)}-badge`}>
+              <div className="text-[9px] uppercase">{s === "Google Play" ? "Android app on" : "Available on the"}</div>
+              <div className="text-base font-semibold">{s}</div>
             </div>
           ))}
         </div>
@@ -63,26 +63,26 @@ function SettingsNav() {
 }
 
 const Row = ({ label, required, hint, help, children }) => (
-  <div className="grid grid-cols-[160px_1fr] items-start gap-3 py-2">
-    <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-700 pt-2 flex items-center gap-1">
+  <div className="grid grid-cols-[230px_1fr] items-start gap-4 py-2.5">
+    <div className="text-[13px] font-semibold uppercase tracking-wide text-slate-800 pt-2.5 flex items-center gap-1">
       {help && <span className="text-slate-400">?</span>}{label}{required && <span className="text-red-500">*</span>}
     </div>
-    <div>{children}{hint && <p className="mt-1 text-[11px] text-slate-500">{hint}</p>}</div>
+    <div>{children}{hint && <p className="mt-1.5 text-xs text-slate-500">{hint}</p>}</div>
   </div>
 );
 
-const input = "w-full h-8 rounded border border-slate-300 px-2.5 text-sm text-slate-700 outline-none focus:border-[#1E88E5]";
+const input = "w-full h-10 rounded border border-slate-300 px-3 text-[15px] text-slate-700 outline-none focus:border-[#1E88E5]";
 
 const Toggle = ({ value, onChange, testId }) => (
   <button type="button" onClick={() => onChange(!value)} data-testid={testId}
-          className={`h-6 min-w-[48px] rounded px-2 text-xs font-semibold flex items-center ${value ? "bg-[#1E88E5] text-white justify-start" : "bg-slate-200 text-slate-700 justify-end"}`}>
+          className={`h-8 min-w-[56px] rounded px-2.5 text-sm font-semibold flex items-center ${value ? "bg-[#1E88E5] text-white justify-start" : "bg-slate-200 text-slate-700 justify-end"}`}>
     {value ? "Yes" : "No"}
   </button>
 );
 
 const Section = ({ title, children }) => (
-  <section className="rounded border border-slate-200 bg-white px-5 py-4">
-    <h2 className="text-sm font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h2>
+  <section className="rounded border border-slate-200 bg-white px-8 py-6">
+    <h2 className="text-lg font-bold uppercase tracking-wide text-slate-800 mb-3">{title}</h2>
     {children}
   </section>
 );
@@ -117,23 +117,23 @@ export default function PracticeSettings() {
 
   return (
     <PracticeShell>
-      <div className="space-y-3" data-testid="practice-settings">
+      <div className="space-y-4" data-testid="practice-settings">
         <div className="flex items-center gap-3">
-          <Cog size={26} className="text-slate-500" strokeWidth={1.5} />
-          <h1 className="text-2xl font-bold text-slate-800">Settings</h1>
+          <Cog size={32} className="text-slate-500" strokeWidth={1.5} />
+          <h1 className="text-3xl font-bold text-slate-800">Settings</h1>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,31%)_1fr] gap-8 pt-1">
           <SettingsNav />
-          <div className="space-y-4">
+          <div className="space-y-5">
             <Section title="Personal Settings">
               <Row label="Profile Picture" required>
                 <div className="inline-flex flex-col items-start gap-1.5">
-                  <div className="h-24 w-24 rounded border border-slate-300 bg-slate-200 grid place-items-center" data-testid="practice-profile-picture">
-                    <User size={56} className="text-white fill-white" />
+                  <div className="h-40 w-52 rounded border border-slate-300 bg-slate-300 grid place-items-center" data-testid="practice-profile-picture">
+                    <User size={110} className="text-white fill-white" />
                   </div>
                   <button type="button" data-testid="practice-upload-picture-btn"
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2.5 py-0.5 text-[11px] text-slate-700 hover:bg-slate-50">
-                    <Camera size={11} /> Upload Picture
+                          className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50">
+                    <Camera size={13} /> Upload Picture
                   </button>
                 </div>
               </Row>
@@ -178,11 +178,11 @@ export default function PracticeSettings() {
             </Section>
             <div className="flex items-center gap-2">
               <button type="button" onClick={save} disabled={busy} data-testid="practice-settings-save-btn"
-                      className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60">
+                      className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60">
                 <Check size={14} /> {busy ? "Saving…" : "Save"}
               </button>
               <button type="button" onClick={() => setF(saved)} data-testid="practice-settings-cancel-btn"
-                      className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
+                      className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
                 <X size={14} /> Cancel
               </button>
             </div>
