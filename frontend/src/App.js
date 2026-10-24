@@ -175,6 +175,7 @@ import Reconciliation from "@/pages/Reconciliation";
 import ReconciliationDetail from "@/pages/ReconciliationDetail";
 import BookReview from "@/pages/BookReview";
 import ClosePeriods from "@/pages/ClosePeriods";
+import PracticeHome from "@/pages/PracticeHome";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -244,6 +245,7 @@ function App() {
             <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
             <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
+            <Route path="/practice" element={<Protected><PracticeHome /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

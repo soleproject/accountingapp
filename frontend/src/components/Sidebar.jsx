@@ -8,7 +8,7 @@ import {
   PanelLeftClose, PanelLeft, Settings2, Share2, Activity, Repeat, Package,
   MailCheck, UserCircle, Store, Landmark, Download, ShoppingCart, Coins,
   Percent, Lock, History, FlaskConical, Layers, Target, Clock, GitBranch,
-  Home, ArrowLeft, Calculator, Mail, Rocket, Printer, MoreHorizontal, Search,
+  Home, ArrowLeft, Calculator, Scale, Mail, Rocket, Printer, MoreHorizontal, Search,
   Aperture, CheckSquare, TrendingUp, BadgeDollarSign,
   Sunrise, Sunset, Kanban, MessageSquare, FileBarChart2, Bot, Megaphone,
   ShieldCheck, MessageSquareWarning, CheckCircle2, XCircle, Compass,
@@ -86,6 +86,7 @@ const _MODULES = [
   { key: "projects",   to: "/accounting/projects",     label: "Projects",   icon: Briefcase,  hex: "#D97706" },
   { key: "team",       to: "/team",                    label: "Team",       icon: Building2,  hex: "#059669" },
   { key: "accounting", to: "/dashboard",               label: "Accounting", icon: Calculator, hex: "#0891B2" },
+  { key: "practice",   to: "/practice",                label: "Practice",   icon: Scale,      hex: "#1E88E5", superadminOnly: true },
 ];
 
 // Product-launch gate — filter modules based on the backend's
@@ -96,6 +97,7 @@ function _visibleModules(user) {
   const enabled = new Set(user?.enabled_products || ["accounting"]);
   const showHome = !!user?.show_home;
   return _MODULES.filter(m => {
+    if (m.superadminOnly) return user?.role === "superadmin";
     if (m.key === "home") return showHome;
     return enabled.has(m.key);
   });

@@ -1,5 +1,5 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Lock, Sparkles, X, ChevronDown, Users, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
@@ -217,7 +217,8 @@ export function PlanPreviewPill() {
   const { ent, preview, setPreview } = useEntitlements();
   const [open, setOpen] = React.useState(false);
   const [visible] = usePlanPreviewPillVisible();
-  if (process.env.REACT_APP_PLAN_PREVIEW !== "true" || !ent?.preview_switcher || !visible) return null;
+  const onPractice = useLocation().pathname.startsWith("/practice");
+  if (process.env.REACT_APP_PLAN_PREVIEW !== "true" || !ent?.preview_switcher || !visible || onPractice) return null;
   const label = preview === "real" ? `Real (${ent.plan_label || "no plan"}${ent.all_access ? " · all access" : ""})` : preview === "free_spot" ? "Free spot" : PLAN_LABELS[preview];
   const choices = [["real", "Real plan"], ["simple_start", "Core · $38"], ["assistant", "AI Assistant · $79"], ["bookkeeper", "AI Bookkeeper · $99"], ["advanced", "Advanced · $149"], ["free_spot", "Free spot (sponsored)"]];
   return (
