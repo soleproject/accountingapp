@@ -3,7 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { ChevronLeft, Loader2 } from "lucide-react";
-import { AiReviewPanel, AiRowsTable } from "@/components/AiReviewPanel";
+import { AiReviewPanel, AiRowsTable, HeldImportPanel, DuplicateWarning } from "@/components/AiReviewPanel";
 
 /**
  * Statement import detail — shows the extracted transactions from one
@@ -106,7 +106,11 @@ export default function StatementImportDetail() {
       {doc.method === "ai_review" && doc.ai_review && (
         <AiReviewPanel doc={doc} companyId={currentId} onChanged={() => setReloadKey(k => k + 1)} />
       )}
-      {doc.method === "ai_review" && doc.status === "needs_review" && <AiRowsTable rows={doc.ai_rows} />}
+      {doc.method !== "ai_review" && doc.status === "needs_review" && (
+        <HeldImportPanel doc={doc} companyId={currentId} onChanged={() => setReloadKey(k => k + 1)} />
+      )}
+      {doc.method !== "ai_review" && doc.status !== "needs_review" && doc.duplicate_warning && <DuplicateWarning dup={doc.duplicate_warning} />}
+      {doc.status === "needs_review" && <AiRowsTable rows={doc.ai_rows} />}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <MetaCard label="METHOD" value={doc.method === "ai_review" ? "AI Review · GPT-4o" : `${doc.method || "—"} · bank_statement`} />

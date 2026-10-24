@@ -74,9 +74,10 @@ export function AiReviewPanel({ doc, companyId, onChanged }) {
         <Row label="Ending Balance" value={s.ending_balance} ok={r.balance_ok} drift={r.balance_drift} />
       </div>
 
+      {doc.duplicate_warning && <div className="mt-3"><DuplicateWarning dup={doc.duplicate_warning} /></div>}
       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         {r.ties ? (
-          <div className="text-sm text-emerald-800 inline-flex items-center gap-1.5" data-testid="ai-review-ties"><CheckCircle2 size={15} /> Extracted transactions tie to the statement summary.</div>
+          <div className="text-sm text-emerald-800 inline-flex items-center gap-1.5" data-testid="ai-review-ties"><CheckCircle2 size={15} /> Extracted transactions tie to the statement summary.{held ? " Held because of the possible duplicate above." : ""}</div>
         ) : (
           <div className="text-sm text-rose-800 inline-flex items-center gap-1.5" data-testid="ai-review-drift"><AlertTriangle size={15} /> Totals don't tie — nothing has been posted. Review the rows below, then approve or reject.</div>
         )}
@@ -90,6 +91,53 @@ export function AiReviewPanel({ doc, companyId, onChanged }) {
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const REASON = {
+  same_file: "This is the exact same file you already imported",
+  same_period: "A statement for this account and period was already imported",
+  overlapping_period: "A statement for this account overlaps this period",
+};
+
+export function DuplicateWarning({ dup }) {
+  if (!dup) return null;
+  return (
+    <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="duplicate-warning">
+      <div className="font-semibold inline-flex items-center gap-1.5"><AlertTriangle size={14} /> Possible duplicate statement</div>
+      <div className="mt-1">
+        {REASON[dup.reason] || "A similar statement was already imported"}:{" "}
+        <b>{dup.filename}</b> · {dup.period_start} → {dup.period_end}
+        {dup.account_name ? <> · {dup.account_name}</> : null} · {dup.transaction_count} transactions already in the ledger.
+      </div>
+      <div className="mt-1 text-xs text-amber-800">Approving will post these rows again. Reject to keep the ledger as is.</div>
+    </div>
+  );
+}
+
+export function HeldImportPanel({ doc, companyId, onChanged }) {
+  const [busy, setBusy] = useState(null);
+  const act = async (kind) => {
+    setBusy(kind);
+    try {
+      const res = await api.post(`/companies/${companyId}/statements/imports/${doc.id}/${kind}`);
+      toast.success(kind === "approve" ? `Posted ${res.data.transaction_count} transactions` : "Import rejected — nothing was posted");
+      onChanged?.();
+    } catch (e) { toast.error(e?.response?.data?.detail || `Couldn't ${kind}`); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="rounded-xl border border-rose-200 bg-rose-50/40 p-4 space-y-3" data-testid="held-import-panel">
+      <div className="text-xs uppercase tracking-widest font-semibold text-rose-800">Held before posting</div>
+      <DuplicateWarning dup={doc.duplicate_warning} />
+      <div className="text-sm text-slate-700">{(doc.ai_rows || []).length} extracted rows · {doc.period_start} → {doc.period_end}. Nothing has been posted yet.</div>
+      <div className="flex items-center gap-2 justify-end">
+        <button onClick={() => act("reject")} disabled={!!busy} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full border border-slate-300 bg-white text-sm font-semibold hover:border-rose-400 hover:text-rose-700 disabled:opacity-50" data-testid="held-import-reject"><XCircle size={14} /> Reject</button>
+        <button onClick={() => act("approve")} disabled={!!busy} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50" data-testid="held-import-approve">
+          {busy === "approve" ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} Approve &amp; post anyway
+        </button>
       </div>
     </div>
   );

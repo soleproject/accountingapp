@@ -121,6 +121,14 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
         loadImports();
         return;
       }
+      if (r.data?.status === "needs_review" && r.data?.duplicate_warning) {
+        setUploading(u => u.map(x => x.tempId === id
+          ? { ...x, file: null, status: "needs_review", importId: r.data.import_id }
+          : x));
+        toast.warning(`${file.name}: looks like a duplicate of ${r.data.duplicate_warning.filename} — held for your review.`, { duration: 10000 });
+        loadImports();
+        return;
+      }
       if (r.data?.status === "splitting") {
         setUploading(u => u.map(x => x.tempId === id
           ? { ...x, file: null, status: "splitting",
@@ -649,7 +657,7 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
         )}
         {entry.status === "needs_review" && (
           <Link to={`/connections/imports/${entry.importId}`} className="text-xs text-rose-700 font-semibold inline-flex items-center gap-1 hover:underline" data-testid="stmt-upload-needs-review">
-            Totals don't tie · Review before posting →
+            Held · Review before posting →
           </Link>
         )}
         {entry.status === "ai_processing" && (
