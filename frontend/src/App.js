@@ -182,6 +182,7 @@ import PracticeNewContact from "@/pages/PracticeNewContact";
 import PracticeContactDetail from "@/pages/PracticeContactDetail";
 import PracticeMatters from "@/pages/PracticeMatters";
 import PracticeNewMatter from "@/pages/PracticeNewMatter";
+import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -258,6 +259,8 @@ function App() {
             <Route path="/practice/contacts/:id" element={<Protected><PracticeContactDetail /></Protected>} />
             <Route path="/practice/matters" element={<Protected><PracticeMatters /></Protected>} />
             <Route path="/practice/matters/new" element={<Protected><PracticeNewMatter /></Protected>} />
+            <Route path="/practice/matters/:id" element={<Protected><PracticeMatterDetail /></Protected>} />
+            <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

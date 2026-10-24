@@ -19,9 +19,13 @@ function MattersTable({ rows, nav }) {
         <ListHead cols={COLS} />
         <tbody>
           {shown.map(r => (
-            <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50" data-testid={`practice-matter-row-${r.id}`}>
+            <tr key={r.id} className="group border-t border-slate-200 hover:bg-slate-50" data-testid={`practice-matter-row-${r.id}`}>
               <td className="px-4 py-4"><input type="checkbox" className="h-4 w-4" /></td>
-              <td className="px-2 py-4"><span className="font-semibold text-[#1E88E5] text-[15px]" data-testid={`practice-matter-link-${r.id}`}>{r.name}</span></td>
+              <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/matters/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-matter-link-${r.id}`}>{r.name}</button>
+                <div className="hidden group-hover:flex gap-3 mt-1 text-[9px] uppercase tracking-wider text-slate-500 whitespace-nowrap">
+                  <button type="button" onClick={() => nav(`/practice/matters/${r.id}/edit`)} className="hover:text-[#1E88E5]" data-testid={`practice-matter-row-edit-${r.id}`}>Edit</button>
+                  {["Track Time", "Start Timer", "Add Expense", "Invoice", "Enter Payment"].map(a => <span key={a}>{a}</span>)}
+                </div></td>
               <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className="text-[#1E88E5] hover:underline">{r.contact_name}</button></td>
               <td className="px-2 py-4 text-slate-700">{r.matter_rate}</td>
               <td className="px-2 py-4">{money(0)}</td>

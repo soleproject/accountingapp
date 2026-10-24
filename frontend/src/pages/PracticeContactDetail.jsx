@@ -77,7 +77,7 @@ function MattersTab({ contactId }) {
           <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr>{["Matter", "Status", "Matter Rate", "Assigned To", "Opened"].map(h => <th key={h} className="px-4 py-2 text-left font-semibold">{h}</th>)}</tr></thead>
           <tbody>{rows.map(m => (
             <tr key={m.id} className="border-t border-slate-100" data-testid={`practice-contact-matter-${m.id}`}>
-              <td className="px-4 py-3 font-semibold text-[#1E88E5]">{m.name}</td><td className="px-4 py-3">{m.status}</td><td className="px-4 py-3">{m.matter_rate}</td>
+              <td className="px-4 py-3"><button type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="font-semibold text-[#1E88E5] hover:underline">{m.name}</button></td><td className="px-4 py-3">{m.status}</td><td className="px-4 py-3">{m.matter_rate}</td>
               <td className="px-4 py-3">{m.assigned_to}</td><td className="px-4 py-3 text-slate-500">{m.open_date || new Date(m.created_at).toLocaleDateString("en-US")}</td>
             </tr>))}</tbody>
         </table>

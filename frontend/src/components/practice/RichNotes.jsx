@@ -11,6 +11,8 @@ export const RichNotes = ({ value, onChange, testId = "practice-rich-notes" }) =
   const [open, setOpen] = useState(!!value);
   const ref = useRef(null);
 
+  useEffect(() => { if (value && !open) setOpen(true); }, [value, open]);
+
   useEffect(() => {
     if (open && ref.current && ref.current.innerHTML !== (value || "")) ref.current.innerHTML = value || "";
   }, [open, value]);

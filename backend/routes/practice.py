@@ -196,3 +196,19 @@ async def get_matter(matter_id: str, user: dict = Depends(_guard)):
     if not doc:
         raise HTTPException(404, "Matter not found")
     return await _with_contact(doc, user)
+
+
+@router.put("/matters/{matter_id}")
+async def update_matter(matter_id: str, inp: PracticeMatterIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Matter name is required.")
+    if not await db.practice_contacts.find_one({"id": inp.contact_id, "owner_id": user["id"]}):
+        raise HTTPException(400, "Select a contact.")
+    data = {**inp.model_dump(), "updated_at": datetime.now(timezone.utc).isoformat()}
+    if not data.get("matter_number"):
+        data.pop("matter_number")
+    r = await db.practice_matters.update_one({"id": matter_id, "owner_id": user["id"]}, {"$set": data})
+    if not r.matched_count:
+        raise HTTPException(404, "Matter not found")
+    doc = await db.practice_matters.find_one({"id": matter_id}, {"_id": 0})
+    return await _with_contact(doc, user)

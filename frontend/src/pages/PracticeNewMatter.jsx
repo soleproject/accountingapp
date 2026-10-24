@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Briefcase, X, Check, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
@@ -24,6 +24,7 @@ const EMPTY = {
 export default function PracticeNewMatter() {
   const nav = useNavigate();
   const { user } = useAuth();
+  const { id } = useParams();
   const [params] = useSearchParams();
   const [contacts, setContacts] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -33,6 +34,15 @@ export default function PracticeNewMatter() {
   useEffect(() => {
     api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!id) return;
+    api.get(`/practice/matters/${id}`).then(r => {
+      const m = r.data;
+      setF({ ...EMPTY, ...Object.fromEntries(Object.entries(m).filter(([k]) => k in EMPTY).map(([k, v]) => [k, v ?? ""])),
+             tags: (m.tags || []).join(", "), matter_number: m.matter_number || "" });
+    }).catch(() => { toast.error("Matter not found"); nav("/practice/matters"); });
+  }, [id, nav]);
 
   const save = async (addNew) => {
     if (!f.contact_id) return toast.error("Select a contact.");
@@ -44,10 +54,10 @@ export default function PracticeNewMatter() {
         statute_of_limitations: f.statute_of_limitations || null, open_date: f.open_date || null, close_date: f.close_date || null,
         tags: f.tags.split(",").map(t => t.trim()).filter(Boolean),
       };
-      await api.post("/practice/matters", payload);
+      const r = id ? await api.put(`/practice/matters/${id}`, payload) : await api.post("/practice/matters", payload);
       toast.success("Matter saved");
-      if (addNew) setF({ ...EMPTY, assigned_to: user?.name || "" });
-      else nav("/practice/matters");
+      if (addNew) { setF({ ...EMPTY, assigned_to: user?.name || "" }); if (id) nav("/practice/matters/new"); }
+      else nav(`/practice/matters/${r.data.id}`);
     } catch (e) {
       toast.error(e?.response?.data?.detail || "Could not save matter");
     } finally { setBusy(false); }
@@ -58,7 +68,7 @@ export default function PracticeNewMatter() {
       <div className="space-y-4" data-testid="practice-new-matter">
         <div className="flex items-center gap-3">
           <Briefcase size={30} className="text-slate-600" strokeWidth={1.5} />
-          <h1 className="text-3xl font-bold text-slate-800">New Matter</h1>
+          <h1 className="text-3xl font-bold text-slate-800">{id ? "Edit Matter" : "New Matter"}</h1>
         </div>
         <Section title="About" testId="practice-matter-about-card">
           <div className={W}>
@@ -69,7 +79,7 @@ export default function PracticeNewMatter() {
               </select>
             </Row>
             <Row label="Matter Name" required labelWidth={LW}><input className={input} placeholder="Add Name..." value={f.name} onChange={set("name")} data-testid="practice-matter-name" /></Row>
-            <Row label="Notes" labelWidth={LW}><RichNotes value={f.notes} onChange={set("notes")} testId="practice-matter-notes" /></Row>
+            <Row label="Notes" labelWidth={LW}><RichNotes key={id || "new"} value={f.notes} onChange={set("notes")} testId="practice-matter-notes" /></Row>
           </div>
         </Section>
         <Section title="Custom Fields">
@@ -134,7 +144,7 @@ export default function PracticeNewMatter() {
                   className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60"><Check size={14} /> Save</button>
           <button type="button" onClick={() => save(true)} disabled={busy} data-testid="practice-matter-save-add-btn"
                   className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60"><Check size={14} /> Save & Add New</button>
-          <button type="button" onClick={() => nav("/practice/matters")} data-testid="practice-matter-cancel-btn"
+          <button type="button" onClick={() => nav(id ? `/practice/matters/${id}` : "/practice/matters")} data-testid="practice-matter-cancel-btn"
                   className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"><X size={14} /> Cancel</button>
         </div>
       </div>
