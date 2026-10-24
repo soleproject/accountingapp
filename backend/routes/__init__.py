@@ -67,6 +67,7 @@ from routes.help import router as help_router  # noqa: F401
 from routes.leads import router as leads_router  # noqa: F401
 from routes.affiliate_center import router as affiliate_center_router  # noqa: F401
 from routes.affiliate_pricing import router as affiliate_pricing_router  # noqa: F401
+from routes.practice import router as practice_router  # noqa: F401
 from routes.client_messages import router as client_messages_router  # noqa: F401
 from routes.tax_lines import router as tax_lines_router  # noqa: F401
 from routes.cron_affiliate_drips import router as cron_affiliate_drips_router  # noqa: F401
@@ -178,6 +179,7 @@ ALL_ROUTERS = [
     cron_entitlement_digest_router,
     affiliate_center_router,
     affiliate_pricing_router,
+    practice_router,
     client_messages_router,
     tax_lines_router,
     cron_affiliate_drips_router,

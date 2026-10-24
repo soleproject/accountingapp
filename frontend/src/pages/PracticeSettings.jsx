@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
   Cog, User, Lock, Wrench, Info, Settings, PenLine, Tag, PenTool, Smartphone, Trash2,
   CreditCard, DollarSign, Mail, FileText, BellRing, Users, UsersRound, Shield,
   CalendarCheck, Folder, Landmark, AtSign, Gavel, Zap, Code, Camera, Upload, Check, X,
 } from "lucide-react";
-import { useAuth } from "@/lib/auth";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 
 const GROUPS = [
@@ -87,14 +87,33 @@ const Section = ({ title, children }) => (
   </section>
 );
 
+const EMPTY = {
+  first_name: "", middle_name: "", last_name: "", job_title: "", mobile: "", email: "",
+  time_zone: "(UTC-08:00) Pacific Time (US & Canada)", home_phone: "", office_phone: "",
+  hourly_rate: 0, round_time_entries: false, daily_agenda_email: true,
+};
+
 export default function PracticeSettings() {
-  const { user } = useAuth();
-  const [first = "", ...rest] = (user?.name || "").split(" ");
-  const [f, setF] = useState({
-    first, middle: "", last: rest.join(" "), title: "", mobile: "", email: user?.email || "",
-    tz: "(UTC-08:00) Pacific Time (US & Canada)", home: "", office: "", rate: "0.00", round: false, agenda: true,
-  });
+  const [f, setF] = useState(EMPTY);
+  const [saved, setSaved] = useState(EMPTY);
+  const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));
+
+  useEffect(() => {
+    api.get("/practice/profile").then(r => { const d = { ...EMPTY, ...r.data }; setF(d); setSaved(d); })
+      .catch(() => toast.error("Could not load settings"));
+  }, []);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.put("/practice/profile", { ...f, hourly_rate: Number(f.hourly_rate) || 0 });
+      const d = { ...EMPTY, ...r.data }; setF(d); setSaved(d);
+      toast.success("Settings saved");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Could not save settings");
+    } finally { setBusy(false); }
+  };
 
   return (
     <PracticeShell>
@@ -120,13 +139,13 @@ export default function PracticeSettings() {
               </Row>
               <Row label="Name">
                 <div className="grid grid-cols-3 gap-2">
-                  <input className={input} value={f.first} onChange={set("first")} placeholder="First" data-testid="practice-first-name" />
-                  <input className={input} value={f.middle} onChange={set("middle")} placeholder="M" data-testid="practice-middle-name" />
-                  <input className={input} value={f.last} onChange={set("last")} placeholder="Last" data-testid="practice-last-name" />
+                  <input className={input} value={f.first_name} onChange={set("first_name")} placeholder="First" data-testid="practice-first-name" />
+                  <input className={input} value={f.middle_name} onChange={set("middle_name")} placeholder="M" data-testid="practice-middle-name" />
+                  <input className={input} value={f.last_name} onChange={set("last_name")} placeholder="Last" data-testid="practice-last-name" />
                 </div>
               </Row>
               <Row label="Job Title" help>
-                <select className={input} value={f.title} onChange={set("title")} data-testid="practice-job-title">
+                <select className={input} value={f.job_title} onChange={set("job_title")} data-testid="practice-job-title">
                   <option value=""></option>
                   {["Attorney", "Partner", "Associate", "Paralegal", "Legal Assistant", "Office Manager", "Bookkeeper"].map(t => <option key={t}>{t}</option>)}
                 </select>
@@ -138,31 +157,31 @@ export default function PracticeSettings() {
                 <input className={input} value={f.email} onChange={set("email")} data-testid="practice-email" />
               </Row>
               <Row label="Time Zone" hint="Each user can have their own time zone. All dates in the system will be adjusted accordingly.">
-                <select className={input} value={f.tz} onChange={set("tz")} data-testid="practice-timezone">
+                <select className={input} value={f.time_zone} onChange={set("time_zone")} data-testid="practice-timezone">
                   {["(UTC-10:00) Hawaii", "(UTC-09:00) Alaska", "(UTC-08:00) Pacific Time (US & Canada)", "(UTC-07:00) Mountain Time (US & Canada)",
                     "(UTC-06:00) Central Time (US & Canada)", "(UTC-05:00) Eastern Time (US & Canada)"].map(t => <option key={t}>{t}</option>)}
                 </select>
               </Row>
             </Section>
             <Section title="Contact Info">
-              <Row label="Home"><input className={input} value={f.home} onChange={set("home")} data-testid="practice-home-phone" /></Row>
-              <Row label="Office"><input className={input} value={f.office} onChange={set("office")} data-testid="practice-office-phone" /></Row>
+              <Row label="Home"><input className={input} value={f.home_phone} onChange={set("home_phone")} data-testid="practice-home-phone" /></Row>
+              <Row label="Office"><input className={input} value={f.office_phone} onChange={set("office_phone")} data-testid="practice-office-phone" /></Row>
             </Section>
             <Section title="Time Entries">
               <Row label="Hourly Rate (USD)" required hint="The amount you charge per hour when billing for your time. Each user can have their own rates.">
-                <input type="number" step="0.01" className={input} value={f.rate} onChange={set("rate")} data-testid="practice-hourly-rate" />
+                <input type="number" step="0.01" className={input} value={f.hourly_rate} onChange={set("hourly_rate")} data-testid="practice-hourly-rate" />
               </Row>
-              <Row label="Round Time Entries?" help><Toggle value={f.round} onChange={set("round")} testId="practice-round-toggle" /></Row>
+              <Row label="Round Time Entries?" help><Toggle value={f.round_time_entries} onChange={set("round_time_entries")} testId="practice-round-toggle" /></Row>
             </Section>
             <Section title="Notification Emails">
-              <Row label="Receive Daily Agenda Email?" help><Toggle value={f.agenda} onChange={set("agenda")} testId="practice-agenda-toggle" /></Row>
+              <Row label="Receive Daily Agenda Email?" help><Toggle value={f.daily_agenda_email} onChange={set("daily_agenda_email")} testId="practice-agenda-toggle" /></Row>
             </Section>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => toast.success("Settings saved")} data-testid="practice-settings-save-btn"
-                      className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]">
-                <Check size={14} /> Save
+              <button type="button" onClick={save} disabled={busy} data-testid="practice-settings-save-btn"
+                      className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60">
+                <Check size={14} /> {busy ? "Saving…" : "Save"}
               </button>
-              <button type="button" data-testid="practice-settings-cancel-btn"
+              <button type="button" onClick={() => setF(saved)} data-testid="practice-settings-cancel-btn"
                       className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
                 <X size={14} /> Cancel
               </button>
