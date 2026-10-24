@@ -67,7 +67,7 @@ export function AiReviewPanel({ doc, companyId, onChanged }) {
           <div className="text-sm text-slate-700 mt-1">
             {s.bank_name || "Statement"} · {s.account_type?.replace("_", " ")} {s.account_number_masked ? `· ${s.account_number_masked}` : ""} · {s.period_start} → {s.period_end}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{r.count_withdrawals ?? 0} withdrawals · {r.count_deposits ?? 0} deposits · {review.pages} pages{r.retried ? ` · ${r.pass === "vision" ? "vision re-read used" : "second pass used"}` : ""}</div>
+          <div className="text-xs text-slate-500 mt-0.5">{r.count_withdrawals ?? 0} withdrawals · {r.count_deposits ?? 0} deposits · {review.pages} pages{r.retried ? ` · ${r.pass === "vision" ? "vision re-read used" : r.pass === "layout" ? "layout re-read used" : "second pass used"}` : ""}</div>
         </div>
         <div className="flex items-center gap-2">
           {doc.has_source_file && (
