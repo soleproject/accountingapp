@@ -7,6 +7,7 @@ import {
   CalendarCheck, Folder, Landmark, AtSign, Gavel, Zap, Code, Camera, Upload, Check, X,
 } from "lucide-react";
 import { PracticeShell } from "@/components/practice/PracticeShell";
+import { Row, input, Toggle, Section } from "@/components/practice/forms";
 
 const GROUPS = [
   { title: "Personal & Company", items: [
@@ -61,31 +62,6 @@ function SettingsNav() {
     </nav>
   );
 }
-
-const Row = ({ label, required, hint, help, children }) => (
-  <div className="grid grid-cols-[230px_1fr] items-start gap-4 py-2.5">
-    <div className="text-[13px] font-semibold uppercase tracking-wide text-slate-800 pt-2.5 flex items-center gap-1">
-      {help && <span className="text-slate-400">?</span>}{label}{required && <span className="text-red-500">*</span>}
-    </div>
-    <div>{children}{hint && <p className="mt-1.5 text-xs text-slate-500">{hint}</p>}</div>
-  </div>
-);
-
-const input = "w-full h-10 rounded border border-slate-300 px-3 text-[15px] text-slate-700 outline-none focus:border-[#1E88E5]";
-
-const Toggle = ({ value, onChange, testId }) => (
-  <button type="button" onClick={() => onChange(!value)} data-testid={testId}
-          className={`h-8 min-w-[56px] rounded px-2.5 text-sm font-semibold flex items-center ${value ? "bg-[#1E88E5] text-white justify-start" : "bg-slate-200 text-slate-700 justify-end"}`}>
-    {value ? "Yes" : "No"}
-  </button>
-);
-
-const Section = ({ title, children }) => (
-  <section className="rounded border border-slate-200 bg-white px-8 py-6">
-    <h2 className="text-lg font-bold uppercase tracking-wide text-slate-800 mb-3">{title}</h2>
-    {children}
-  </section>
-);
 
 const EMPTY = {
   first_name: "", middle_name: "", last_name: "", job_title: "", mobile: "", email: "",

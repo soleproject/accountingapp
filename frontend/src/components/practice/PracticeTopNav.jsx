@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   Scale, Play, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
   Settings, CreditCard, LogOut, Calculator, Check, ChevronsLeft,
@@ -7,7 +7,7 @@ import {
 import { useAuth } from "@/lib/auth";
 
 const NAV = [
-  "Home", "Matters", "Contacts", "Calendar", "Time Entries",
+  { label: "Home", to: "/practice", exact: true }, "Matters", { label: "Contacts", to: "/practice/contacts" }, "Calendar", "Time Entries",
   { label: "Billing", menu: true }, { label: "Payments", menu: true },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
@@ -76,7 +76,10 @@ function ProfileMenu({ user }) {
   );
 }
 
-export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => (
+export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
+  const nav = useNavigate();
+  const { pathname } = useLocation();
+  return (
   <header className="bg-[#1E88E5] text-white" data-testid="practice-topnav">
     <div className="flex items-center gap-3 px-4 h-14">
       <div className="flex items-center gap-2 pr-2" data-testid="practice-brand">
@@ -108,10 +111,13 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => (
       </label>
       {NAV.map(n => {
         const label = typeof n === "string" ? n : n.label;
-        const menu = typeof n !== "string";
+        const menu = typeof n !== "string" && n.menu;
+        const to = typeof n !== "string" ? n.to : null;
+        const active = to && (n.exact ? pathname === to : pathname.startsWith(to));
         return (
           <button key={label} type="button" data-testid={`practice-nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                  className="shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1">
+                  onClick={() => to && nav(to)}
+                  className={`shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`}>
             {label}{menu && <ChevronDown size={12} />}
           </button>
         );
@@ -129,4 +135,5 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => (
       )}
     </div>
   </header>
-);
+  );
+};

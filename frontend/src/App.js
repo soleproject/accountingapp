@@ -177,6 +177,8 @@ import BookReview from "@/pages/BookReview";
 import ClosePeriods from "@/pages/ClosePeriods";
 import PracticeHome from "@/pages/PracticeHome";
 import PracticeSettings from "@/pages/PracticeSettings";
+import PracticeContacts from "@/pages/PracticeContacts";
+import PracticeNewContact from "@/pages/PracticeNewContact";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -248,6 +250,8 @@ function App() {
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
             <Route path="/practice" element={<Protected><PracticeHome /></Protected>} />
             <Route path="/practice/settings" element={<Protected><PracticeSettings /></Protected>} />
+            <Route path="/practice/contacts" element={<Protected><PracticeContacts /></Protected>} />
+            <Route path="/practice/contacts/new" element={<Protected><PracticeNewContact /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

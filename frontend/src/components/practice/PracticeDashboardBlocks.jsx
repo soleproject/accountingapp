@@ -32,19 +32,22 @@ export const PracticeStatTiles = () => (
 );
 
 const QUICK = [
-  ["New Contact", UserPlus], ["New Matter", Briefcase], ["New Event", CalendarDays],
+  ["New Contact", UserPlus, "/practice/contacts/new"], ["New Matter", Briefcase], ["New Event", CalendarDays],
   ["New Task", ClipboardList], ["New Note", FileText], ["New Call", Phone],
   ["Send Message", MessageSquare], ["Track Time", Clock], ["Add Expense", Wallet],
   ["New Intake", FileSignature], ["New Invoice", FileInput], ["New Payment", CreditCard],
   ["New Flat Fee", Receipt],
 ];
 
-export const PracticeQuickCreate = () => (
+export const PracticeQuickCreate = () => {
+  const nav = useNavigate();
+  return (
   <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-quick-create">
     <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3">Quick Create</h2>
     <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 xl:grid-cols-[repeat(13,minmax(0,1fr))] gap-2">
-      {QUICK.map(([label, Icon]) => (
+      {QUICK.map(([label, Icon, to]) => (
         <button key={label} type="button" data-testid={`practice-quick-${label.toLowerCase().replace(/\s+/g, "-")}`}
+                onClick={() => to && nav(to)}
                 className="flex flex-col items-center justify-center gap-2 rounded border border-slate-200 bg-white py-4 px-1 text-[11px] font-medium text-slate-700 hover:border-[#1E88E5] hover:text-[#1E88E5] transition-colors">
           <Icon size={30} strokeWidth={1.4} className="text-slate-800" />
           <span className="whitespace-nowrap">{label}</span>
@@ -52,7 +55,8 @@ export const PracticeQuickCreate = () => (
       ))}
     </div>
   </section>
-);
+  );
+};
 
 const STEPS = [
   { label: "Setup your profile", done: true, to: "/practice/settings" }, { label: "Add your logo" }, { label: "Create a matter" },
