@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { toISO } from "@/components/practice/DateTimePicker";
+import { SearchSelect, DEFAULT_ITEMS, MiniModal } from "@/components/practice/SearchSelect";
 
 const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const Row = ({ label, required, help, sub, children }) => (
@@ -21,13 +22,15 @@ const Toggle = ({ value, onChange, testId }) => (
 );
 const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4"><h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>{children}</section>;
 
-const ITEMS = ["Consultation", "Research", "Drafting", "Court Appearance", "Phone Call", "Email", "Meeting", "Other"];
 
 export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState(DEFAULT_ITEMS);
+  const [newMatter, setNewMatter] = useState(null);
+  const [newItem, setNewItem] = useState(null);
   const [f, setF] = useState({
     contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: "", date: task?.due_date || toISO(new Date()),
     description: task ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : "",
@@ -68,13 +71,16 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           <Card title="Linked To">
             <Row label="Contact" required><ContactPicker value={f.contact_id} onChange={(id) => setF(p => ({ ...p, contact_id: id, matter_id: "" }))} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-te-contact" /></Row>
             <Row label="Matter" required>
-              <select className={inp} value={f.matter_id} onChange={set("matter_id")} data-testid="practice-te-matter">
-                <option value="">Select Matter...</option>{visibleMatters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              <SearchSelect value={f.matter_id} onChange={set("matter_id")} placeholder="Select Matter..." testId="practice-te-matter"
+                            options={visibleMatters.map(m => ({ id: m.id, label: m.name }))} newLabel="New Matter"
+                            onNew={() => f.contact_id ? setNewMatter({ name: "" }) : toast.error("Select a contact first.")} />
             </Row>
           </Card>
           <Card title="Time Entries">
-            <Row label="Item" help><select className={inp} value={f.item} onChange={set("item")} data-testid="practice-te-item"><option value="">Select Item...</option>{ITEMS.map(i => <option key={i}>{i}</option>)}</select></Row>
+            <Row label="Item" help>
+              <SearchSelect value={f.item} onChange={set("item")} placeholder="Select Item..." testId="practice-te-item" clearable
+                            options={items} newLabel="New Item" onNew={() => setNewItem({ label: "", code: "" })} />
+            </Row>
             <Row label="Hours" required>
               <input className={inp} placeholder="Format: 1h 10m, 1:10, 1.2h" value={f.hours_raw} onChange={set("hours_raw")} data-testid="practice-te-hours" />
               <button type="button" className="mt-1.5 w-full h-8 rounded bg-[#1E88E5] text-white text-sm font-semibold inline-flex items-center justify-center gap-1.5" data-testid="practice-te-start-timer"><Play size={12} className="fill-white" /> Start Timer</button>
@@ -98,6 +104,38 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           </div>
         </div>
       </div>
+      {newMatter && (
+        <MiniModal title="New Matter" onClose={() => setNewMatter(null)} testId="practice-te-new-matter-modal">
+          <div className="text-xs text-slate-600">Contact: <span className="font-semibold text-slate-800">{contacts.find(c => c.id === f.contact_id)?.display_name}</span></div>
+          <input autoFocus className={inp} placeholder="Matter Name..." value={newMatter.name} onChange={e => setNewMatter({ name: e.target.value })} data-testid="practice-te-new-matter-name" />
+          <div className="flex gap-2">
+            <button type="button" data-testid="practice-te-new-matter-save" className="rounded bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"
+                    onClick={async () => {
+                      if (!newMatter.name.trim()) return toast.error("Matter name is required.");
+                      try {
+                        const r = await api.post("/practice/matters", { contact_id: f.contact_id, name: newMatter.name, assigned_to: user?.name || "" });
+                        setMatters(l => [r.data, ...l]); setF(p => ({ ...p, matter_id: r.data.id })); setNewMatter(null); toast.success("Matter created");
+                      } catch (e) { toast.error(e?.response?.data?.detail || "Could not create matter"); }
+                    }}>Save</button>
+            <button type="button" onClick={() => setNewMatter(null)} className="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-700">Cancel</button>
+          </div>
+        </MiniModal>
+      )}
+      {newItem && (
+        <MiniModal title="New Item" onClose={() => setNewItem(null)} testId="practice-te-new-item-modal">
+          <input autoFocus className={inp} placeholder="Item name..." value={newItem.label} onChange={e => setNewItem(p => ({ ...p, label: e.target.value }))} data-testid="practice-te-new-item-name" />
+          <input className={inp} placeholder="Code (optional, e.g. A112)" value={newItem.code} onChange={e => setNewItem(p => ({ ...p, code: e.target.value }))} data-testid="practice-te-new-item-code" />
+          <div className="flex gap-2">
+            <button type="button" data-testid="practice-te-new-item-save" className="rounded bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"
+                    onClick={() => {
+                      if (!newItem.label.trim()) return toast.error("Item name is required.");
+                      const it = { id: newItem.label.trim(), label: newItem.label.trim(), code: newItem.code.trim() };
+                      setItems(l => [...l, it]); setF(p => ({ ...p, item: it.id })); setNewItem(null);
+                    }}>Save</button>
+            <button type="button" onClick={() => setNewItem(null)} className="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-700">Cancel</button>
+          </div>
+        </MiniModal>
+      )}
     </div>
   );
 };
