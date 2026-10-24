@@ -15,23 +15,23 @@ function Agenda({ first }) {
   const today = toISO(new Date());
   useEffect(() => { api.get("/practice/tasks", { params: { start: today, end: today } }).then(r => setItems(r.data)).catch(() => {}); }, [today]);
   return (
-    <section className="rounded border border-slate-200 bg-white px-4 py-3" data-testid="practice-user-agenda">
+    <section className="rounded border border-slate-200 bg-white px-4 py-4" data-testid="practice-user-agenda">
       <div className="flex items-center justify-between">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-700">{first}'s Agenda</h2>
-        <div className="flex gap-3 text-[10px] font-semibold uppercase tracking-wider text-slate-600">
+        <h2 className="text-[13px] font-bold uppercase tracking-wider text-slate-700">{first}'s Agenda</h2>
+        <div className="flex gap-5 text-xs font-semibold uppercase tracking-wider text-slate-700">
           <button type="button" onClick={() => nav("/practice/calendar")} className="hover:text-[#1E88E5]" data-testid="practice-user-view-calendar">View Calendar ⊕</button>
           <button type="button" onClick={() => nav("/practice/calendar")} className="hover:text-[#1E88E5]" data-testid="practice-user-all-tasks">All Tasks ⊕</button>
         </div>
       </div>
-      <div className="mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-700">Today</div>
-      {items.length === 0 ? <div className="mt-2 text-xs text-slate-500">Nothing on the agenda today.</div> : (
-        <ul className="mt-2 space-y-3">
+      <div className="mt-5 text-[13px] font-bold uppercase tracking-wider text-slate-800">Today</div>
+      {items.length === 0 ? <div className="mt-3 text-[13px] text-slate-500">Nothing on the agenda today.</div> : (
+        <ul className="mt-4 space-y-4">
           {items.map(t => (
-            <li key={t.id} className="text-xs" data-testid={`practice-user-agenda-${t.id}`}>
-              <div className="flex items-center gap-1.5 text-[#1E88E5] font-semibold text-sm">{t.kind === "event" ? <CalendarDays size={12} /> : <ClipboardList size={12} />}{t.subject}</div>
-              {t.kind === "event" && !t.all_day && <div className="text-slate-600 ml-5">{fmtTime(t.start_time)} – {fmtTime(t.end_time)}</div>}
-              {t.description && <div className="text-slate-600 ml-5">{t.description.replace(/<[^>]+>/g, "")}</div>}
-              {(t.contact_name || t.matter_name) && <div className="ml-5 font-semibold text-slate-800">Re: {[t.contact_name, t.matter_name].filter(Boolean).join(" / ")}</div>}
+            <li key={t.id} className="text-[13px] leading-[18px]" data-testid={`practice-user-agenda-${t.id}`}>
+              <div className="flex items-center gap-1.5 text-[#1E88E5] font-semibold text-[15px]">{t.kind === "event" ? <CalendarDays size={14} /> : <ClipboardList size={14} />}{t.subject}</div>
+              {t.kind === "event" && !t.all_day && <div className="text-slate-700 ml-6">{fmtTime(t.start_time)} – {fmtTime(t.end_time)}</div>}
+              {t.description && <div className="text-slate-700 ml-6">{t.description.replace(/<[^>]+>/g, "")}</div>}
+              {(t.contact_name || t.matter_name) && <div className="ml-6 font-semibold text-slate-800">Re: {[t.contact_name, t.matter_name].filter(Boolean).join(" / ")}</div>}
             </li>
           ))}
         </ul>
@@ -52,29 +52,29 @@ function Activity({ first, name }) {
   };
   return (
     <section className="rounded border border-slate-200 bg-white" data-testid="practice-user-activity">
-      <h2 className="px-4 pt-3 text-xs font-bold uppercase tracking-wider text-slate-700">{first}'s Activity</h2>
-      <div className="flex items-stretch gap-2 px-4 py-3">
+      <h2 className="px-4 pt-4 text-[13px] font-bold uppercase tracking-wider text-slate-700">{first}'s Activity</h2>
+      <div className="flex items-stretch gap-2 px-3 py-4">
         <label className="flex-1 flex items-center gap-2 rounded border border-slate-300 bg-white px-3">
-          <MessageSquare size={14} className="text-slate-400" />
-          <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && post()} placeholder="What's new?" data-testid="practice-user-activity-input" className="flex-1 h-8 text-sm outline-none bg-transparent" />
-          <Filter size={12} className="text-slate-400" /><ChevronDown size={12} className="text-slate-400" />
+          <MessageSquare size={16} className="text-slate-400" />
+          <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && post()} placeholder="What's new?" data-testid="practice-user-activity-input" className="flex-1 h-9 text-[15px] outline-none bg-transparent" />
+          <Filter size={14} className="text-slate-400" /><ChevronDown size={14} className="text-slate-400" />
         </label>
-        <button type="button" onClick={post} className="h-8 px-3 rounded bg-[#1E88E5] text-white text-xs font-semibold" data-testid="practice-user-activity-save">Save ›</button>
+        <button type="button" onClick={post} className="h-9 px-4 rounded bg-[#1E88E5] text-white text-sm font-semibold" data-testid="practice-user-activity-save">Save ›</button>
       </div>
       <ul>
         {(items || []).slice(0, 10).map((a, i) => (
-          <li key={i} className={`flex gap-3 px-4 py-3 text-xs ${i % 2 ? "bg-white" : "bg-slate-50"}`} data-testid="practice-user-activity-item">
-            <span className="h-7 w-7 rounded-full bg-slate-300 grid place-items-center shrink-0"><User size={14} className="text-white fill-white" /></span>
+          <li key={i} className={`flex gap-3 px-3 py-4 text-[13px] leading-[19px] ${i % 2 ? "bg-white" : "bg-slate-50"}`} data-testid="practice-user-activity-item">
+            <span className="h-8 w-8 rounded-full bg-slate-300 grid place-items-center shrink-0"><User size={16} className="text-white fill-white" /></span>
             <div>
-              <div><span className="font-semibold text-slate-800">{name}</span> <span className="text-slate-400">{fmtAt(a.at)}</span></div>
+              <div><span className="font-semibold text-slate-800 text-[15px]">{name}</span> <span className="text-slate-400 text-[11px]">{fmtAt(a.at)}</span></div>
               {a.re?.length > 0 && <div className="text-slate-500">Re: {a.re.map((r, j) => <span key={j}>{j > 0 && " / "}{r.to ? <button type="button" onClick={() => nav(r.to)} className="text-[#1E88E5] hover:underline">{r.label}</button> : r.label}</span>)}</div>}
               <div className="text-slate-700">{a.text}</div>
             </div>
           </li>
         ))}
-        {items && items.length === 0 && <li className="px-4 py-6 text-xs text-slate-500">No activity yet.</li>}
+        {items && items.length === 0 && <li className="px-4 py-6 text-[13px] text-slate-500">No activity yet.</li>}
       </ul>
-      <div className="flex items-center gap-3 px-4 py-2 border-t border-slate-200 text-[10px] uppercase tracking-wider text-slate-500">
+      <div className="flex items-center gap-3 px-4 py-3 border-t border-slate-200 text-xs uppercase tracking-wider text-slate-500">
         <span className="text-slate-300">« ‹</span><span className="text-slate-800 text-sm border-b border-slate-400 px-2">1</span><span className="text-slate-300">› »</span>
         <span className="ml-2 rounded-full border border-slate-300 px-2 py-0.5">10 ▾</span><span className="font-semibold">Items per page</span>
         <span className="flex-1 text-right">1 - {Math.min(10, items?.length || 0)} of {items?.length || 0} items</span>
@@ -96,31 +96,31 @@ export default function PracticeUser() {
     <PracticeShell>
       <div className="space-y-4" data-testid="practice-user-page">
         <div className="flex items-center gap-3">
-          <UserPlus size={28} className="text-slate-600" strokeWidth={1.5} />
-          <h1 className="text-2xl font-bold text-slate-800">User - {name}</h1>
-          <button type="button" className="text-slate-700" data-testid="practice-user-edit"><Pencil size={14} /></button>
+          <UserPlus size={32} className="text-slate-600" strokeWidth={1.5} />
+          <h1 className="text-[26px] font-bold text-slate-800">User - {name}</h1>
+          <button type="button" className="text-slate-700" data-testid="practice-user-edit"><Pencil size={16} /></button>
           <div className="flex-1" />
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700 hover:bg-slate-50" data-testid="practice-user-change-password"><KeyRound size={12} /> Change Your Password</button>
+          <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-[13px] text-slate-700 hover:bg-slate-50" data-testid="practice-user-change-password"><KeyRound size={14} /> Change Your Password</button>
         </div>
-        <section className="rounded border border-slate-200 bg-white px-4 py-3" data-testid="practice-user-card">
+        <section className="rounded border border-slate-200 bg-white px-4 py-4" data-testid="practice-user-card">
           <div className="flex items-center gap-3">
-            <span className="h-10 w-10 rounded bg-slate-300 grid place-items-center"><User size={26} className="text-white fill-white" /></span>
+            <span className="h-12 w-12 rounded bg-slate-300 grid place-items-center"><User size={30} className="text-white fill-white" /></span>
             <div>
-              <div className="flex items-center gap-2 text-lg font-semibold text-slate-800">{name} <span className="rounded bg-[#43A047] px-1.5 py-px text-[10px] font-bold text-white">Online</span></div>
-              <div className="text-xs text-[#1E88E5]">{user?.email}</div>
+              <div className="flex items-center gap-2 text-xl font-semibold text-slate-800">{name} <span className="rounded bg-[#43A047] px-1.5 py-px text-[11px] font-bold text-white">Online</span></div>
+              <div className="text-[13px] text-[#1E88E5]">{user?.email}</div>
             </div>
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-5 text-[11px] text-slate-600">
-            <span className="inline-flex items-center gap-1"><Calendar size={11} /> Last Seen: {fmtAt(new Date().toISOString())}</span>
-            <span className="inline-flex items-center gap-1"><Lock size={11} /> Security Role: <span className="text-[#1E88E5]">Admin</span></span>
-            {profile.mobile && <span className="inline-flex items-center gap-1"><Smartphone size={11} /> <span className="text-[#1E88E5]">{profile.mobile}</span></span>}
-            {profile.office_phone && <span className="inline-flex items-center gap-1"><Phone size={11} /> <span className="text-[#1E88E5]">{profile.office_phone}</span></span>}
+          <div className="mt-4 flex flex-wrap items-center gap-6 text-[13px] text-slate-600">
+            <span className="inline-flex items-center gap-1"><Calendar size={13} /> Last Seen: {fmtAt(new Date().toISOString())}</span>
+            <span className="inline-flex items-center gap-1"><Lock size={13} /> Security Role: <span className="text-[#1E88E5]">Admin</span></span>
+            {profile.mobile && <span className="inline-flex items-center gap-1"><Smartphone size={13} /> <span className="text-[#1E88E5]">{profile.mobile}</span></span>}
+            {profile.office_phone && <span className="inline-flex items-center gap-1"><Phone size={13} /> <span className="text-[#1E88E5]">{profile.office_phone}</span></span>}
           </div>
         </section>
         <div className="flex border-b border-slate-200" data-testid="practice-user-tabs">
           {tabs.map(t => (
             <button key={t} type="button" onClick={() => setTab(t)} data-testid={`practice-user-tab-${t.toLowerCase().replace(/\s+/g, "-")}`}
-                    className={`-mb-px px-3 py-2 text-xs border ${tab === t ? "border-slate-200 border-b-white bg-white text-slate-900 font-medium rounded-t" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{first}'s {t}</button>
+                    className={`-mb-px px-3 py-2.5 text-sm border ${tab === t ? "border-slate-200 border-b-white bg-white text-slate-900 font-medium rounded-t" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{first}'s {t}</button>
           ))}
         </div>
         {tab === "Dashboard" ? <div className="space-y-4"><Agenda first={first} /><Activity first={first} name={name} /></div>
@@ -139,8 +139,8 @@ function UserTabList({ tab }) {
   const to = (r) => tab === "Contacts" ? `/practice/contacts/${r.id}` : tab === "Matters" ? `/practice/matters/${r.id}` : "/practice/time-entries";
   return (
     <section className="rounded border border-slate-200 bg-white" data-testid={`practice-user-list-${tab.toLowerCase().replace(/\s+/g, "-")}`}>
-      {rows === null ? <div className="p-6 text-xs text-slate-500">Loading…</div> : rows.length === 0 ? <div className="p-6 text-xs text-slate-500">Nothing here yet.</div> : (
-        <ul className="divide-y divide-slate-100">{rows.map(r => <li key={r.id} className="px-4 py-2 text-sm"><button type="button" onClick={() => nav(to(r))} className="text-[#1E88E5] hover:underline">{label(r)}</button></li>)}</ul>
+      {rows === null ? <div className="p-6 text-[13px] text-slate-500">Loading…</div> : rows.length === 0 ? <div className="p-6 text-[13px] text-slate-500">Nothing here yet.</div> : (
+        <ul className="divide-y divide-slate-100">{rows.map(r => <li key={r.id} className="px-4 py-2.5 text-[15px]"><button type="button" onClick={() => nav(to(r))} className="text-[#1E88E5] hover:underline">{label(r)}</button></li>)}</ul>
       )}
     </section>
   );
