@@ -123,7 +123,7 @@ async def get_contact(contact_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_contacts.find_one({"id": contact_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Contact not found")
-    return {**doc, "display_name": _display_name(doc)}
+    return {**doc, "display_name": _display_name(doc), "counts": await _counts(user["id"], contact_id=contact_id)}
 
 
 class PracticeMatterIn(BaseModel):
@@ -195,7 +195,7 @@ async def get_matter(matter_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_matters.find_one({"id": matter_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Matter not found")
-    return await _with_contact(doc, user)
+    return {**(await _with_contact(doc, user)), "counts": await _counts(user["id"], matter_id=matter_id)}
 
 
 @router.put("/matters/{matter_id}")
@@ -251,7 +251,12 @@ async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, use
     q = {"owner_id": user["id"]}
     if start and end:
         q["due_date"] = {"$gte": start, "$lte": end}
-    return await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", 1), ("due_time", 1)]).to_list(2000)
+    docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", 1), ("due_time", 1)]).to_list(2000)
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]
 
 
 @router.post("/tasks")
@@ -267,3 +272,103 @@ async def create_task(inp: PracticeTaskIn, user: dict = Depends(_guard)):
     await db.practice_tasks.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@router.put("/tasks/{task_id}")
+async def update_task(task_id: str, inp: PracticeTaskIn, user: dict = Depends(_guard)):
+    data = {**inp.model_dump(), "updated_at": datetime.now(timezone.utc).isoformat()}
+    if data["all_day"]:
+        data["due_time"] = None
+    r = await db.practice_tasks.update_one({"id": task_id, "owner_id": user["id"]}, {"$set": data})
+    if not r.matched_count:
+        raise HTTPException(404, "Task not found")
+    return await db.practice_tasks.find_one({"id": task_id}, {"_id": 0})
+
+
+@router.patch("/tasks/{task_id}/status")
+async def set_task_status(task_id: str, body: dict, user: dict = Depends(_guard)):
+    r = await db.practice_tasks.update_one({"id": task_id, "owner_id": user["id"]},
+                                           {"$set": {"status": body.get("status", "Completed"), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not r.matched_count:
+        raise HTTPException(404, "Task not found")
+    return await db.practice_tasks.find_one({"id": task_id}, {"_id": 0})
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(task_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_tasks.delete_one({"id": task_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Task not found")
+    return {"ok": True}
+
+
+class PracticeTimeEntryIn(BaseModel):
+    contact_id: str
+    matter_id: str
+    task_id: Optional[str] = None
+    item: str = ""
+    hours: float = Field(..., gt=0)
+    hours_raw: str = ""
+    date: str
+    description: str = ""
+    billable: bool = True
+    billed_by: str = ""
+    hourly_rate: float = 0
+    total: float = 0
+    private_notes: str = ""
+
+
+def parse_hours(raw: str) -> Optional[float]:
+    """Accepts '1h 10m', '1:10', '1.2h', '45m', '1.5'."""
+    import re
+    s = (raw or "").strip().lower()
+    if not s:
+        return None
+    if ":" in s:
+        h, m = s.split(":", 1)
+        return int(h or 0) + int(m or 0) / 60
+    hrs = re.search(r"([\d.]+)\s*h", s)
+    mins = re.search(r"([\d.]+)\s*m", s)
+    if hrs or mins:
+        return (float(hrs.group(1)) if hrs else 0) + (float(mins.group(1)) if mins else 0) / 60
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+@router.post("/time-entries/parse")
+async def parse_hours_api(body: dict, user: dict = Depends(_guard)):
+    h = parse_hours(body.get("raw", ""))
+    if h is None:
+        raise HTTPException(400, "Use a format like 1h 10m, 1:10 or 1.2h")
+    return {"hours": round(h, 4)}
+
+
+@router.get("/time-entries")
+async def list_time_entries(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if contact_id:
+        q["contact_id"] = contact_id
+    if matter_id:
+        q["matter_id"] = matter_id
+    return await db.practice_time_entries.find(q, {"_id": 0}).sort("date", -1).to_list(2000)
+
+
+@router.post("/time-entries")
+async def create_time_entry(inp: PracticeTimeEntryIn, user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(),
+           "total": round(inp.hours * inp.hourly_rate, 2) if inp.billable else 0, "created_at": now}
+    await db.practice_time_entries.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+async def _counts(user_id: str, **match) -> dict:
+    q = {"owner_id": user_id, **match}
+    return {
+        "matters": await db.practice_matters.count_documents(q) if "contact_id" in match and "matter_id" not in match else None,
+        "activities": await db.practice_tasks.count_documents(q),
+        "time": await db.practice_time_entries.count_documents(q),
+    }

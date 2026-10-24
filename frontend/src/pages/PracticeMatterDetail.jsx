@@ -100,10 +100,14 @@ export default function PracticeMatterDetail() {
           </div>
           <PracticeStatTiles />
           <div className="flex flex-wrap border-b border-slate-200" data-testid="practice-matter-tabs">
-            {TABS.map(t => (
+            {TABS.map(t => {
+              const n = { Activities: m.counts?.activities, "Time Entries": m.counts?.time }[t];
+              return (
               <button key={t} type="button" onClick={() => setTab(t)} data-testid={`practice-matter-tab-${slug(t)}`}
-                      className={`-mb-px px-3 py-2 text-sm border ${tab === t ? "border-slate-200 border-b-white bg-white text-slate-900 font-medium rounded-t" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{t}</button>
-            ))}
+                      className={`-mb-px px-3 py-2 text-sm border inline-flex items-center gap-1 ${tab === t ? "border-slate-200 border-b-white bg-white text-slate-900 font-medium rounded-t" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+                {t}{n > 0 && <span className="inline-grid h-4 min-w-4 place-items-center rounded-full border border-slate-400 px-1 text-[10px] text-slate-600">{n}</span>}
+              </button>
+            ); })}
           </div>
           {tab === "Matter" ? <MatterTab m={m} nav={nav} /> : tab === "Contact" ? (
             <Card title="Contact">

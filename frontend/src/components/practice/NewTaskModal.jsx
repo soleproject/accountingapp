@@ -74,12 +74,12 @@ const Toggle = ({ value, onChange, testId }) => (
 );
 const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4">{title && <h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>}{children}</section>;
 
-export const NewTaskModal = ({ defaultDate, onSaved, onClose }) => {
+export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [f, setF] = useState({
+  const [f, setF] = useState(() => task ? { ...task, contact_id: task.contact_id || "", matter_id: task.matter_id || "", due_time: task.due_time || "09:00", tags: (task.tags || []).join(", ") } : {
     contact_id: "", matter_id: "", subject: "", due_date: toISO(defaultDate || new Date()), due_time: "09:00", all_day: true,
     status: "Not Completed", description: "", private: false, priority: "Medium", repeat: "Never",
     assigned_users: [user?.name].filter(Boolean), assigned_contacts: "", tags: "", email_assignees: true,
@@ -90,16 +90,17 @@ export const NewTaskModal = ({ defaultDate, onSaved, onClose }) => {
   useEffect(() => {
     api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {});
     api.get("/practice/matters", { params: { status: "All" } }).then(r => setMatters(r.data)).catch(() => {});
-    api.get("/practice/tasks/reminder-defaults").then(r => { if (r.data?.length) setF(p => ({ ...p, reminders: r.data })); }).catch(() => {});
-  }, []);
+    if (!task) api.get("/practice/tasks/reminder-defaults").then(r => { if (r.data?.length) setF(p => ({ ...p, reminders: r.data })); }).catch(() => {});
+  }, [task]);
 
   const save = async () => {
     if (!f.subject.trim()) return toast.error("Subject is required.");
     if (f.assigned_users.length === 0) return toast.error("Assign at least one user.");
     setBusy(true);
     try {
-      const r = await api.post("/practice/tasks", { ...f, contact_id: f.contact_id || null, matter_id: f.matter_id || null,
-        due_time: f.all_day ? null : f.due_time, tags: f.tags.split(",").map(t => t.trim()).filter(Boolean) });
+      const payload = { ...f, contact_id: f.contact_id || null, matter_id: f.matter_id || null,
+        due_time: f.all_day ? null : f.due_time, tags: f.tags.split(",").map(t => t.trim()).filter(Boolean) };
+      const r = task ? await api.put(`/practice/tasks/${task.id}`, payload) : await api.post("/practice/tasks", payload);
       toast.success("Task saved");
       onSaved(r.data);
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save task"); } finally { setBusy(false); }
@@ -111,7 +112,7 @@ export const NewTaskModal = ({ defaultDate, onSaved, onClose }) => {
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto py-6 px-4" data-testid="practice-new-task-modal">
       <div className="w-full max-w-xl rounded bg-white shadow-2xl">
         <div className="h-10 bg-[#1E88E5] rounded-t flex items-center justify-between px-4 text-white text-sm">
-          <span className="inline-flex items-center gap-1 font-semibold"><Plus size={14} /> New Task</span>
+          <span className="inline-flex items-center gap-1 font-semibold"><Plus size={14} /> {task ? "Edit Task" : "New Task"}</span>
           <span className="inline-flex items-center gap-3"><span className="inline-flex items-center gap-1 text-xs"><Calculator size={13} /> Date Calculator</span><Move size={13} className="cursor-move" />
             <button type="button" onClick={onClose} data-testid="practice-new-task-close"><X size={16} /></button></span>
         </div>

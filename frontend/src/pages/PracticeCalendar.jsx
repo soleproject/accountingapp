@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NewTaskModal } from "@/components/practice/NewTaskModal";
+import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
+import { TaskPopover } from "@/components/practice/TaskPopover";
+import { toast } from "sonner";
 import { toISO } from "@/components/practice/DateTimePicker";
 import { CalendarDays, Tag, Filter, ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Calendar } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -45,6 +48,11 @@ export default function PracticeCalendar() {
   const [calOn, setCalOn] = useState(true);
   const [tasks, setTasks] = useState([]);
   const [taskModal, setTaskModal] = useState(false);
+  const [editTask, setEditTask] = useState(null);
+  const [popTask, setPopTask] = useState(null);
+  const [timeTask, setTimeTask] = useState(null);
+  const del = async () => { try { await api.delete(`/practice/tasks/${popTask.id}`); toast.success("Task deleted"); setPopTask(null); load(); } catch { toast.error("Could not delete"); } };
+  const complete = async () => { try { await api.patch(`/practice/tasks/${popTask.id}/status`, { status: "Completed" }); toast.success("Task completed"); setPopTask(null); load(); } catch { toast.error("Could not update"); } };
   const [s, e] = range(view, date);
   const loadStart = toISO(addDays(startOfWeek(new Date(s.getFullYear(), s.getMonth(), 1)), 0));
   const loadEnd = toISO(addDays(e, 42));
@@ -91,14 +99,18 @@ export default function PracticeCalendar() {
                         className={`rounded-full px-3 py-1 text-xs uppercase tracking-wide ${view === v ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>{v}</button>
               ))}
             </div>
-            {view === "Month" ? <MonthView date={date} selected={date} onPick={(d) => { setDate(d); setView("Day"); }} tasks={visible} />
-              : view === "Agenda" ? <AgendaView start={s} end={e} tasks={rangeTasks} />
-              : <TimeGrid days={days} userName={user?.name} tasks={visible} />}
+            {view === "Month" ? <MonthView date={date} selected={date} onPick={(d) => { setDate(d); setView("Day"); }} tasks={visible} onOpen={setPopTask} />
+              : view === "Agenda" ? <AgendaView start={s} end={e} tasks={rangeTasks} onOpen={setPopTask} />
+              : <TimeGrid days={days} userName={user?.name} tasks={visible} onOpen={setPopTask} />}
             </>)}
           </section>
         </div>
       </div>
       {taskModal && <NewTaskModal defaultDate={date} onClose={() => setTaskModal(false)} onSaved={() => { setTaskModal(false); load(); }} />}
+      {editTask && <NewTaskModal task={editTask} onClose={() => setEditTask(null)} onSaved={() => { setEditTask(null); load(); }} />}
+      {popTask && <TaskPopover task={popTask} onClose={() => setPopTask(null)} onLogTime={() => { setTimeTask(popTask); setPopTask(null); }}
+                               onEdit={() => { setEditTask(popTask); setPopTask(null); }} onDelete={del} onComplete={complete} />}
+      {timeTask && <NewTimeEntryModal task={timeTask} onClose={() => setTimeTask(null)} onSaved={() => setTimeTask(null)} />}
     </PracticeShell>
   );
 }
