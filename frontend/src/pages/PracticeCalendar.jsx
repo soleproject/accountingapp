@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { NewTaskModal } from "@/components/practice/NewTaskModal";
+import { toISO } from "@/components/practice/DateTimePicker";
 import { CalendarDays, Tag, Filter, ChevronDown, ChevronLeft, ChevronRight, Plus, Search, Calendar } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { PracticeShell } from "@/components/practice/PracticeShell";
@@ -39,7 +42,18 @@ export default function PracticeCalendar() {
   const { user } = useAuth();
   const [view, setView] = useState("Month");
   const [date, setDate] = useState(new Date());
+  const [calOn, setCalOn] = useState(true);
+  const [tasks, setTasks] = useState([]);
+  const [taskModal, setTaskModal] = useState(false);
   const [s, e] = range(view, date);
+  const loadStart = toISO(addDays(startOfWeek(new Date(s.getFullYear(), s.getMonth(), 1)), 0));
+  const loadEnd = toISO(addDays(e, 42));
+  const load = useCallback(() => {
+    api.get("/practice/tasks", { params: { start: loadStart, end: loadEnd } }).then(r => setTasks(r.data)).catch(() => {});
+  }, [loadStart, loadEnd]);
+  useEffect(() => { load(); }, [load]);
+  const visible = calOn ? tasks : [];
+  const rangeTasks = visible.filter(t => t.due_date >= toISO(s) && t.due_date <= toISO(e));
   const inRange = (d) => view !== "Month" && view !== "Day" && d >= new Date(s.toDateString()) && d <= new Date(e.toDateString());
   const days = view === "Day" ? [date] : Array.from({ length: Math.round((e - s) / 86400000) + 1 }, (_, i) => addDays(s, i));
 
@@ -53,16 +67,17 @@ export default function PracticeCalendar() {
           <Pill testId="practice-cal-tags"><Tag size={14} /> Tags <ChevronDown size={12} /></Pill>
           <Pill testId="practice-cal-filter"><Filter size={14} /> <ChevronDown size={12} /></Pill>
           <Pill testId="practice-cal-sync"><Calendar size={14} /> Sync Your Calendar</Pill>
-          <button type="button" data-testid="practice-cal-new-task" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Task</button>
+          <button type="button" onClick={() => setTaskModal(true)} data-testid="practice-cal-new-task" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Task</button>
           <button type="button" data-testid="practice-cal-new-event" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Event</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
-          <CalendarSidebar selected={date} onSelect={setDate} inRange={inRange} userName={user?.name} />
+          <CalendarSidebar selected={date} onSelect={setDate} inRange={inRange} userName={user?.name} calOn={calOn} setCalOn={setCalOn} />
           <section className="rounded border border-slate-200 bg-white p-3 space-y-3" data-testid="practice-cal-main">
             <label className="flex items-center gap-3 border-b border-slate-200 px-2">
               <Search size={16} className="text-slate-400" />
               <input placeholder="Search..." data-testid="practice-cal-search" className="flex-1 h-9 text-sm outline-none bg-transparent" />
             </label>
+            {!calOn ? <div className="py-3 text-sm font-bold uppercase tracking-wide text-slate-800" data-testid="practice-cal-none-selected">Please select at least one calendar.</div> : (<>
             <div className="flex items-center gap-2">
               <div className="inline-flex rounded-full border border-slate-300 overflow-hidden">
                 <button type="button" onClick={() => setDate(d => step(view, d, -1))} className="px-2.5 py-1 hover:bg-slate-50" data-testid="practice-cal-prev"><ChevronLeft size={14} /></button>
@@ -76,12 +91,14 @@ export default function PracticeCalendar() {
                         className={`rounded-full px-3 py-1 text-xs uppercase tracking-wide ${view === v ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-50"}`}>{v}</button>
               ))}
             </div>
-            {view === "Month" ? <MonthView date={date} selected={date} onPick={(d) => { setDate(d); setView("Day"); }} />
-              : view === "Agenda" ? <AgendaView start={s} end={e} />
-              : <TimeGrid days={days} userName={user?.name} />}
+            {view === "Month" ? <MonthView date={date} selected={date} onPick={(d) => { setDate(d); setView("Day"); }} tasks={visible} />
+              : view === "Agenda" ? <AgendaView start={s} end={e} tasks={rangeTasks} />
+              : <TimeGrid days={days} userName={user?.name} tasks={visible} />}
+            </>)}
           </section>
         </div>
       </div>
+      {taskModal && <NewTaskModal defaultDate={date} onClose={() => setTaskModal(false)} onSaved={() => { setTaskModal(false); load(); }} />}
     </PracticeShell>
   );
 }

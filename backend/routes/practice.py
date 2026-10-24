@@ -212,3 +212,42 @@ async def update_matter(matter_id: str, inp: PracticeMatterIn, user: dict = Depe
         raise HTTPException(404, "Matter not found")
     doc = await db.practice_matters.find_one({"id": matter_id}, {"_id": 0})
     return await _with_contact(doc, user)
+
+
+class PracticeTaskIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    subject: str
+    due_date: str
+    due_time: Optional[str] = None
+    all_day: bool = True
+    status: str = "Not Completed"
+    description: str = ""
+    private: bool = False
+    priority: str = "Medium"
+    repeat: str = "Never"
+    assigned_users: list[str] = Field(default_factory=list)
+    assigned_contacts: str = ""
+    tags: list[str] = Field(default_factory=list)
+    email_assignees: bool = True
+
+
+@router.get("/tasks")
+async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if start and end:
+        q["due_date"] = {"$gte": start, "$lte": end}
+    return await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", 1), ("due_time", 1)]).to_list(2000)
+
+
+@router.post("/tasks")
+async def create_task(inp: PracticeTaskIn, user: dict = Depends(_guard)):
+    if not inp.subject.strip():
+        raise HTTPException(400, "Subject is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "kind": "task", "created_at": now, "updated_at": now}
+    if doc["all_day"]:
+        doc["due_time"] = None
+    await db.practice_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc

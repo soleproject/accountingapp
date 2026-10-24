@@ -56,12 +56,12 @@ export const SidePanel = ({ title, children, testId }) => {
   );
 };
 
-export const CalendarSidebar = ({ selected, onSelect, inRange, userName }) => (
+export const CalendarSidebar = ({ selected, onSelect, inRange, userName, calOn, setCalOn }) => (
   <aside className="space-y-3" data-testid="practice-cal-sidebar">
     <SidePanel title="Mini Calendar" testId="practice-cal-mini-panel"><MiniCalendar selected={selected} onSelect={onSelect} inRange={inRange} /></SidePanel>
     <SidePanel title="Calendars" testId="practice-cal-calendars-panel">
       <label className="flex items-center gap-2 text-sm text-slate-700">
-        <input type="checkbox" defaultChecked className="h-4 w-4" data-testid="practice-cal-user-toggle" />
+        <input type="checkbox" checked={calOn} onChange={e => setCalOn(e.target.checked)} className="h-4 w-4" data-testid="practice-cal-user-toggle" />
         <span className="h-7 w-7 rounded-full bg-slate-300 grid place-items-center"><User size={16} className="text-white fill-white" /></span>{userName}
       </label>
     </SidePanel>
