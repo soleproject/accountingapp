@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { NewTaskModal } from "@/components/practice/NewTaskModal";
+import { NewEventModal } from "@/components/practice/NewEventModal";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import { TaskPopover } from "@/components/practice/TaskPopover";
 import { toast } from "sonner";
@@ -49,6 +50,8 @@ export default function PracticeCalendar() {
   const [tasks, setTasks] = useState([]);
   const [taskModal, setTaskModal] = useState(false);
   const [editTask, setEditTask] = useState(null);
+  const [eventModal, setEventModal] = useState(false);
+  const [editEvent, setEditEvent] = useState(null);
   const [popTask, setPopTask] = useState(null);
   const [timeTask, setTimeTask] = useState(null);
   const del = async () => { try { await api.delete(`/practice/tasks/${popTask.id}`); toast.success("Task deleted"); setPopTask(null); load(); } catch { toast.error("Could not delete"); } };
@@ -76,7 +79,7 @@ export default function PracticeCalendar() {
           <Pill testId="practice-cal-filter"><Filter size={14} /> <ChevronDown size={12} /></Pill>
           <Pill testId="practice-cal-sync"><Calendar size={14} /> Sync Your Calendar</Pill>
           <button type="button" onClick={() => setTaskModal(true)} data-testid="practice-cal-new-task" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Task</button>
-          <button type="button" data-testid="practice-cal-new-event" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Event</button>
+          <button type="button" onClick={() => setEventModal(true)} data-testid="practice-cal-new-event" className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Event</button>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4">
           <CalendarSidebar selected={date} onSelect={setDate} inRange={inRange} userName={user?.name} calOn={calOn} setCalOn={setCalOn} />
@@ -107,9 +110,11 @@ export default function PracticeCalendar() {
         </div>
       </div>
       {taskModal && <NewTaskModal defaultDate={date} onClose={() => setTaskModal(false)} onSaved={() => { setTaskModal(false); load(); }} />}
+      {eventModal && <NewEventModal defaultDate={date} onClose={() => setEventModal(false)} onSaved={() => { setEventModal(false); load(); }} />}
+      {editEvent && <NewEventModal event={editEvent} onClose={() => setEditEvent(null)} onSaved={() => { setEditEvent(null); load(); }} />}
       {editTask && <NewTaskModal task={editTask} onClose={() => setEditTask(null)} onSaved={() => { setEditTask(null); load(); }} />}
       {popTask && <TaskPopover task={popTask} onClose={() => setPopTask(null)} onLogTime={() => { setTimeTask(popTask); setPopTask(null); }}
-                               onEdit={() => { setEditTask(popTask); setPopTask(null); }} onDelete={del} onComplete={complete} />}
+                               onEdit={() => { (popTask.kind === "event" ? setEditEvent : setEditTask)(popTask); setPopTask(null); }} onDelete={del} onComplete={complete} />}
       {timeTask && <NewTimeEntryModal task={timeTask} onClose={() => setTimeTask(null)} onSaved={() => setTimeTask(null)} />}
     </PracticeShell>
   );

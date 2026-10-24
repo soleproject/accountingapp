@@ -432,3 +432,63 @@ async def list_time_entries_full(user: dict = Depends(_guard)):
     contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
     return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]
+
+
+class PracticeEventIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    subject: str
+    start_date: str
+    start_time: Optional[str] = "10:00"
+    end_date: str
+    end_time: Optional[str] = "11:00"
+    all_day: bool = False
+    description: str = ""
+    reminders: list[PracticeReminder] = Field(default_factory=list)
+    private: bool = False
+    location: str = ""
+    color: str = "#1E88E5"
+    priority: str = "Medium"
+    repeat: str = "Never"
+    assigned_users: list[str] = Field(default_factory=list)
+    assigned_contacts: str = ""
+    tags: list[str] = Field(default_factory=list)
+    email_assignees: bool = True
+
+
+def _event_doc(inp: PracticeEventIn) -> dict:
+    d = inp.model_dump()
+    if d["all_day"]:
+        d["start_time"] = d["end_time"] = None
+    return {**d, "kind": "event", "due_date": d["start_date"], "due_time": d["start_time"], "status": "Scheduled"}
+
+
+@router.get("/events/conflicts")
+async def event_conflicts(date: str, start: str = "00:00", end: str = "23:59", exclude: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"], "kind": "event", "start_date": date}
+    if exclude:
+        q["id"] = {"$ne": exclude}
+    out = []
+    async for e in db.practice_tasks.find(q, {"_id": 0, "id": 1, "subject": 1, "start_time": 1, "end_time": 1, "all_day": 1, "assigned_users": 1}):
+        if e.get("all_day") or ((e.get("start_time") or "00:00") < end and (e.get("end_time") or "23:59") > start):
+            out.append(e)
+    return out
+
+
+@router.post("/events")
+async def create_event(inp: PracticeEventIn, user: dict = Depends(_guard)):
+    if not inp.subject.strip():
+        raise HTTPException(400, "Subject is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **_event_doc(inp), "created_at": now, "updated_at": now}
+    await db.practice_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/events/{event_id}")
+async def update_event(event_id: str, inp: PracticeEventIn, user: dict = Depends(_guard)):
+    r = await db.practice_tasks.update_one({"id": event_id, "owner_id": user["id"]}, {"$set": {**_event_doc(inp), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not r.matched_count:
+        raise HTTPException(404, "Event not found")
+    return await db.practice_tasks.find_one({"id": event_id}, {"_id": 0})

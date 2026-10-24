@@ -7,14 +7,14 @@ import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { DateTimePicker, toISO } from "@/components/practice/DateTimePicker";
 
-const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
-const Help = ({ text }) => (
+export const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
+export const Help = ({ text }) => (
   <span className="relative group inline-flex">
     <span className="h-3.5 w-3.5 rounded-full bg-slate-400 text-white text-[9px] font-bold grid place-items-center cursor-help">?</span>
     <span className="pointer-events-none absolute left-0 top-full mt-1 z-50 hidden group-hover:block w-40 rounded bg-slate-900 px-2 py-1.5 text-[11px] font-semibold normal-case tracking-normal text-white text-center shadow-lg">{text}</span>
   </span>
 );
-const Row = ({ label, required, help, children }) => (
+export const Row = ({ label, required, help, children }) => (
   <div className="grid grid-cols-[150px_1fr] items-start gap-3 py-1.5">
     <div className="text-[12px] font-semibold uppercase tracking-wide text-slate-800 pt-2 flex items-center gap-1">{help && <Help text={help} />}{label}{required && <span className="text-red-500">*</span>}</div>
     <div>{children}</div>
@@ -24,7 +24,7 @@ const METHODS = ["Email", "Popup", "Text Message"];
 const UNITS = ["Minute(s)", "Hour(s)", "Day(s)", "Week(s)"];
 const selCls = "h-8 rounded border border-slate-300 bg-white px-2 text-sm text-slate-700 outline-none";
 
-function Reminders({ list, onChange }) {
+export function Reminders({ list, onChange }) {
   const upd = (i, k, v) => onChange(list.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
   return (
     <div className="space-y-1.5 pt-0.5" data-testid="practice-task-reminders">
@@ -41,7 +41,7 @@ function Reminders({ list, onChange }) {
   );
 }
 
-function UserPicker({ selected, options, onChange }) {
+export function UserPicker({ selected, options, onChange }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const shown = options.filter(o => !selected.includes(o) && o.toLowerCase().includes(q.toLowerCase()));
@@ -68,11 +68,11 @@ function UserPicker({ selected, options, onChange }) {
     </div>
   );
 }
-const Toggle = ({ value, onChange, testId }) => (
+export const Toggle = ({ value, onChange, testId }) => (
   <button type="button" onClick={() => onChange(!value)} data-testid={testId}
           className={`h-7 w-14 rounded border text-xs font-semibold flex items-center ${value ? "bg-[#1E88E5] border-[#1E88E5] text-white justify-start pl-2" : "bg-white border-slate-300 text-slate-700 justify-end pr-2"}`}>{value ? "Yes" : "No"}</button>
 );
-const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4">{title && <h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>}{children}</section>;
+export const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4">{title && <h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>}{children}</section>;
 
 export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
   const { user } = useAuth();
