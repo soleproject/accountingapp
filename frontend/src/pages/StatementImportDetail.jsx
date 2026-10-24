@@ -57,8 +57,14 @@ export default function StatementImportDetail() {
   }
   if (!doc) return null;
 
-  const total = (doc.transactions || [])
-    .reduce((s, t) => s + Math.abs(Number(t.amount) || 0), 0);
+  // Net change in the statement balance (ending − beginning); falls back
+  // to the sum of posted amounts when the summary balances are unknown.
+  const _bal = doc.ai_review?.summary || doc.veryfi_raw || {};
+  const _beg = _bal.beginning_balance ?? _bal.starting_balance;
+  const _end = _bal.ending_balance;
+  const net = (_beg != null && _end != null)
+    ? Number(_end) - Number(_beg)
+    : (doc.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
   const veryfi = doc.veryfi_raw || {};
 
   return (
@@ -79,7 +85,9 @@ export default function StatementImportDetail() {
             {doc.status === "needs_review"
               ? <>0 posted · {(doc.ai_rows || []).length} extracted</>
               : <>{(doc.transactions || []).length} transactions</>}
-            {total > 0 && (<> · total ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>)}
+            {doc.status !== "needs_review" && (doc.transactions || []).length > 0 && (
+              <span data-testid="stmt-detail-net"> · net {net < 0 ? "−" : ""}${Math.abs(net).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            )}
           </p>
         </div>
         <span data-testid="stmt-detail-status" className={"inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full " +
@@ -121,7 +129,7 @@ export default function StatementImportDetail() {
           reconcile to its own summary totals for this PDF, or when
           Layers 1+2 dropped rows that looked like phantom sidebars /
           balance columns. Aug 23 2026. */}
-      {(doc.ocr_reconcile_flag || (doc.ocr_dropped_rows && Object.keys(doc.ocr_dropped_rows).length > 0)) && (
+      {doc.method !== "ai_review" && (doc.ocr_reconcile_flag || (doc.ocr_dropped_rows && Object.keys(doc.ocr_dropped_rows).length > 0)) && (
         <div
           className={
             "rounded-xl border p-4 " +
@@ -144,8 +152,8 @@ export default function StatementImportDetail() {
           }>
             {doc.ocr_reconcile_flag && (
               <>
-                Veryfi's extracted line items don't add up to its own summary
-                totals on this PDF — expected ending balance{" "}
+                The extracted line items don't add up to the statement's own summary
+                totals{doc.ocr_reconcile_flag.is_liability ? " (credit-card math: beginning − payments + purchases)" : ""} — expected ending balance{" "}
                 <span className="font-mono">${Number(doc.ocr_reconcile_flag.ending_balance).toFixed(2)}</span>,
                 computed{" "}
                 <span className="font-mono">${Number(doc.ocr_reconcile_flag.computed_ending).toFixed(2)}</span>

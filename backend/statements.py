@@ -167,6 +167,7 @@ def _apply_veryfi_row_guards(lines: list[dict]) -> tuple[list[dict], dict[str, i
 
 def _statement_ocr_reconcile(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+    is_liability: bool = False,
 ) -> dict | None:
     """Layer 3: reconcile Veryfi's line items against its OWN summary
     totals extracted from the same PDF. Advisory only — MUST NEVER
@@ -175,7 +176,7 @@ def _statement_ocr_reconcile(
     the import proceed. Aug 24 2026.
     """
     try:
-        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped)
+        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped, is_liability)
     except Exception as e:  # noqa: BLE001
         logging.getLogger(__name__).warning(
             "Layer 3 reconcile skipped (shape drift): %s", e)
@@ -184,8 +185,13 @@ def _statement_ocr_reconcile(
 
 def _statement_ocr_reconcile_impl(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+    is_liability: bool = False,
 ) -> dict | None:
     if not isinstance(veryfi_data, dict):
+        return None
+    # AI Review docs carry their own liability-aware reconciliation
+    # (statement_ai_engine._reconcile) which the detail page shows.
+    if veryfi_data.get("engine") == "ai_review":
         return None
     _fields = statement_account_resolver._statement_fields(veryfi_data)
     # `_statement_fields` returns `starting_balance` (not
@@ -232,11 +238,17 @@ def _statement_ocr_reconcile_impl(
                            if float(ln.get("amount") or 0) > 0), 2)
     actual_wd = round(-sum(float(ln.get("amount") or 0) for ln in lines
                            if float(ln.get("amount") or 0) < 0), 2)
-    computed_ending = round(bb_f + actual_dep - actual_wd, 2)
+    # Credit cards / loans: payments (credits) reduce the balance owed,
+    # purchases (debits) increase it — the mirror of bank math.
+    if is_liability:
+        computed_ending = round(bb_f - actual_dep + actual_wd, 2)
+    else:
+        computed_ending = round(bb_f + actual_dep - actual_wd, 2)
     drift = round(computed_ending - eb_f, 2)
     if abs(drift) <= 0.01:
         return None
     return {
+        "is_liability": is_liability,
         "beginning_balance": bb_f,
         "ending_balance": eb_f,
         "extracted_deposits": actual_dep,
@@ -604,12 +616,7 @@ async def _process_veryfi_result(
             "Statements: dropped/flagged %d Veryfi rows (%s) — company=%s",
             sum(_dropped_rows.values()), _dropped_rows, cid,
         )
-    _reconcile_flag = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows)
-    if _reconcile_flag:
-        logging.getLogger(__name__).warning(
-            "Statements: OCR self-consistency FAILED — drift=$%.2f (%s)",
-            _reconcile_flag["drift"], cid,
-        )
+    _reconcile_flag = None  # computed once the bank account (asset vs liability) is known
 
     # -------- Period extraction --------
     # Veryfi's `period_start_date` / `period_end_date` come from OCR on the
@@ -682,6 +689,13 @@ async def _process_veryfi_result(
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
     bank_acct = next(a for a in accts if a["id"] == bank_account_id)
+    _reconcile_flag = _statement_ocr_reconcile(
+        veryfi_data, lines, _dropped_rows, is_liability=bank_acct.get("type") == "liability")
+    if _reconcile_flag:
+        logging.getLogger(__name__).warning(
+            "Statements: OCR self-consistency FAILED — drift=$%.2f (%s)",
+            _reconcile_flag["drift"], cid,
+        )
 
     candidates: list[dict] = []
     skipped_dupes = 0
@@ -1760,7 +1774,8 @@ async def reprocess_import(
     lines, _dup_flagged2 = _apply_veryfi_dup_guard(lines)
     if _dup_flagged2:
         _dropped_rows2["duplicate_row_flagged"] = _dup_flagged2
-    _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
+    _reconcile_flag2 = _statement_ocr_reconcile(
+        veryfi_data, lines, _dropped_rows2, is_liability=(bank_acct or {}).get("type") == "liability")
 
     # Recompute the statement period from the (now year-corrected) txn
     # dates, applying the same sanity check as the initial upload path:
