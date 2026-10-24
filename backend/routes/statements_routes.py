@@ -179,3 +179,17 @@ async def statements_export_xlsx(cid: str, import_id: str, user: dict = Depends(
     data, name = await statements.export_import_xlsx(cid, import_id)
     return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/companies/{cid}/statements/imports/{import_id}/source", dependencies=[Depends(require_feature("statements_ai"))])
+async def statements_source_file(cid: str, import_id: str, user: dict = Depends(get_current_user)):
+    """Stream the original uploaded statement (kept for AI Review imports)."""
+    await require_company(user, cid)
+    import statements
+    from fastapi.responses import FileResponse
+    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"filename": 1})
+    path = statements.statement_file_path(import_id) if row else None
+    if not path:
+        raise HTTPException(404, "Source file not available for this import")
+    return FileResponse(path, media_type="application/pdf" if path.endswith(".pdf") else "application/octet-stream",
+                        filename=row.get("filename") or "statement.pdf")

@@ -22,6 +22,7 @@ Auto-promote flow (Rocketsuite-style):
 """
 from __future__ import annotations
 import logging
+import os
 import re as _re
 import uuid
 from datetime import datetime, timezone
@@ -167,6 +168,7 @@ def _apply_veryfi_row_guards(lines: list[dict]) -> tuple[list[dict], dict[str, i
 
 def _statement_ocr_reconcile(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+    is_liability: bool = False,
 ) -> dict | None:
     """Layer 3: reconcile Veryfi's line items against its OWN summary
     totals extracted from the same PDF. Advisory only — MUST NEVER
@@ -175,7 +177,7 @@ def _statement_ocr_reconcile(
     the import proceed. Aug 24 2026.
     """
     try:
-        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped)
+        return _statement_ocr_reconcile_impl(veryfi_data, lines, dropped, is_liability)
     except Exception as e:  # noqa: BLE001
         logging.getLogger(__name__).warning(
             "Layer 3 reconcile skipped (shape drift): %s", e)
@@ -184,8 +186,13 @@ def _statement_ocr_reconcile(
 
 def _statement_ocr_reconcile_impl(
     veryfi_data: dict, lines: list[dict], dropped: dict[str, int],
+    is_liability: bool = False,
 ) -> dict | None:
     if not isinstance(veryfi_data, dict):
+        return None
+    # AI Review docs carry their own liability-aware reconciliation
+    # (statement_ai_engine._reconcile) which the detail page shows.
+    if veryfi_data.get("engine") == "ai_review":
         return None
     _fields = statement_account_resolver._statement_fields(veryfi_data)
     # `_statement_fields` returns `starting_balance` (not
@@ -232,11 +239,17 @@ def _statement_ocr_reconcile_impl(
                            if float(ln.get("amount") or 0) > 0), 2)
     actual_wd = round(-sum(float(ln.get("amount") or 0) for ln in lines
                            if float(ln.get("amount") or 0) < 0), 2)
-    computed_ending = round(bb_f + actual_dep - actual_wd, 2)
+    # Credit cards / loans: payments (credits) reduce the balance owed,
+    # purchases (debits) increase it — the mirror of bank math.
+    if is_liability:
+        computed_ending = round(bb_f - actual_dep + actual_wd, 2)
+    else:
+        computed_ending = round(bb_f + actual_dep - actual_wd, 2)
     drift = round(computed_ending - eb_f, 2)
     if abs(drift) <= 0.01:
         return None
     return {
+        "is_liability": is_liability,
         "beginning_balance": bb_f,
         "ending_balance": eb_f,
         "extracted_deposits": actual_dep,
@@ -249,6 +262,46 @@ def _statement_ocr_reconcile_impl(
         "drift": drift,
         "dropped_rows": dict(dropped),
     }
+
+
+async def find_duplicate_import(cid: str, doc: dict, file_sha256: str | None,
+                                exclude_import_id: str | None = None) -> dict | None:
+    """Return a prior completed import that looks like the same statement:
+    identical file bytes, or same account (last4) with an overlapping
+    period. Used to hold an upload in ``needs_review`` before posting."""
+    base = {"company_id": cid, "status": "completed", "transaction_count": {"$gt": 0}}
+    if exclude_import_id:
+        base["id"] = {"$ne": exclude_import_id}
+    if file_sha256:
+        hit = await db.statement_imports.find_one(
+            {**base, "file_sha256": file_sha256}, {"_id": 0, "id": 1, "filename": 1, "period_start": 1,
+                                                    "period_end": 1, "account_name": 1, "transaction_count": 1, "created_at": 1})
+        if hit:
+            return {**hit, "reason": "same_file"}
+    fields = statement_account_resolver._statement_fields(doc)
+    ps, pe = doc.get("period_start_date") or fields.get("period_start"), doc.get("period_end_date") or fields.get("period_end")
+    acct_num = str(fields.get("account_number") or doc.get("account_number") or "")
+    last4 = _re.sub(r"\D", "", acct_num)[-4:]
+    if not (ps and pe and last4):
+        return None
+    # Legacy rows predate `stmt_last4`; their account_name ends in "···1234".
+    q = {**base, "period_start": {"$lte": pe}, "period_end": {"$gte": ps},
+         "$or": [{"stmt_last4": last4}, {"account_name": {"$regex": f"{last4}$"}}]}
+    hit = await db.statement_imports.find_one(q, {"_id": 0, "id": 1, "filename": 1, "period_start": 1, "period_end": 1,
+                                                  "account_name": 1, "transaction_count": 1, "created_at": 1}, sort=[("created_at", -1)])
+    if hit:
+        hit["reason"] = "same_period" if (hit.get("period_start") == ps and hit.get("period_end") == pe) else "overlapping_period"
+        return hit
+    return None
+
+
+def _doc_last4(doc: dict) -> str | None:
+    try:
+        num = str(statement_account_resolver._statement_fields(doc).get("account_number") or doc.get("account_number") or "")
+    except Exception:  # noqa: BLE001
+        num = str(doc.get("account_number") or "")
+    d = _re.sub(r"\D", "", num)
+    return d[-4:] if len(d) >= 4 else None
 
 
 async def upload_statement_multi(
@@ -362,11 +415,14 @@ async def upload_statement(
     # something to poll (Veryfi calls can take 30-60 s).
     import_id = str(uuid.uuid4())
     now = now_iso()
+    import hashlib as _hl
+    _sha = _hl.sha256(file_bytes).hexdigest()
     await db.statement_imports.insert_one({
         "id": import_id,
         "company_id": cid,
         "filename": file.filename or "statement.pdf",
         "size": len(file_bytes),
+        "file_sha256": _sha,
         "method": "veryfi",
         "status": "processing",
         "transaction_count": None,
@@ -392,6 +448,18 @@ async def upload_statement(
                       "updated_at": now_iso()}},
         )
         raise HTTPException(502, f"Veryfi error: {e}")
+
+    dup = await find_duplicate_import(cid, veryfi_data, _sha, exclude_import_id=import_id)
+    if dup:
+        _f = statement_account_resolver._statement_fields(veryfi_data)
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {
+            "status": "needs_review", "held_doc": veryfi_data, "duplicate_warning": dup,
+            "stmt_last4": _doc_last4(veryfi_data),
+            "period_start": veryfi_data.get("period_start_date") or _f.get("period_start"),
+            "period_end": veryfi_data.get("period_end_date") or _f.get("period_end"),
+            "transaction_count": len(veryfi_service.extract_transactions(veryfi_data)),
+            "updated_at": now_iso()}})
+        return {"import_id": import_id, "status": "needs_review", "method": "veryfi", "duplicate_warning": dup}
 
     return await _process_veryfi_result(
         cid, import_id, veryfi_data, account_id,
@@ -604,12 +672,7 @@ async def _process_veryfi_result(
             "Statements: dropped/flagged %d Veryfi rows (%s) — company=%s",
             sum(_dropped_rows.values()), _dropped_rows, cid,
         )
-    _reconcile_flag = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows)
-    if _reconcile_flag:
-        logging.getLogger(__name__).warning(
-            "Statements: OCR self-consistency FAILED — drift=$%.2f (%s)",
-            _reconcile_flag["drift"], cid,
-        )
+    _reconcile_flag = None  # computed once the bank account (asset vs liability) is known
 
     # -------- Period extraction --------
     # Veryfi's `period_start_date` / `period_end_date` come from OCR on the
@@ -682,6 +745,13 @@ async def _process_veryfi_result(
     accts = await db.accounts.find({"company_id": cid}).to_list(2000)
     coa = [{"code": a["code"], "name": a["name"], "type": a["type"]} for a in accts]
     bank_acct = next(a for a in accts if a["id"] == bank_account_id)
+    _reconcile_flag = _statement_ocr_reconcile(
+        veryfi_data, lines, _dropped_rows, is_liability=bank_acct.get("type") == "liability")
+    if _reconcile_flag:
+        logging.getLogger(__name__).warning(
+            "Statements: OCR self-consistency FAILED — drift=$%.2f (%s)",
+            _reconcile_flag["drift"], cid,
+        )
 
     candidates: list[dict] = []
     skipped_dupes = 0
@@ -811,6 +881,7 @@ async def _process_veryfi_result(
             # already filtered out. Aug 23 2026.
             "ocr_reconcile_flag": _reconcile_flag,
             "ocr_dropped_rows": _dropped_rows or None,
+            "stmt_last4": _doc_last4(veryfi_data),
             "veryfi_document_id": (
                 str(veryfi_data.get("id")) if veryfi_data.get("id") else None
             ),
@@ -938,7 +1009,7 @@ async def list_imports(cid: str, limit: int = 50, offset: int = 0) -> dict:
     total = await db.statement_imports.count_documents({"company_id": cid})
     cursor = (
         db.statement_imports
-        .find({"company_id": cid}, {"veryfi_raw": 0, "ai_doc": 0, "ai_rows": 0})
+        .find({"company_id": cid}, {"veryfi_raw": 0, "ai_doc": 0, "ai_rows": 0, "held_doc": 0, "ai_page_texts": 0})
         .sort("created_at", DESCENDING)
         .skip(offset)
         .limit(limit)
@@ -968,7 +1039,7 @@ async def _lazy_backfill_opening_balances(cid: str) -> None:
 
 async def get_import_detail(cid: str, import_id: str) -> dict:
     """Return the import row + the transactions promoted from it."""
-    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"ai_doc": 0})
+    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"ai_doc": 0, "held_doc": 0, "ai_page_texts": 0})
     if not doc:
         raise HTTPException(404, "Import not found")
     doc = coerce(doc)
@@ -979,6 +1050,16 @@ async def get_import_detail(cid: str, import_id: str) -> dict:
             .find({"company_id": cid, "statement_import_id": import_id})
             .sort("date", 1).limit(2000)]
     doc["transactions"] = rows
+    # Held Veryfi import (duplicate guard): expose the parsed rows so the
+    # review screen can show what would post.
+    if doc.get("status") == "needs_review" and not doc.get("ai_rows"):
+        held = await db.statement_imports.find_one({"id": import_id}, {"held_doc": 1})
+        if (held or {}).get("held_doc"):
+            doc["ai_rows"] = [{
+                "post_date": ln.get("date"), "trans_date": ln.get("date"), "description": ln.get("description"),
+                "reference": None, "check_number": None, "amount": abs(float(ln.get("amount") or 0)),
+                "direction": "deposit" if float(ln.get("amount") or 0) > 0 else "withdrawal", "cardholder": None,
+            } for ln in veryfi_service.extract_transactions(held["held_doc"])]
     return doc
 
 
@@ -1760,7 +1841,8 @@ async def reprocess_import(
     lines, _dup_flagged2 = _apply_veryfi_dup_guard(lines)
     if _dup_flagged2:
         _dropped_rows2["duplicate_row_flagged"] = _dup_flagged2
-    _reconcile_flag2 = _statement_ocr_reconcile(veryfi_data, lines, _dropped_rows2)
+    _reconcile_flag2 = _statement_ocr_reconcile(
+        veryfi_data, lines, _dropped_rows2, is_liability=(bank_acct or {}).get("type") == "liability")
 
     # Recompute the statement period from the (now year-corrected) txn
     # dates, applying the same sanity check as the initial upload path:
@@ -1902,13 +1984,16 @@ async def upload_statement_ai(
         raise HTTPException(400, "File too large (max 25 MB)")
     import_id = str(uuid.uuid4())
     now = now_iso()
+    import hashlib as _hl
     await db.statement_imports.insert_one({
         "id": import_id, "company_id": cid, "filename": file.filename or "statement.pdf",
-        "size": len(file_bytes), "method": "ai_review", "status": "processing", "ai_stage": "queued",
+        "size": len(file_bytes), "file_sha256": _hl.sha256(file_bytes).hexdigest(),
+        "method": "ai_review", "status": "processing", "ai_stage": "queued",
         "transaction_count": None, "period_start": None, "period_end": None,
         "account_id": account_id, "account_name": None, "account_kind_hint": account_kind_hint,
         "veryfi_document_id": None, "created_at": now, "updated_at": now,
     })
+    _store_statement_file(import_id, file_bytes, file.filename or "statement.pdf")
     task = asyncio.create_task(_run_ai_import(
         cid, import_id, file_bytes, file.filename or "statement.pdf",
         file.content_type or "application/pdf", account_id, account_kind_hint,
@@ -1920,6 +2005,24 @@ async def upload_statement_ai(
 
 
 _AI_TASKS: set = set()
+STATEMENT_FILES_DIR = os.environ.get("STATEMENT_FILES_DIR", "/app/backend/uploads/statements")
+
+
+def _store_statement_file(import_id: str, file_bytes: bytes, filename: str) -> None:
+    """Keep the source PDF so misses can be inspected / viewed later."""
+    try:
+        os.makedirs(STATEMENT_FILES_DIR, exist_ok=True)
+        ext = ".pdf" if filename.lower().endswith(".pdf") or file_bytes[:5] == b"%PDF-" else os.path.splitext(filename)[1] or ".bin"
+        with open(os.path.join(STATEMENT_FILES_DIR, f"{import_id}{ext}"), "wb") as fh:
+            fh.write(file_bytes)
+    except OSError:
+        logging.getLogger(__name__).exception("could not persist statement file for %s", import_id)
+
+
+def statement_file_path(import_id: str) -> str | None:
+    import glob as _glob
+    hits = _glob.glob(os.path.join(STATEMENT_FILES_DIR, f"{import_id}.*"))
+    return hits[0] if hits else None
 
 
 async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, account_id,
@@ -1939,26 +2042,31 @@ async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, acc
             {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {e}", "updated_at": now_iso()}})
         return
     review = doc["ai_review"]
+    page_texts = review.pop("page_texts", None)
+    row = await db.statement_imports.find_one({"id": import_id}, {"file_sha256": 1})
+    dup = await find_duplicate_import(cid, doc, (row or {}).get("file_sha256"), exclude_import_id=import_id)
     await db.statement_imports.update_one({"id": import_id}, {"$set": {
         "ai_doc": doc, "ai_review": {k: v for k, v in review.items() if k != "rows"},
-        "ai_rows": review["rows"], "ai_stage": "reconciled",
+        "ai_rows": review["rows"], "ai_stage": "reconciled", "stmt_last4": _doc_last4(doc),
+        "ai_page_texts": page_texts, "has_source_file": statement_file_path(import_id) is not None,
         "period_start": doc.get("period_start_date"), "period_end": doc.get("period_end_date"),
-        "transaction_count": len(review["rows"]), "updated_at": now_iso()}})
-    if not review["reconciliation"]["ties"]:
+        "transaction_count": len(review["rows"]), "duplicate_warning": dup, "updated_at": now_iso()}})
+    if not review["reconciliation"]["ties"] or dup:
         await db.statement_imports.update_one(
             {"id": import_id}, {"$set": {"status": "needs_review", "ai_stage": "needs_review", "updated_at": now_iso()}})
         return
     await _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categorize_fn, is_period_closed_fn)
 
 
-async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categorize_fn, is_period_closed_fn):
+async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categorize_fn, is_period_closed_fn,
+                       method: str = "ai_review"):
     try:
         await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "processing", "ai_stage": "posting", "updated_at": now_iso()}})
         result = await _process_veryfi_result(
             cid, import_id, doc, account_id,
             categorize_fn=categorize_fn, is_period_closed_fn=is_period_closed_fn,
             account_kind_hint=account_kind_hint)
-        await db.statement_imports.update_one({"id": import_id}, {"$set": {"method": "ai_review", "ai_stage": "done", "updated_at": now_iso()}})
+        await db.statement_imports.update_one({"id": import_id}, {"$set": {"method": method, "ai_stage": "done", "updated_at": now_iso()}})
         return result
     except HTTPException as e:
         await db.statement_imports.update_one({"id": import_id}, {"$set": {"status": "failed", "error": str(e.detail), "updated_at": now_iso()}})
@@ -1972,14 +2080,16 @@ async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categ
 async def approve_ai_import(cid: str, import_id: str, categorize_fn, is_period_closed_fn) -> dict:
     # Atomic claim: only one approve wins; a failed post can be retried.
     row = await db.statement_imports.find_one_and_update(
-        {"id": import_id, "company_id": cid, "status": {"$in": ["needs_review", "failed"]}, "ai_doc": {"$exists": True}},
+        {"id": import_id, "company_id": cid, "status": {"$in": ["needs_review", "failed"]},
+         "$or": [{"ai_doc": {"$exists": True}}, {"held_doc": {"$exists": True}}]},
         {"$set": {"status": "processing", "ai_stage": "posting", "ai_approved_at": now_iso(), "updated_at": now_iso()}})
     if not row:
         if not await db.statement_imports.find_one({"id": import_id, "company_id": cid}):
             raise HTTPException(404, "Import not found")
         raise HTTPException(400, "This import is not waiting for review.")
-    return await _post_ai_doc(cid, import_id, row["ai_doc"], row.get("account_id"), row.get("account_kind_hint"),
-                              categorize_fn, is_period_closed_fn)
+    return await _post_ai_doc(cid, import_id, row.get("ai_doc") or row["held_doc"], row.get("account_id"),
+                              row.get("account_kind_hint"), categorize_fn, is_period_closed_fn,
+                              method=row.get("method") or "ai_review")
 
 
 async def reject_ai_import(cid: str, import_id: str) -> dict:

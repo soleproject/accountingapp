@@ -175,6 +175,15 @@ import Reconciliation from "@/pages/Reconciliation";
 import ReconciliationDetail from "@/pages/ReconciliationDetail";
 import BookReview from "@/pages/BookReview";
 import ClosePeriods from "@/pages/ClosePeriods";
+import PracticeHome from "@/pages/PracticeHome";
+import PracticeSettings from "@/pages/PracticeSettings";
+import PracticeContacts from "@/pages/PracticeContacts";
+import PracticeNewContact from "@/pages/PracticeNewContact";
+import PracticeContactDetail from "@/pages/PracticeContactDetail";
+import PracticeMatters from "@/pages/PracticeMatters";
+import PracticeNewMatter from "@/pages/PracticeNewMatter";
+import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
+import PracticeCalendar from "@/pages/PracticeCalendar";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -244,6 +253,16 @@ function App() {
             <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
             <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
+            <Route path="/practice" element={<Protected><PracticeHome /></Protected>} />
+            <Route path="/practice/settings" element={<Protected><PracticeSettings /></Protected>} />
+            <Route path="/practice/contacts" element={<Protected><PracticeContacts /></Protected>} />
+            <Route path="/practice/contacts/new" element={<Protected><PracticeNewContact /></Protected>} />
+            <Route path="/practice/contacts/:id" element={<Protected><PracticeContactDetail /></Protected>} />
+            <Route path="/practice/matters" element={<Protected><PracticeMatters /></Protected>} />
+            <Route path="/practice/matters/new" element={<Protected><PracticeNewMatter /></Protected>} />
+            <Route path="/practice/matters/:id" element={<Protected><PracticeMatterDetail /></Protected>} />
+            <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
+            <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

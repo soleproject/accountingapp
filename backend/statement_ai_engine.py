@@ -22,14 +22,26 @@ from datetime import date, datetime
 logger = logging.getLogger("axiom.statement_ai")
 
 MODEL = "gpt-4o"
-TEXT_PAGES_PER_CALL = 2
+TEXT_PAGES_PER_CALL = 1   # one page per call: continuation pages get full attention
 IMAGE_PAGES_PER_CALL = 2
 MIN_TEXT_CHARS = 200      # below this a page is treated as scanned → vision
-RENDER_DPI = 130
+RENDER_DPI = 200      # vision re-reads need enough resolution to keep columns apart
 TOLERANCE = 0.01
 
 
 # ---------------------------------------------------------------- pages
+def _layout_markdown(doc, page_index: int) -> str | None:
+    """Layout-aware text: tables come back as markdown with columns intact,
+    so Deposits / Withdrawals / Balance amounts can't be confused."""
+    try:
+        import pymupdf4llm
+        md = pymupdf4llm.to_markdown(doc, pages=[page_index], show_progress=False)
+        return md if md and len(md.strip()) >= MIN_TEXT_CHARS else None
+    except Exception as e:  # noqa: BLE001
+        logger.warning("statement_ai: layout markdown failed p%s: %s", page_index + 1, e)
+        return None
+
+
 def _pdf_pages(file_bytes: bytes) -> list[dict]:
     import pymupdf
     pages = []
@@ -37,12 +49,25 @@ def _pdf_pages(file_bytes: bytes) -> list[dict]:
         for i, page in enumerate(doc):
             text = page.get_text("text") or ""
             if len(text.strip()) >= MIN_TEXT_CHARS:
-                pages.append({"page": i + 1, "text": text, "image_b64": None})
+                pages.append({"page": i + 1, "text": text, "raw_text": text, "md_text": _layout_markdown(doc, i),
+                              "image_b64": None, "layout": "text"})
             else:
                 pix = page.get_pixmap(dpi=RENDER_DPI)
-                pages.append({"page": i + 1, "text": text,
-                              "image_b64": base64.b64encode(pix.tobytes("png")).decode()})
+                pages.append({"page": i + 1, "text": text, "raw_text": text,
+                              "image_b64": base64.b64encode(pix.tobytes("png")).decode(), "layout": "image"})
     return pages
+
+
+def render_pages(file_bytes: bytes, page_numbers: list[int]) -> list[dict]:
+    """Render specific PDF pages to PNG for a vision pass."""
+    import pymupdf
+    out = []
+    with pymupdf.open(stream=file_bytes, filetype="pdf") as doc:
+        for n in page_numbers:
+            if 1 <= n <= len(doc):
+                pix = doc[n - 1].get_pixmap(dpi=RENDER_DPI)
+                out.append({"page": n, "text": "", "image_b64": base64.b64encode(pix.tobytes("png")).decode()})
+    return out
 
 
 def extract_pages(file_bytes: bytes, content_type: str, filename: str) -> list[dict]:
@@ -66,13 +91,15 @@ def _chunks(pages: list[dict]) -> list[list[dict]]:
     return out
 
 
-def _content_for(pages: list[dict], intro: str) -> list[dict]:
+def _content_for(pages: list[dict], intro: str, mode: str = "raw") -> list[dict]:
     parts = [{"type": "text", "text": intro}]
     for p in pages:
         if p["image_b64"]:
             parts.append({"type": "text", "text": f"--- Page {p['page']} (image) ---"})
             mime = p.get("mime") or "image/png"
             parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{p['image_b64']}", "detail": "high"}})
+        elif mode == "markdown" and p.get("md_text"):
+            parts.append({"type": "text", "text": f"--- Page {p['page']} (layout table) ---\n{p['md_text']}"})
         else:
             parts.append({"type": "text", "text": f"--- Page {p['page']} (text) ---\n{p['text']}"})
     return parts
@@ -107,16 +134,16 @@ async def _ask_json(client, system: str, content: list[dict], *, max_tokens: int
         return json.loads(m.group(0)) if m else {}
 
 
-async def _extract_chunk(client, chunk: list[dict], intro: str) -> dict:
+async def _extract_chunk(client, chunk: list[dict], intro: str, mode: str = "raw") -> dict:
     """Extract one chunk; on output truncation split the chunk in half."""
     try:
-        return await _ask_json(client, TXN_SYSTEM, _content_for(chunk, intro), max_tokens=16000)
+        return await _ask_json(client, TXN_SYSTEM, _content_for(chunk, intro, mode), max_tokens=16000)
     except _Truncated:
         if len(chunk) == 1:
             logger.warning("statement_ai: page %s output truncated even alone", chunk[0]["page"])
             return {"transactions": []}
         mid = len(chunk) // 2
-        a, b = await asyncio.gather(_extract_chunk(client, chunk[:mid], intro), _extract_chunk(client, chunk[mid:], intro))
+        a, b = await asyncio.gather(_extract_chunk(client, chunk[:mid], intro, mode), _extract_chunk(client, chunk[mid:], intro, mode))
         return {"transactions": (a.get("transactions") or []) + (b.get("transactions") or [])}
 
 
@@ -141,6 +168,12 @@ Return ONLY JSON: {"transactions": [ {"post_date": "YYYY-MM-DD", "trans_date": "
  "reference": str|null, "check_number": str|null, "amount": number (positive), "direction": "deposit|withdrawal",
  "cardholder": str|null, "type": "purchase|payment|deposit|withdrawal|fee|interest|transfer|check|credit|other", "page": int } ] }
 Rules:
+- Pages may be given as markdown tables: read the column HEADERS and map each amount by its column
+  (e.g. "Deposits/Additions" → deposit, "Withdrawals/Subtractions" → withdrawal). An "Ending daily balance" /
+  "Balance" column is NOT a transaction amount — never emit it as a row. Empty cells mean no amount in that column.
+- Amounts like "7,000.00" are seven thousand; keep thousands separators in mind and never drop digits.
+- Table rows that are section headers or subtotals (e.g. "Payments … -$7,600.00", "Total Activity", "Totals",
+  a cardholder name with a total) are NOT transactions — skip them.
 - Include every transaction row on these pages exactly once; never summarize or skip rows. Keep the statement's row order.
 - Exclude: section subtotals/totals, per-cardholder subtotal lines, daily balance tables, "pending" items, summary boxes, marketing text.
 - "deposit" = money INTO the account (deposits, credits, refunds, payments received on a credit card).
@@ -202,13 +235,14 @@ async def analyze_statement(file_bytes: bytes, filename: str, content_type: str,
     txn_pages = {int(p) for p in (summary.get("transaction_pages") or []) if str(p).isdigit()}
     cand = [p for p in pages if not txn_pages or p["page"] in txn_pages or p["page"] >= min(txn_pages)]
 
-    async def _extract(diligent: bool) -> list[dict]:
+    async def _extract(pages_in: list[dict], missing: str | None = None, mode: str = "raw") -> list[dict]:
         intro = (f"Statement period: {period_start} to {period_end}. Account type: {summary.get('account_type')}. "
                  f"Extract all transactions from these pages.")
-        if diligent:
-            intro += (" IMPORTANT: a previous pass missed or double-counted rows — the totals did not tie to the statement "
-                      "summary. Re-read every line carefully, including continuation rows and rows at page edges.")
-        results = await asyncio.gather(*[_extract_chunk(client, chunk, intro) for chunk in _chunks(cand)])
+        if missing:
+            intro += (f" IMPORTANT: a previous pass did not tie to the statement summary — {missing}. "
+                      "Re-read every line, especially continuation rows at the top/bottom of the page and rows whose "
+                      "amount sits in a separate column. Do not invent rows; every row must be visible on the page.")
+        results = await asyncio.gather(*[_extract_chunk(client, chunk, intro, mode) for chunk in _chunks(pages_in)])
         rows = []
         for r in results:
             for t in r.get("transactions") or []:
@@ -230,17 +264,51 @@ async def analyze_statement(file_bytes: bytes, filename: str, content_type: str,
         return rows
 
     await _progress("transactions", pages=len(cand))
-    rows = await _extract(diligent=False)
+    rows = await _extract(cand)
     recon = _reconcile(summary, rows)
-    if not recon["ties"]:
-        await _progress("retry")
-        rows2 = await _extract(diligent=True)
+    recon["pass"] = "text"
+    # Escalation ladder when the raw-text pass doesn't tie:
+    #  2) layout-aware markdown tables (fixes columnar PDFs like Wells
+    #     Fargo where raw text orphans amounts from their column), then
+    #  3) vision re-read of the rendered pages. Best-scoring pass wins.
+    if not recon["ties"] and any(p.get("md_text") for p in cand):
+        await _progress("retry_layout")
+        rows2 = await _extract(cand, missing=_missing_hint(recon), mode="markdown")
         recon2 = _reconcile(summary, rows2)
+        recon2["pass"] = "layout"
         if recon2["score"] < recon["score"]:
             rows, recon = rows2, recon2
         recon["retried"] = True
+    if not recon["ties"]:
+        await _progress("retry_vision")
+        is_pdf = any(not p["image_b64"] for p in pages)
+        vision_pages = render_pages(file_bytes, [p["page"] for p in cand]) if is_pdf else cand
+        rows3 = await _extract(vision_pages, missing=_missing_hint(recon))
+        recon3 = _reconcile(summary, rows3)
+        recon3["pass"] = "vision"
+        if recon3["score"] < recon["score"]:
+            rows, recon = rows3, recon3
+        recon["retried"] = True
 
-    return _build_doc(summary, rows, recon, period_start, period_end, filename, len(pages))
+    doc = _build_doc(summary, rows, recon, period_start, period_end, filename, len(pages))
+    doc["ai_review"]["page_texts"] = [{"page": p["page"], "text": p["text"], "layout": p.get("layout"),
+                                       "scanned": bool(p["image_b64"])} for p in pages]
+    return doc
+
+
+def _missing_hint(recon: dict) -> str:
+    parts = []
+    if not recon.get("deposits_ok"):
+        d = recon.get("deposits_drift") or 0
+        parts.append(f"deposits are {'short' if d < 0 else 'over'} by ${abs(d):,.2f} "
+                     f"(extracted ${recon['deposits_extracted']:,.2f} vs stated ${recon['deposits_stated']:,.2f})")
+    if not recon.get("withdrawals_ok"):
+        d = recon.get("withdrawals_drift") or 0
+        parts.append(f"withdrawals are {'short' if d < 0 else 'over'} by ${abs(d):,.2f} "
+                     f"(extracted ${recon['withdrawals_extracted']:,.2f} vs stated ${recon['withdrawals_stated']:,.2f})")
+    if recon.get("balance_ok") is False and not parts:
+        parts.append(f"the ending balance is off by ${abs(recon.get('balance_drift') or 0):,.2f}")
+    return "; ".join(parts) or "totals did not tie"
 
 
 def _reconcile(summary: dict, rows: list[dict]) -> dict:
