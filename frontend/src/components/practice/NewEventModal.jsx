@@ -4,6 +4,7 @@ import { Plus, X, Check, Calculator, Move, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
+import { MatterPicker } from "@/components/practice/MatterPicker";
 import { DateTimePicker, toISO, fmtTime } from "@/components/practice/DateTimePicker";
 import { inp, Row, Toggle, Card, Reminders, UserPicker } from "@/components/practice/NewTaskModal";
 
@@ -74,7 +75,6 @@ export const NewEventModal = ({ defaultDate, event, onSaved, onClose }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save event"); } finally { setBusy(false); }
   };
 
-  const visibleMatters = matters.filter(m => !f.contact_id || m.contact_id === f.contact_id);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto py-6 px-4" data-testid="practice-new-event-modal">
@@ -88,9 +88,8 @@ export const NewEventModal = ({ defaultDate, event, onSaved, onClose }) => {
           <Card title="Linked To">
             <Row label="Contact"><ContactPicker value={f.contact_id} onChange={(id) => setF(p => ({ ...p, contact_id: id, matter_id: "" }))} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-event-contact" /></Row>
             <Row label="Matter">
-              <select className={inp} value={f.matter_id} onChange={set("matter_id")} data-testid="practice-event-matter">
-                <option value="">Select Matter...</option>{visibleMatters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              <MatterPicker value={f.matter_id} onChange={set("matter_id")} matters={matters} contactId={f.contact_id} contacts={contacts}
+                            onCreated={(m) => setMatters(l => [m, ...l])} onContactChange={(id) => setF(p => ({ ...p, contact_id: id }))} testId="practice-event-matter" />
             </Row>
           </Card>
           <Card title="Event">

@@ -5,6 +5,7 @@ import { RichNotes } from "@/components/practice/RichNotes";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
+import { MatterPicker } from "@/components/practice/MatterPicker";
 import { DateTimePicker, toISO } from "@/components/practice/DateTimePicker";
 
 export const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
@@ -106,7 +107,6 @@ export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save task"); } finally { setBusy(false); }
   };
 
-  const visibleMatters = matters.filter(m => !f.contact_id || m.contact_id === f.contact_id);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center overflow-y-auto py-6 px-4" data-testid="practice-new-task-modal">
@@ -120,9 +120,8 @@ export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
           <Card title="Linked To">
             <Row label="Contact"><ContactPicker value={f.contact_id} onChange={(id) => setF(p => ({ ...p, contact_id: id, matter_id: "" }))} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-task-contact" /></Row>
             <Row label="Matter">
-              <select className={inp} value={f.matter_id} onChange={set("matter_id")} data-testid="practice-task-matter">
-                <option value="">Select Matter...</option>{visibleMatters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              <MatterPicker value={f.matter_id} onChange={set("matter_id")} matters={matters} contactId={f.contact_id} contacts={contacts}
+                            onCreated={(m) => setMatters(l => [m, ...l])} onContactChange={(id) => setF(p => ({ ...p, contact_id: id }))} testId="practice-task-matter" />
             </Row>
           </Card>
           <Card title="Task">

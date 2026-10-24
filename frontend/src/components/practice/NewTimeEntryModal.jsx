@@ -6,8 +6,9 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { toISO } from "@/components/practice/DateTimePicker";
-import { SearchSelect, DEFAULT_ITEMS, MiniModal } from "@/components/practice/SearchSelect";
+import { SearchSelect, DEFAULT_ITEMS } from "@/components/practice/SearchSelect";
 import { NewItemModal } from "@/components/practice/NewItemModal";
+import { MatterPicker } from "@/components/practice/MatterPicker";
 
 const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const Row = ({ label, required, help, sub, children }) => (
@@ -32,7 +33,6 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   const [busy, setBusy] = useState(false);
   const [customItems, setCustomItems] = useState([]);
   const items = [...DEFAULT_ITEMS, ...customItems.map(i => ({ id: i.id, label: i.name, code: i.code, price: i.price, use_item_price: i.use_item_price }))];
-  const [newMatter, setNewMatter] = useState(null);
   const [newItem, setNewItem] = useState(null);
   const [f, setF] = useState({
     contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: "", date: task?.due_date || toISO(new Date()),
@@ -84,7 +84,6 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save time entry"); } finally { setBusy(false); }
   };
 
-  const visibleMatters = matters.filter(m => !f.contact_id || m.contact_id === f.contact_id);
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/40 flex items-start justify-center overflow-y-auto py-6 px-4" data-testid="practice-time-entry-modal">
@@ -97,9 +96,8 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           <Card title="Linked To">
             <Row label="Contact" required><ContactPicker value={f.contact_id} onChange={(id) => setF(p => ({ ...p, contact_id: id, matter_id: "" }))} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-te-contact" /></Row>
             <Row label="Matter" required>
-              <SearchSelect value={f.matter_id} onChange={set("matter_id")} placeholder="Select Matter..." testId="practice-te-matter"
-                            options={visibleMatters.map(m => ({ id: m.id, label: m.name }))} newLabel="New Matter"
-                            onNew={() => f.contact_id ? setNewMatter({ name: "" }) : toast.error("Select a contact first.")} />
+              <MatterPicker value={f.matter_id} onChange={set("matter_id")} matters={matters} contactId={f.contact_id} contacts={contacts}
+                            onCreated={(m) => setMatters(l => [m, ...l])} onContactChange={(id) => setF(p => ({ ...p, contact_id: id }))} testId="practice-te-matter" />
             </Row>
           </Card>
           <Card title="Time Entries">
@@ -136,23 +134,6 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
           </div>
         </div>
       </div>
-      {newMatter && (
-        <MiniModal title="New Matter" onClose={() => setNewMatter(null)} testId="practice-te-new-matter-modal">
-          <div className="text-xs text-slate-600">Contact: <span className="font-semibold text-slate-800">{contacts.find(c => c.id === f.contact_id)?.display_name}</span></div>
-          <input autoFocus className={inp} placeholder="Matter Name..." value={newMatter.name} onChange={e => setNewMatter({ name: e.target.value })} data-testid="practice-te-new-matter-name" />
-          <div className="flex gap-2">
-            <button type="button" data-testid="practice-te-new-matter-save" className="rounded bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"
-                    onClick={async () => {
-                      if (!newMatter.name.trim()) return toast.error("Matter name is required.");
-                      try {
-                        const r = await api.post("/practice/matters", { contact_id: f.contact_id, name: newMatter.name, assigned_to: user?.name || "" });
-                        setMatters(l => [r.data, ...l]); setF(p => ({ ...p, matter_id: r.data.id })); setNewMatter(null); toast.success("Matter created");
-                      } catch (e) { toast.error(e?.response?.data?.detail || "Could not create matter"); }
-                    }}>Save</button>
-            <button type="button" onClick={() => setNewMatter(null)} className="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-700">Cancel</button>
-          </div>
-        </MiniModal>
-      )}
       {newItem && <NewItemModal onClose={() => setNewItem(false)} onSaved={(it) => { setCustomItems(l => [...l, it]); setNewItem(false); setF(p => ({ ...p, item: it.id, ...(it.use_item_price ? { hourly_rate: it.price } : {}) })); }} />}
     </div>
   );
