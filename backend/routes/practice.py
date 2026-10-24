@@ -537,3 +537,44 @@ async def update_time_entry(entry_id: str, inp: PracticeTimeEntryIn, user: dict 
             "updated_at": datetime.now(timezone.utc).isoformat()}
     await db.practice_time_entries.update_one({"id": entry_id}, {"$set": data})
     return {**doc, **data}
+
+
+@router.get("/activity")
+async def activity_feed(user: dict = Depends(_guard)):
+    uid = user["id"]
+    out = []
+    contacts = {c["id"]: c async for c in db.practice_contacts.find({"owner_id": uid}, {"_id": 0})}
+    matters = {m["id"]: m async for m in db.practice_matters.find({"owner_id": uid}, {"_id": 0})}
+    def re(cid=None, mid=None, extra=None):
+        parts = [{"label": _display_name(contacts[cid]), "to": f"/practice/contacts/{cid}"}] if cid in contacts else []
+        if mid in matters:
+            parts.append({"label": matters[mid]["name"], "to": f"/practice/matters/{mid}"})
+        if extra:
+            parts.append({"label": extra})
+        return parts
+    for c in contacts.values():
+        out.append({"at": c["created_at"], "text": f"Created a new client: {_display_name(c)}.", "re": re(c["id"])})
+    for m in matters.values():
+        out.append({"at": m["created_at"], "text": f"Created a new matter: {m['name']}.", "re": re(m["contact_id"], m["id"])})
+    async for t in db.practice_tasks.find({"owner_id": uid}, {"_id": 0}):
+        kind = "event" if t.get("kind") == "event" else "task"
+        out.append({"at": t["created_at"], "text": f"Created a new {kind}: {t['subject']}.", "re": re(t.get("contact_id"), t.get("matter_id"), t["subject"])})
+        if t.get("status") == "Completed":
+            out.append({"at": t.get("updated_at") or t["created_at"], "text": f"Completed a task: {t['subject']}.", "re": re(t.get("contact_id"), t.get("matter_id"), t["subject"])})
+    async for e in db.practice_time_entries.find({"owner_id": uid}, {"_id": 0}):
+        out.append({"at": e["created_at"], "text": f"Created a new time entry: {e.get('hours', 0):.2f} hrs / ${e.get('total', 0):.2f}.", "re": re(e.get("contact_id"), e.get("matter_id"))})
+    async for n in db.practice_notes.find({"owner_id": uid}, {"_id": 0}):
+        out.append({"at": n["created_at"], "text": n["text"], "re": []})
+    out.sort(key=lambda x: x["at"], reverse=True)
+    return out[:200]
+
+
+@router.post("/activity")
+async def post_activity(body: dict, user: dict = Depends(_guard)):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Enter something first.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "text": text, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_notes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc

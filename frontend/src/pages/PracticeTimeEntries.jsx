@@ -109,7 +109,7 @@ export default function PracticeTimeEntries() {
                       <td className="px-2 py-5 text-slate-700">{hrs(r.hours)}</td>
                       <td className="px-2 py-5 text-slate-700">{usd(r.hourly_rate)}</td>
                       <td className="px-2 py-5 text-slate-700">{usd(r.billable ? r.total : 0)}</td>
-                      <td className="px-2 py-5"><span className="text-[#1E88E5]">{r.billed_by}</span></td>
+                      <td className="px-2 py-5"><button type="button" onClick={() => nav("/practice/users/me")} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-billed-by-${r.id}`}>{r.billed_by}</button></td>
                       <td className="px-2 py-5"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className="text-[#1E88E5] hover:underline">{r.contact_name}</button></td>
                       <td className="px-2 py-5"><button type="button" onClick={() => nav(`/practice/matters/${r.matter_id}`)} className="text-[#1E88E5] hover:underline">{r.matter_name}</button></td>
                     </tr>
