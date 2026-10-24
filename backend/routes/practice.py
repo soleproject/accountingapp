@@ -214,7 +214,15 @@ async def update_matter(matter_id: str, inp: PracticeMatterIn, user: dict = Depe
     return await _with_contact(doc, user)
 
 
+class PracticeReminder(BaseModel):
+    method: str = "Popup"
+    amount: int = 10
+    unit: str = "Minute(s)"
+
+
 class PracticeTaskIn(BaseModel):
+    reminders: list[PracticeReminder] = Field(default_factory=list)
+    save_reminders: bool = True
     contact_id: Optional[str] = None
     matter_id: Optional[str] = None
     subject: str
@@ -230,6 +238,12 @@ class PracticeTaskIn(BaseModel):
     assigned_contacts: str = ""
     tags: list[str] = Field(default_factory=list)
     email_assignees: bool = True
+
+
+@router.get("/tasks/reminder-defaults")
+async def reminder_defaults(user: dict = Depends(_guard)):
+    doc = await db.practice_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "default_reminders": 1})
+    return (doc or {}).get("default_reminders") or []
 
 
 @router.get("/tasks")
@@ -248,6 +262,8 @@ async def create_task(inp: PracticeTaskIn, user: dict = Depends(_guard)):
     doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "kind": "task", "created_at": now, "updated_at": now}
     if doc["all_day"]:
         doc["due_time"] = None
+    if inp.save_reminders and inp.reminders:
+        await db.practice_profiles.update_one({"user_id": user["id"]}, {"$set": {"default_reminders": doc["reminders"]}}, upsert=True)
     await db.practice_tasks.insert_one(doc)
     doc.pop("_id", None)
     return doc

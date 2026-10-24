@@ -7,7 +7,7 @@ const TOOLS = [
   ["insertOrderedList", ListOrdered], ["insertUnorderedList", List], null, ["code", Code],
 ];
 
-export const RichNotes = ({ value, onChange, testId = "practice-rich-notes" }) => {
+export const RichNotes = ({ value, onChange, testId = "practice-rich-notes", placeholder = "Add Notes...", minHeight = 200 }) => {
   const [open, setOpen] = useState(!!value);
   const ref = useRef(null);
 
@@ -33,7 +33,7 @@ export const RichNotes = ({ value, onChange, testId = "practice-rich-notes" }) =
   if (!open) {
     return (
       <button type="button" onClick={() => setOpen(true)} data-testid={`${testId}-collapsed`}
-              className="w-full h-10 rounded border border-slate-300 px-3 text-left text-[15px] text-slate-400 bg-white">Add Notes...</button>
+              className="w-full h-10 rounded border border-slate-300 px-3 text-left text-[15px] text-slate-400 bg-white">{placeholder}</button>
     );
   }
   return (
@@ -50,7 +50,7 @@ export const RichNotes = ({ value, onChange, testId = "practice-rich-notes" }) =
       </div>
       <div ref={ref} contentEditable suppressContentEditableWarning autoFocus data-testid={`${testId}-editor`}
            onInput={() => onChange(ref.current?.innerHTML || "")}
-           className="min-h-[200px] px-3 py-2 text-[15px] text-slate-700 outline-none" />
+           style={{ minHeight }} className="px-3 py-2 text-[15px] text-slate-700 outline-none" />
     </div>
   );
 };
