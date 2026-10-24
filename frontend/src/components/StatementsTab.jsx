@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Upload, Loader2, FileText, Trash2, ChevronRight, CheckCircle2, RotateCw, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { Gate } from "@/components/Entitlements";
 
 /**
@@ -34,6 +34,9 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
   // to avoid burning splitter credits on regular monthly statements.
   // Auto-forced ON in the modal when the dropped file is a .zip.
   const [modalIsMulti, setModalIsMulti] = useState(false);
+  // Extraction engine: "veryfi" (default) | "ai_review" — remembered per company.
+  const [engine, setEngine] = useState(() => localStorage.getItem(`stmt_engine_${companyId}`) || "veryfi");
+  const pickEngine = (v) => { setEngine(v); localStorage.setItem(`stmt_engine_${companyId}`, v); };
 
   const loadAssets = useCallback(async () => {
     try {
@@ -92,6 +95,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
       const fd = new FormData();
       fd.append("file", file);
       if (isMulti) fd.append("is_multi_statement", "true");
+      if (engine === "ai_review" && !isMulti) fd.append("engine", "ai_review");
       // Precedence: per-file modal override > top-of-page dropdown.
       const effectiveAccountId = kindHintOverride ?? accountId;
       if (effectiveAccountId && !String(effectiveAccountId).startsWith("auto")) {
@@ -108,6 +112,15 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
       // Multi-statement path returns immediately with `status: 'splitting'`
       // and no txn count yet. Individual child statements land later via
       // Veryfi webhook — the imports table polls to surface them.
+      if (r.data?.method === "ai_review" && r.data?.status === "processing") {
+        setUploading(u => u.map(x => x.tempId === id
+          ? { ...x, file: null, status: "ai_processing", importId: r.data.import_id }
+          : x));
+        toast.success(`${file.name} → AI Review started. It posts automatically when the totals tie; otherwise it waits for your approval.`, { duration: 8000 });
+        _startSplitPoll(r.data.import_id);
+        loadImports();
+        return;
+      }
       if (r.data?.status === "splitting") {
         setUploading(u => u.map(x => x.tempId === id
           ? { ...x, file: null, status: "splitting",
@@ -255,11 +268,24 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
         const r = await api.get(`/companies/${companyId}/statements/imports`);
         setImports(r.data.imports || []);
         const parent = (r.data.imports || []).find(x => x.id === parentImportId);
-        if (parent && parent.status !== "splitting") {
+        if (parent && parent.status !== "splitting" && parent.status !== "processing") {
           clearInterval(iv);
+          if (parent.method === "ai_review") {
+            setUploading(u => u.map(x => x.importId === parentImportId
+              ? { ...x, status: parent.status === "failed" ? "failed" : parent.status === "needs_review" ? "needs_review" : "completed", error: parent.error || null,
+                  transactionCount: parent.transaction_count, accountName: parent.account_name }
+              : x));
+            if (parent.status === "needs_review") {
+              toast.warning(`${parent.filename}: AI totals don't tie to the statement summary — review before posting.`, { duration: 10000 });
+            } else if (parent.status === "completed") {
+              toast.success(`${parent.filename} → ${parent.transaction_count} txns posted (AI Review, totals tie ✓)`, { duration: 8000 });
+            } else if (parent.status === "failed") {
+              toast.error(`${parent.filename}: ${parent.error || "AI Review failed"}`, { duration: 10000 });
+            }
+          }
         }
       } catch { /* keep polling — transient errors */ }
-    }, 8000);
+    }, 5000);
   };
 
   const clearCompleted = () => {
@@ -322,8 +348,8 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
     }
   };
 
-  const activeUploads   = uploading.filter(x => x.status === "processing" || x.status === "queued" || x.status === "splitting");
-  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed");
+  const activeUploads   = uploading.filter(x => x.status === "processing" || x.status === "queued" || x.status === "splitting" || x.status === "ai_processing");
+  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed" || x.status === "needs_review");
 
   return (
     <div className="space-y-4" data-testid="statements-tab">
@@ -523,6 +549,26 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
                 </label>
               ))}
             </div>
+            <div className="mt-4" data-testid="stmt-engine-switch">
+              <div className="text-xs font-semibold text-slate-700 mb-1.5">Extraction engine</div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { v: "veryfi",    label: "Veryfi OCR",        hint: "Current default. Supports zip / multi-statement splitting." },
+                  { v: "ai_review", label: "AI Review (beta)",  hint: "GPT-4o reads the statement, reconciles totals, and holds for your approval if they don't tie." },
+                ].map(o => (
+                  <button
+                    key={o.v}
+                    type="button"
+                    onClick={() => pickEngine(o.v)}
+                    data-testid={`stmt-engine-${o.v}`}
+                    className={`text-left p-2.5 rounded-lg border transition ${engine === o.v ? "border-indigo-500 bg-indigo-50" : "border-slate-200 hover:bg-slate-50"}`}
+                  >
+                    <div className="text-sm font-medium text-slate-800">{o.label}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{o.hint}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
             <label className="flex items-center gap-2 mt-4 text-xs text-slate-600 cursor-pointer">
               <input
                 type="checkbox"
@@ -599,6 +645,16 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
         {entry.status === "processing" && (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
             <Loader2 size={12} className="animate-spin" /> processing
+          </span>
+        )}
+        {entry.status === "needs_review" && (
+          <Link to={`/connections/imports/${entry.importId}`} className="text-xs text-rose-700 font-semibold inline-flex items-center gap-1 hover:underline" data-testid="stmt-upload-needs-review">
+            Totals don't tie · Review before posting →
+          </Link>
+        )}
+        {entry.status === "ai_processing" && (
+          <span className="text-xs text-indigo-700 inline-flex items-center gap-1" data-testid="stmt-upload-ai-processing">
+            <Loader2 size={12} className="animate-spin" /> AI Review in progress…
           </span>
         )}
         {entry.status === "splitting" && (
@@ -747,7 +803,10 @@ function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
                 {r.account_name ?? "—"}
               </td>
               <td className="px-4 py-2 text-slate-500 font-mono-num text-xs">
-                {r.method}
+                {r.method === "ai_review" ? <span className="text-indigo-700 font-semibold">AI Review</span> : r.method}
+                {r.method === "ai_review" && r.status === "processing" && r.ai_stage && (
+                  <span className="ml-1 text-[10px] text-slate-400">· {r.ai_stage}</span>
+                )}
               </td>
               <td className="px-4 py-2 text-right tabular-nums text-slate-700">
                 {r.transaction_count ?? "—"}
@@ -759,6 +818,16 @@ function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
                 <StatusPill status={r.status} />
               </td>
               <td className="px-4 py-2 text-right">
+                {r.status === "needs_review" && (
+                  <Link
+                    to={`/connections/imports/${r.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="inline-flex items-center rounded-full bg-rose-600 text-white text-[11px] font-semibold px-2.5 py-0.5 mr-2 hover:bg-rose-700"
+                    data-testid={`stmt-import-review-${r.id}`}
+                  >
+                    Review
+                  </Link>
+                )}
                 {r.status === "completed" && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onReprocess(r); }}
@@ -794,10 +863,12 @@ function StatusPill({ status }) {
     splitting:  "bg-indigo-100 text-indigo-800",
     partial:    "bg-yellow-100 text-yellow-800",
     failed:     "bg-red-100 text-red-800",
+    needs_review: "bg-rose-100 text-rose-800",
+    rejected:   "bg-slate-200 text-slate-600",
   };
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${map[status] ?? "bg-slate-100 text-slate-700"}`}>
-      {status ?? "—"}
+      {status === "needs_review" ? "needs review" : (status ?? "—")}
     </span>
   );
 }

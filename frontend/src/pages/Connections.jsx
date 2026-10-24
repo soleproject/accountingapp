@@ -164,7 +164,7 @@ export default function Connections() {
         </h1>
         <p className="text-slate-500 text-sm mt-1">
           {importsOnly
-            ? "Upload bank-statement PDFs and let Veryfi OCR pull the transactions."
+            ? "Upload bank-statement PDFs — Veryfi OCR or AI Review (GPT-4o) pulls the transactions."
             : "Connect real bank accounts via Plaid, or upload bank-statement PDFs for Veryfi OCR."}
         </p>
       </div>

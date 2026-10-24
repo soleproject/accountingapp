@@ -74,12 +74,22 @@ async def statements_upload(
     # webhook and become child `statement_imports` rows under a parent.
     # Auto-forced True when the filename ends with `.zip`.
     is_multi_statement: bool = Form(False),
+    # "veryfi" (default) | "ai_review" — GPT-4o extraction with a
+    # reconciliation gate (statements.upload_statement_ai).
+    engine: str | None = Form(None),
     user: dict = Depends(get_current_user),
 ):
     await require_company(user, cid)
     import statements
     _fname = (file.filename or "").lower()
     _is_multi = bool(is_multi_statement) or _fname.endswith(".zip")
+    if (engine or "").lower() == "ai_review" and not _is_multi:
+        return await statements.upload_statement_ai(
+            cid, file, account_id or None,
+            categorize_fn=categorize_transaction,
+            is_period_closed_fn=is_period_closed,
+            account_kind_hint=account_kind_hint,
+        )
     if _is_multi:
         return await statements.upload_statement_multi(
             cid, file,
@@ -144,3 +154,28 @@ async def statements_reprocess(
     )
 
 
+
+
+@router.post("/companies/{cid}/statements/imports/{import_id}/approve", dependencies=[Depends(require_feature("statements_ai"))])
+async def statements_approve(cid: str, import_id: str, user: dict = Depends(get_current_user)):
+    """Post an AI Review import that was held because its totals didn't tie."""
+    await require_company(user, cid)
+    import statements
+    return await statements.approve_ai_import(
+        cid, import_id, categorize_fn=categorize_transaction, is_period_closed_fn=is_period_closed)
+
+
+@router.post("/companies/{cid}/statements/imports/{import_id}/reject", dependencies=[Depends(require_feature("statements_ai"))])
+async def statements_reject(cid: str, import_id: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    import statements
+    return await statements.reject_ai_import(cid, import_id)
+
+
+@router.get("/companies/{cid}/statements/imports/{import_id}/export.xlsx", dependencies=[Depends(require_feature("statements_ai"))])
+async def statements_export_xlsx(cid: str, import_id: str, user: dict = Depends(get_current_user)):
+    await require_company(user, cid)
+    import statements
+    data, name = await statements.export_import_xlsx(cid, import_id)
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})

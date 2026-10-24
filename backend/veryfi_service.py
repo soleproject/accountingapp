@@ -445,6 +445,10 @@ def extract_transactions(veryfi_data: dict) -> list[dict]:
             "amount": round(amt, 2),
             "veryfi_category": veryfi_category,       # None when feature is off
             "veryfi_vendor": veryfi_vendor or None,
+            # AI Review engine extras (None for Veryfi docs).
+            "check_number": t.get("check_number") or None,
+            "reference": t.get("reference") or None,
+            "cardholder": t.get("cardholder") or None,
         })
 
     # Shape 1: top-level transactions

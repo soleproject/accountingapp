@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { ChevronLeft, Loader2 } from "lucide-react";
+import { AiReviewPanel, AiRowsTable } from "@/components/AiReviewPanel";
 
 /**
  * Statement import detail — shows the extracted transactions from one
@@ -16,6 +17,7 @@ export default function StatementImportDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     if (!currentId || !importId) return;
     let cancelled = false;
@@ -31,7 +33,13 @@ export default function StatementImportDetail() {
       }
     })();
     return () => { cancelled = true; };
-  }, [currentId, importId]);
+  }, [currentId, importId, reloadKey]);
+  // AI Review imports still processing — poll until they settle.
+  useEffect(() => {
+    if (doc?.method !== "ai_review" || doc?.status !== "processing") return;
+    const t = setTimeout(() => setReloadKey(k => k + 1), 4000);
+    return () => clearTimeout(t);
+  }, [doc]);
 
   if (loading) {
     return (
@@ -68,22 +76,32 @@ export default function StatementImportDetail() {
             {doc.filename}
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            {(doc.transactions || []).length} transactions
+            {doc.status === "needs_review"
+              ? <>0 posted · {(doc.ai_rows || []).length} extracted</>
+              : <>{(doc.transactions || []).length} transactions</>}
             {total > 0 && (<> · total ${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</>)}
           </p>
         </div>
-        <span className={"inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full " +
+        <span data-testid="stmt-detail-status" className={"inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full " +
           (doc.status === "completed"
             ? "bg-emerald-100 text-emerald-800"
             : doc.status === "failed"
               ? "bg-red-100 text-red-800"
-              : "bg-amber-100 text-amber-800")}>
-          {doc.status}
+              : doc.status === "needs_review"
+                ? "bg-rose-100 text-rose-800"
+                : "bg-amber-100 text-amber-800")}>
+          {doc.status === "needs_review" ? "needs review" : doc.status}
+          {doc.method === "ai_review" && doc.status === "processing" && doc.ai_stage ? ` · ${doc.ai_stage}` : ""}
         </span>
       </div>
 
+      {doc.method === "ai_review" && doc.ai_review && (
+        <AiReviewPanel doc={doc} companyId={currentId} onChanged={() => setReloadKey(k => k + 1)} />
+      )}
+      {doc.method === "ai_review" && doc.status === "needs_review" && <AiRowsTable rows={doc.ai_rows} />}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <MetaCard label="METHOD" value={`${doc.method || "—"} · bank_statement`} />
+        <MetaCard label="METHOD" value={doc.method === "ai_review" ? "AI Review · GPT-4o" : `${doc.method || "—"} · bank_statement`} />
         <MetaCard label="ACCOUNT" value={
           doc.account_code && doc.account_name
             ? `${doc.account_code} · ${doc.account_name}`

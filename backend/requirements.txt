@@ -159,3 +159,6 @@ wrapt==2.2.2
 yarl==1.24.2
 zipp==4.1.0
 zstandard==0.25.0
+pymupdf==2.0
+pymupdf4llm==2.0
+pymupdf_layout==2.0
