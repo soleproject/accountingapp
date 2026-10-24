@@ -22,6 +22,7 @@ Auto-promote flow (Rocketsuite-style):
 """
 from __future__ import annotations
 import logging
+import os
 import re as _re
 import uuid
 from datetime import datetime, timezone
@@ -1008,7 +1009,7 @@ async def list_imports(cid: str, limit: int = 50, offset: int = 0) -> dict:
     total = await db.statement_imports.count_documents({"company_id": cid})
     cursor = (
         db.statement_imports
-        .find({"company_id": cid}, {"veryfi_raw": 0, "ai_doc": 0, "ai_rows": 0, "held_doc": 0})
+        .find({"company_id": cid}, {"veryfi_raw": 0, "ai_doc": 0, "ai_rows": 0, "held_doc": 0, "ai_page_texts": 0})
         .sort("created_at", DESCENDING)
         .skip(offset)
         .limit(limit)
@@ -1038,7 +1039,7 @@ async def _lazy_backfill_opening_balances(cid: str) -> None:
 
 async def get_import_detail(cid: str, import_id: str) -> dict:
     """Return the import row + the transactions promoted from it."""
-    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"ai_doc": 0, "held_doc": 0})
+    doc = await db.statement_imports.find_one({"id": import_id, "company_id": cid}, {"ai_doc": 0, "held_doc": 0, "ai_page_texts": 0})
     if not doc:
         raise HTTPException(404, "Import not found")
     doc = coerce(doc)
@@ -1992,6 +1993,7 @@ async def upload_statement_ai(
         "account_id": account_id, "account_name": None, "account_kind_hint": account_kind_hint,
         "veryfi_document_id": None, "created_at": now, "updated_at": now,
     })
+    _store_statement_file(import_id, file_bytes, file.filename or "statement.pdf")
     task = asyncio.create_task(_run_ai_import(
         cid, import_id, file_bytes, file.filename or "statement.pdf",
         file.content_type or "application/pdf", account_id, account_kind_hint,
@@ -2003,6 +2005,24 @@ async def upload_statement_ai(
 
 
 _AI_TASKS: set = set()
+STATEMENT_FILES_DIR = os.environ.get("STATEMENT_FILES_DIR", "/app/backend/uploads/statements")
+
+
+def _store_statement_file(import_id: str, file_bytes: bytes, filename: str) -> None:
+    """Keep the source PDF so misses can be inspected / viewed later."""
+    try:
+        os.makedirs(STATEMENT_FILES_DIR, exist_ok=True)
+        ext = ".pdf" if filename.lower().endswith(".pdf") or file_bytes[:5] == b"%PDF-" else os.path.splitext(filename)[1] or ".bin"
+        with open(os.path.join(STATEMENT_FILES_DIR, f"{import_id}{ext}"), "wb") as fh:
+            fh.write(file_bytes)
+    except OSError:
+        logging.getLogger(__name__).exception("could not persist statement file for %s", import_id)
+
+
+def statement_file_path(import_id: str) -> str | None:
+    import glob as _glob
+    hits = _glob.glob(os.path.join(STATEMENT_FILES_DIR, f"{import_id}.*"))
+    return hits[0] if hits else None
 
 
 async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, account_id,
@@ -2022,11 +2042,13 @@ async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, acc
             {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {e}", "updated_at": now_iso()}})
         return
     review = doc["ai_review"]
+    page_texts = review.pop("page_texts", None)
     row = await db.statement_imports.find_one({"id": import_id}, {"file_sha256": 1})
     dup = await find_duplicate_import(cid, doc, (row or {}).get("file_sha256"), exclude_import_id=import_id)
     await db.statement_imports.update_one({"id": import_id}, {"$set": {
         "ai_doc": doc, "ai_review": {k: v for k, v in review.items() if k != "rows"},
         "ai_rows": review["rows"], "ai_stage": "reconciled", "stmt_last4": _doc_last4(doc),
+        "ai_page_texts": page_texts, "has_source_file": statement_file_path(import_id) is not None,
         "period_start": doc.get("period_start_date"), "period_end": doc.get("period_end_date"),
         "transaction_count": len(review["rows"]), "duplicate_warning": dup, "updated_at": now_iso()}})
     if not review["reconciliation"]["ties"] or dup:

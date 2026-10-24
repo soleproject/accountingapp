@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, AlertTriangle, Download, Loader2, XCircle, Sparkles } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Download, Loader2, XCircle, Sparkles, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 
@@ -21,6 +21,17 @@ export function AiReviewPanel({ doc, companyId, onChanged }) {
       toast.success(kind === "approve" ? `Posted ${res.data.transaction_count} transactions` : "Import rejected — nothing was posted");
       onChanged?.();
     } catch (e) { toast.error(e?.response?.data?.detail || `Couldn't ${kind}`); }
+    finally { setBusy(null); }
+  };
+
+  const openSource = async () => {
+    setBusy("source");
+    try {
+      const res = await api.get(`/companies/${companyId}/statements/imports/${doc.id}/source`, { responseType: "blob" });
+      const url = URL.createObjectURL(new Blob([res.data], { type: "application/pdf" }));
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch { toast.error("Source file isn't available for this import"); }
     finally { setBusy(null); }
   };
 
@@ -56,9 +67,14 @@ export function AiReviewPanel({ doc, companyId, onChanged }) {
           <div className="text-sm text-slate-700 mt-1">
             {s.bank_name || "Statement"} · {s.account_type?.replace("_", " ")} {s.account_number_masked ? `· ${s.account_number_masked}` : ""} · {s.period_start} → {s.period_end}
           </div>
-          <div className="text-xs text-slate-500 mt-0.5">{r.count_withdrawals ?? 0} withdrawals · {r.count_deposits ?? 0} deposits · {review.pages} pages{r.retried ? " · second pass used" : ""}</div>
+          <div className="text-xs text-slate-500 mt-0.5">{r.count_withdrawals ?? 0} withdrawals · {r.count_deposits ?? 0} deposits · {review.pages} pages{r.retried ? ` · ${r.pass === "vision" ? "vision re-read used" : "second pass used"}` : ""}</div>
         </div>
         <div className="flex items-center gap-2">
+          {doc.has_source_file && (
+            <button onClick={openSource} disabled={busy === "source"} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-slate-300 bg-white text-xs font-semibold hover:border-slate-500" data-testid="ai-review-source">
+              {busy === "source" ? <Loader2 size={12} className="animate-spin" /> : <FileText size={12} />} View source PDF
+            </button>
+          )}
           <button onClick={download} disabled={busy === "export"} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full border border-slate-300 bg-white text-xs font-semibold hover:border-slate-500" data-testid="ai-review-export">
             {busy === "export" ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />} Export Excel
           </button>

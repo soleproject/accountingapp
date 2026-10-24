@@ -22,7 +22,7 @@ from datetime import date, datetime
 logger = logging.getLogger("axiom.statement_ai")
 
 MODEL = "gpt-4o"
-TEXT_PAGES_PER_CALL = 2
+TEXT_PAGES_PER_CALL = 1   # one page per call: continuation pages get full attention
 IMAGE_PAGES_PER_CALL = 2
 MIN_TEXT_CHARS = 200      # below this a page is treated as scanned → vision
 RENDER_DPI = 130
@@ -43,6 +43,18 @@ def _pdf_pages(file_bytes: bytes) -> list[dict]:
                 pages.append({"page": i + 1, "text": text,
                               "image_b64": base64.b64encode(pix.tobytes("png")).decode()})
     return pages
+
+
+def render_pages(file_bytes: bytes, page_numbers: list[int]) -> list[dict]:
+    """Render specific PDF pages to PNG for a vision pass."""
+    import pymupdf
+    out = []
+    with pymupdf.open(stream=file_bytes, filetype="pdf") as doc:
+        for n in page_numbers:
+            if 1 <= n <= len(doc):
+                pix = doc[n - 1].get_pixmap(dpi=RENDER_DPI)
+                out.append({"page": n, "text": "", "image_b64": base64.b64encode(pix.tobytes("png")).decode()})
+    return out
 
 
 def extract_pages(file_bytes: bytes, content_type: str, filename: str) -> list[dict]:
@@ -202,13 +214,14 @@ async def analyze_statement(file_bytes: bytes, filename: str, content_type: str,
     txn_pages = {int(p) for p in (summary.get("transaction_pages") or []) if str(p).isdigit()}
     cand = [p for p in pages if not txn_pages or p["page"] in txn_pages or p["page"] >= min(txn_pages)]
 
-    async def _extract(diligent: bool) -> list[dict]:
+    async def _extract(pages_in: list[dict], missing: str | None = None) -> list[dict]:
         intro = (f"Statement period: {period_start} to {period_end}. Account type: {summary.get('account_type')}. "
                  f"Extract all transactions from these pages.")
-        if diligent:
-            intro += (" IMPORTANT: a previous pass missed or double-counted rows — the totals did not tie to the statement "
-                      "summary. Re-read every line carefully, including continuation rows and rows at page edges.")
-        results = await asyncio.gather(*[_extract_chunk(client, chunk, intro) for chunk in _chunks(cand)])
+        if missing:
+            intro += (f" IMPORTANT: a previous pass did not tie to the statement summary — {missing}. "
+                      "Re-read every line, especially continuation rows at the top/bottom of the page and rows whose "
+                      "amount sits in a separate column. Do not invent rows; every row must be visible on the page.")
+        results = await asyncio.gather(*[_extract_chunk(client, chunk, intro) for chunk in _chunks(pages_in)])
         rows = []
         for r in results:
             for t in r.get("transactions") or []:
@@ -230,17 +243,41 @@ async def analyze_statement(file_bytes: bytes, filename: str, content_type: str,
         return rows
 
     await _progress("transactions", pages=len(cand))
-    rows = await _extract(diligent=False)
+    rows = await _extract(cand)
     recon = _reconcile(summary, rows)
+    recon["pass"] = "text"
     if not recon["ties"]:
-        await _progress("retry")
-        rows2 = await _extract(diligent=True)
+        # Vision retry: the text layer of columnar PDFs (Wells Fargo etc.)
+        # can orphan an amount from its row. Re-read the candidate pages
+        # as images with a targeted "what's missing" hint.
+        await _progress("retry_vision")
+        is_pdf = any(not p["image_b64"] for p in pages)
+        vision_pages = render_pages(file_bytes, [p["page"] for p in cand]) if is_pdf else cand
+        rows2 = await _extract(vision_pages, missing=_missing_hint(recon))
         recon2 = _reconcile(summary, rows2)
+        recon2["pass"] = "vision"
         if recon2["score"] < recon["score"]:
             rows, recon = rows2, recon2
         recon["retried"] = True
 
-    return _build_doc(summary, rows, recon, period_start, period_end, filename, len(pages))
+    doc = _build_doc(summary, rows, recon, period_start, period_end, filename, len(pages))
+    doc["ai_review"]["page_texts"] = [{"page": p["page"], "text": p["text"], "scanned": bool(p["image_b64"])} for p in pages]
+    return doc
+
+
+def _missing_hint(recon: dict) -> str:
+    parts = []
+    if not recon.get("deposits_ok"):
+        d = recon.get("deposits_drift") or 0
+        parts.append(f"deposits are {'short' if d < 0 else 'over'} by ${abs(d):,.2f} "
+                     f"(extracted ${recon['deposits_extracted']:,.2f} vs stated ${recon['deposits_stated']:,.2f})")
+    if not recon.get("withdrawals_ok"):
+        d = recon.get("withdrawals_drift") or 0
+        parts.append(f"withdrawals are {'short' if d < 0 else 'over'} by ${abs(d):,.2f} "
+                     f"(extracted ${recon['withdrawals_extracted']:,.2f} vs stated ${recon['withdrawals_stated']:,.2f})")
+    if recon.get("balance_ok") is False and not parts:
+        parts.append(f"the ending balance is off by ${abs(recon.get('balance_drift') or 0):,.2f}")
+    return "; ".join(parts) or "totals did not tie"
 
 
 def _reconcile(summary: dict, rows: list[dict]) -> dict:
