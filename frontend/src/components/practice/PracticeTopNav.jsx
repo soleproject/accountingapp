@@ -7,7 +7,7 @@ import {
 import { useAuth } from "@/lib/auth";
 
 const NAV = [
-  { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, "Calendar", "Time Entries",
+  { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, "Time Entries",
   { label: "Billing", menu: true }, { label: "Payments", menu: true },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
