@@ -32,7 +32,7 @@ export const PracticeStatTiles = () => (
 );
 
 const QUICK = [
-  ["New Contact", UserPlus, "/practice/contacts/new"], ["New Matter", Briefcase], ["New Event", CalendarDays],
+  ["New Contact", UserPlus, "/practice/contacts/new"], ["New Matter", Briefcase, "/practice/matters/new"], ["New Event", CalendarDays],
   ["New Task", ClipboardList], ["New Note", FileText], ["New Call", Phone],
   ["Send Message", MessageSquare], ["Track Time", Clock], ["Add Expense", Wallet],
   ["New Intake", FileSignature], ["New Invoice", FileInput], ["New Payment", CreditCard],
@@ -59,7 +59,7 @@ export const PracticeQuickCreate = () => {
 };
 
 const STEPS = [
-  { label: "Setup your profile", done: true, to: "/practice/settings" }, { label: "Add your logo" }, { label: "Create a matter" },
+  { label: "Setup your profile", done: true, to: "/practice/settings" }, { label: "Add your logo" }, { label: "Create a matter", to: "/practice/matters/new" },
   { label: "Track time" }, { label: "Generate an invoice" }, { label: "Create your first task" },
   { label: "Sync your calendar" }, { label: "Sync documents and files" }, { label: "Accept credit cards" },
 ];

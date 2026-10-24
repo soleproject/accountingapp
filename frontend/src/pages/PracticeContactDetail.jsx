@@ -59,6 +59,33 @@ function AboutTab({ c }) {
   );
 }
 
+function MattersTab({ contactId }) {
+  const nav = useNavigate();
+  const [rows, setRows] = useState(null);
+  useEffect(() => {
+    api.get("/practice/matters", { params: { status: "All", contact_id: contactId } }).then(r => setRows(r.data)).catch(() => setRows([]));
+  }, [contactId]);
+  if (rows === null) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
+  return (
+    <section className="rounded border border-slate-200 bg-white overflow-hidden" data-testid="practice-contact-matters">
+      {rows.length === 0 ? (
+        <div className="px-6 py-10 text-center text-sm text-slate-500">No matters yet.
+          <button type="button" onClick={() => nav(`/practice/matters/new?contact=${contactId}`)} className="ml-1 text-[#1E88E5] font-semibold" data-testid="practice-contact-matters-new">Create one</button>
+        </div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr>{["Matter", "Status", "Matter Rate", "Assigned To", "Opened"].map(h => <th key={h} className="px-4 py-2 text-left font-semibold">{h}</th>)}</tr></thead>
+          <tbody>{rows.map(m => (
+            <tr key={m.id} className="border-t border-slate-100" data-testid={`practice-contact-matter-${m.id}`}>
+              <td className="px-4 py-3 font-semibold text-[#1E88E5]">{m.name}</td><td className="px-4 py-3">{m.status}</td><td className="px-4 py-3">{m.matter_rate}</td>
+              <td className="px-4 py-3">{m.assigned_to}</td><td className="px-4 py-3 text-slate-500">{m.open_date || new Date(m.created_at).toLocaleDateString("en-US")}</td>
+            </tr>))}</tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 export default function PracticeContactDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -82,7 +109,7 @@ export default function PracticeContactDetail() {
             <button type="button" className="text-[#1E88E5]" data-testid="practice-contact-archive-btn"><Archive size={16} /></button>
             <div className="flex-1" />
             <Play size={14} className="text-[#1E88E5] fill-[#1E88E5]" />
-            <button type="button" data-testid="practice-contact-new-matter-btn"
+            <button type="button" data-testid="practice-contact-new-matter-btn" onClick={() => nav(`/practice/matters/new?contact=${id}`)}
                     className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
               New Matter <ArrowRightCircle size={14} />
             </button>
@@ -103,7 +130,7 @@ export default function PracticeContactDetail() {
               </button>
             ))}
           </div>
-          {tab === "About" ? <AboutTab c={c} /> : (
+          {tab === "About" ? <AboutTab c={c} /> : tab === "Matters" ? <MattersTab contactId={c.id} /> : (
             <section className="rounded border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500" data-testid={`practice-contact-panel-${slug(tab)}`}>
               No {tab.toLowerCase()} for {c.display_name} yet.
             </section>

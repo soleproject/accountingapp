@@ -1,6 +1,6 @@
 """Practice product — per-user profile settings (superadmin-only shell for now)."""
 from __future__ import annotations
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, Field
 import uuid
@@ -124,3 +124,75 @@ async def get_contact(contact_id: str, user: dict = Depends(_guard)):
     if not doc:
         raise HTTPException(404, "Contact not found")
     return {**doc, "display_name": _display_name(doc)}
+
+
+class PracticeMatterIn(BaseModel):
+    contact_id: str
+    name: str
+    notes: str = ""
+    matter_rate: str = "User Hourly Rate"
+    custom_rate: Optional[float] = None
+    invoice_template: str = ""
+    evergreen_retainer: bool = False
+    additional_invoice_recipients: str = ""
+    statute_of_limitations: Optional[str] = None
+    open_date: Optional[str] = None
+    close_date: Optional[str] = None
+    assigned_to: str = ""
+    originating_attorney: str = ""
+    tags: list[str] = Field(default_factory=list)
+    status: str = "Open"
+    matter_number: Optional[str] = None
+
+
+async def _with_contact(doc: dict, user: dict) -> dict:
+    c = await db.practice_contacts.find_one({"id": doc.get("contact_id"), "owner_id": user["id"]}, {"_id": 0})
+    return {**doc, "contact_name": _display_name(c) if c else "", "contact_tags": (c or {}).get("tags", [])}
+
+
+@router.get("/matters")
+async def list_matters(status: str = "Open", contact_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if status != "All":
+        q["status"] = status
+    if contact_id:
+        q["contact_id"] = contact_id
+    docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
+    return [await _with_contact(d, user) for d in docs]
+
+
+@router.get("/matters/counts")
+async def matter_counts(user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc)
+    this_month = now.strftime("%Y-%m")
+    last = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+    docs = await db.practice_matters.find({"owner_id": user["id"]}, {"_id": 0, "status": 1, "created_at": 1}).to_list(5000)
+    return {
+        "all": len(docs),
+        "open": sum(1 for d in docs if d.get("status") == "Open"),
+        "created_this_month": sum(1 for d in docs if (d.get("created_at") or "").startswith(this_month)),
+        "created_last_month": sum(1 for d in docs if (d.get("created_at") or "").startswith(last)),
+    }
+
+
+@router.post("/matters")
+async def create_matter(inp: PracticeMatterIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Matter name is required.")
+    if not await db.practice_contacts.find_one({"id": inp.contact_id, "owner_id": user["id"]}):
+        raise HTTPException(400, "Select a contact.")
+    now = datetime.now(timezone.utc).isoformat()
+    count = await db.practice_matters.count_documents({"owner_id": user["id"]})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(),
+           "matter_number": inp.matter_number or str(count + 1), "created_at": now, "updated_at": now}
+    await db.practice_matters.insert_one(doc)
+    doc.pop("_id", None)
+    return await _with_contact(doc, user)
+
+
+@router.get("/matters/{matter_id}")
+async def get_matter(matter_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_matters.find_one({"id": matter_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Matter not found")
+    return await _with_contact(doc, user)
