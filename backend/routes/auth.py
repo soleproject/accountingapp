@@ -697,19 +697,37 @@ async def share_report(
             {"id": {"$in": payer_ids}}, {"id": 1, "email": 1, "name": 1, "_id": 0},
         ).to_list(2000)
     }
-    lines = [{
-        "date": e.get("created_at"),
-        "referred_email": (payers.get(e["referred_user_id"]) or {}).get("email"),
-        "referred_name": (payers.get(e["referred_user_id"]) or {}).get("name"),
-        "gross_cents": int(e.get("gross_cents") or 0),
-        "share_cents": int(e.get("share_cents") or 0),
-        "share_bps": int(e.get("share_bps") or 0),
-        "status": e.get("status") or "accrued",
-    } for e in earnings]
+    # Custom-priced clients (affiliate_pricing) are reported separately:
+    # their payout is the margin above the floor, not a % share.
+    priced_ids = list({e["custom_pricing_id"] for e in earnings if e.get("custom_pricing_id")})
+    priced = {p["id"]: p for p in await db.affiliate_priced_clients.find(
+        {"id": {"$in": priced_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1, "cadence": 1, "floor_cents": 1},
+    ).to_list(2000)} if priced_ids else {}
+    lines = []
+    for e in earnings:
+        payer = payers.get(e["referred_user_id"]) or {}
+        gross, share = int(e.get("gross_cents") or 0), int(e.get("share_cents") or 0)
+        row = {
+            "date": e.get("created_at"),
+            "referred_email": payer.get("email"),
+            "referred_name": payer.get("name"),
+            "gross_cents": gross,
+            "share_cents": share,
+            "share_bps": int(e.get("share_bps") or 0),
+            "status": e.get("status") or "accrued",
+            "custom": False,
+        }
+        pc = priced.get(e.get("custom_pricing_id") or "")
+        if pc:
+            row.update({"custom": True, "client_name": pc.get("name"), "cadence": pc.get("cadence") or "monthly",
+                        "floor_cents": gross - share, "margin_cents": share})
+            row["referred_email"] = row["referred_email"] or pc.get("email")
+        lines.append(row)
     lines.sort(key=lambda r: r["date"] or "", reverse=True)
     accrued = sum(l["share_cents"] for l in lines if l["status"] == "accrued")
     paid_out = sum(l["share_cents"] for l in lines if l["status"] == "paid_out")
     gross_total = sum(l["gross_cents"] for l in lines)
+    custom_lines = [l for l in lines if l["custom"]]
     return {
         "start": start_iso,
         "end": end_iso,
@@ -719,6 +737,13 @@ async def share_report(
             "accrued_cents": accrued,
             "paid_out_cents": paid_out,
             "total_cents": accrued + paid_out,
+        },
+        "custom_totals": {
+            "invoice_count": len(custom_lines),
+            "gross_cents": sum(l["gross_cents"] for l in custom_lines),
+            "floor_cents": sum(l["floor_cents"] for l in custom_lines),
+            "margin_cents": sum(l["margin_cents"] for l in custom_lines),
+            "clients": len({l.get("referred_email") for l in custom_lines}),
         },
         "lines": lines,
     }

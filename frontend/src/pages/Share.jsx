@@ -528,10 +528,11 @@ function PayoutsTab() {
 
   const exportCsv = () => {
     if (!data?.lines?.length) return;
-    const header = ["date","referred_email","referred_name","gross_usd","share_usd","effective_pct","status"];
+    const header = ["date","type","referred_email","referred_name","gross_usd","floor_usd","share_usd","effective_pct","status"];
     const rows = data.lines.map(l => [
-      l.date, l.referred_email || "", l.referred_name || "",
+      l.date, l.custom ? "custom_price" : "standard", l.referred_email || "", l.client_name || l.referred_name || "",
       (l.gross_cents / 100).toFixed(2),
+      l.custom ? (l.floor_cents / 100).toFixed(2) : "",
       (l.share_cents / 100).toFixed(2),
       (l.share_bps / 100).toFixed(2) + "%",
       l.status,
@@ -547,6 +548,8 @@ function PayoutsTab() {
 
   if (!data) return <Loading />;
   const t = data.totals || {};
+  const customLines = (data.lines || []).filter(l => l.custom);
+  const standardLines = (data.lines || []).filter(l => !l.custom);
 
   return (
     <div className="space-y-5">
@@ -595,13 +598,20 @@ function PayoutsTab() {
         <SummaryTile label="Pending"    value={fmtUsd(t.accrued_cents)} accent="amber" />
       </div>
 
+      {customLines.length > 0 && <CustomPricedPayouts lines={customLines} totals={data.custom_totals || {}} />}
+
       {data.lines?.length === 0 ? (
         <EmptyBox
           title="No payouts in this window"
           body="Adjust the date range or pick a preset above."
         />
-      ) : (
+      ) : standardLines.length === 0 ? null : (
         <div className="bg-white rounded-lg border overflow-hidden" data-testid="payouts-table">
+          {customLines.length > 0 && (
+            <div className="px-3 py-2 border-b bg-slate-50/60 text-xs font-semibold text-slate-600" data-testid="payouts-standard-heading">
+              Standard referrals
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
@@ -613,7 +623,7 @@ function PayoutsTab() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {data.lines.map((l, i) => (
+              {standardLines.map((l, i) => (
                 <tr key={i}>
                   <td className="px-3 py-2 text-slate-600 text-xs">{fmtDate(l.date)}</td>
                   <td className="px-3 py-2 text-slate-800">{l.referred_email || "—"}</td>
@@ -631,6 +641,53 @@ function PayoutsTab() {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function CustomPricedPayouts({ lines, totals }) {
+  return (
+    <div className="bg-white rounded-lg border border-emerald-200 overflow-hidden" data-testid="payouts-custom-table">
+      <div className="px-3 py-2.5 border-b border-emerald-100 bg-emerald-50/60 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-xs font-semibold text-emerald-900">Custom-priced clients</div>
+          <div className="text-[11px] text-emerald-800/80">You keep everything above the floor on each invoice.</div>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-emerald-900">
+          <span>{totals.clients || 0} client{totals.clients === 1 ? "" : "s"} · {totals.invoice_count || 0} invoice{totals.invoice_count === 1 ? "" : "s"}</span>
+          <span>Billed <b className="tabular-nums">{fmtUsd(totals.gross_cents)}</b></span>
+          <span>Floor <b className="tabular-nums">{fmtUsd(totals.floor_cents)}</b></span>
+          <span className="font-semibold">Your margin <b className="tabular-nums" data-testid="payouts-custom-margin">{fmtUsd(totals.margin_cents)}</b></span>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+      <table className="w-full text-sm min-w-[560px]">
+        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <Th>Date</Th><Th>Client</Th>
+            <Th className="text-right">Billed</Th>
+            <Th className="text-right">Floor</Th>
+            <Th className="text-right">Your margin</Th>
+            <Th>Status</Th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {lines.map((l, i) => (
+            <tr key={i} data-testid="payouts-custom-row">
+              <td className="px-3 py-2 text-slate-600 text-xs">{fmtDate(l.date)}</td>
+              <td className="px-3 py-2">
+                <div className="text-slate-800">{l.client_name || l.referred_name || "—"}</div>
+                <div className="text-[11px] text-slate-500">{l.referred_email}{l.cadence === "annual" ? " · annual" : ""}</div>
+              </td>
+              <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(l.gross_cents)}</td>
+              <td className="px-3 py-2 text-right tabular-nums text-slate-500">− {fmtUsd(l.floor_cents)}</td>
+              <td className="px-3 py-2 text-right tabular-nums font-medium text-emerald-700">{fmtUsd(l.margin_cents)}</td>
+              <td className="px-3 py-2"><StatusPill status={l.status} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      </div>
     </div>
   );
 }
