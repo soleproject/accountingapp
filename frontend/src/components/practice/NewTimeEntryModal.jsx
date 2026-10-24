@@ -26,7 +26,7 @@ const Toggle = ({ value, onChange, testId }) => (
 const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4"><h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>{children}</section>;
 
 
-export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
+export const NewTimeEntryModal = ({ task, entry, onSaved, onClose }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
@@ -34,7 +34,7 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   const [customItems, setCustomItems] = useState([]);
   const items = [...DEFAULT_ITEMS, ...customItems.map(i => ({ id: i.id, label: i.name, code: i.code, price: i.price, use_item_price: i.use_item_price }))];
   const [newItem, setNewItem] = useState(null);
-  const [f, setF] = useState({
+  const [f, setF] = useState(entry ? { ...entry, hours_raw: entry.hours_raw || String(entry.hours), private_notes: entry.private_notes || "" } : {
     contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: "", date: task?.due_date || toISO(new Date()),
     description: task ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : "",
     billable: true, billed_by: user?.name || "", hourly_rate: 0, private_notes: "",
@@ -62,9 +62,9 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
   useEffect(() => {
     api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {});
     api.get("/practice/matters", { params: { status: "All" } }).then(r => setMatters(r.data)).catch(() => {});
-    api.get("/practice/profile").then(r => setF(p => ({ ...p, hourly_rate: r.data.hourly_rate || 0 }))).catch(() => {});
+    if (!entry) api.get("/practice/profile").then(r => setF(p => ({ ...p, hourly_rate: r.data.hourly_rate || 0 }))).catch(() => {});
     api.get("/practice/items").then(r => setCustomItems(r.data)).catch(() => {});
-  }, []);
+  }, [entry]);
   const pickItem = (id) => {
     const it = items.find(i => i.id === id);
     setF(p => ({ ...p, item: id, ...(it?.use_item_price ? { hourly_rate: it.price } : {}) }));
@@ -78,7 +78,8 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     setRunning(false);
     setBusy(true);
     try {
-      const r = await api.post("/practice/time-entries", { ...f, task_id: task?.id || null, hours: Math.round(hours * 10000) / 10000, hourly_rate: Number(f.hourly_rate || 0), total });
+      const payload = { ...f, task_id: task?.id || f.task_id || null, hours: Math.round(hours * 10000) / 10000, hourly_rate: Number(f.hourly_rate || 0), total };
+      const r = entry ? await api.put(`/practice/time-entries/${entry.id}`, payload) : await api.post("/practice/time-entries", payload);
       toast.info("Item saved successfully.", { action: { label: "Go to time entry", onClick: () => nav("/practice/time-entries") }, duration: 6000 });
       onSaved(r.data);
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not save time entry"); } finally { setBusy(false); }
@@ -89,7 +90,7 @@ export const NewTimeEntryModal = ({ task, onSaved, onClose }) => {
     <div className="fixed inset-0 z-[60] bg-black/40 flex items-start justify-center overflow-y-auto py-6 px-4" data-testid="practice-time-entry-modal">
       <div className="w-full max-w-xl rounded bg-white shadow-2xl">
         <div className="h-10 bg-[#1E88E5] rounded-t flex items-center justify-between px-4 text-white text-sm">
-          <span className="inline-flex items-center gap-1 font-semibold"><Plus size={14} /> New Time Entry</span>
+          <span className="inline-flex items-center gap-1 font-semibold"><Plus size={14} /> {entry ? "Edit Time Entry" : "New Time Entry"}</span>
           <span className="inline-flex items-center gap-3"><Move size={13} /><button type="button" onClick={onClose} data-testid="practice-time-entry-close"><X size={16} /></button></span>
         </div>
         <div className="p-4 bg-slate-50 space-y-3 rounded-b">

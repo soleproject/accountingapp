@@ -32,12 +32,16 @@ export default function PracticeTimeEntries() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Any");
   const [modal, setModal] = useState(false);
+  const [edit, setEdit] = useState(null);
+  const saved = () => toast.success("Item saved successfully.");
+  const setStatus2 = async (r, st) => { try { await api.patch(`/practice/time-entries/${r.id}/status`, { status: st }); saved(); load(); } catch { toast.error("Could not update"); } };
+  const clone = async (r) => { try { await api.post(`/practice/time-entries/${r.id}/clone`); saved(); load(); } catch { toast.error("Could not clone"); } };
   const load = () => api.get("/practice/time-entries/all").then(r => setRows(r.data)).catch(() => { setRows([]); toast.error("Could not load time entries"); });
   useEffect(() => { load(); }, []);
 
   const all = rows || [];
   const shown = all
-    .filter(r => status === "Any" || (status === "Billable" ? r.billable : !r.billable))
+    .filter(r => status === "Any" || r.billing_status === status)
     .filter(r => `${r.contact_name} ${r.matter_name} ${r.item} ${r.description}`.toLowerCase().includes(q.toLowerCase()));
   const now = new Date();
   const totals = {
@@ -60,7 +64,7 @@ export default function PracticeTimeEntries() {
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-te-filters">
           <span>Billed By</span><UserFilter testId="practice-te-billed-by-filter" />
           <span>Status</span>
-          <select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-te-status-filter"><option>Any</option><option>Billable</option><option>Non-Billable</option></select>
+          <select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-te-status-filter"><option>Any</option><option>Billable</option><option>Billed</option><option>Not Billable</option></select>
           <TagsFilter testId="practice-te-tags-filter" />
           <span>Date Range</span><PillFilter testId="practice-te-date-filter">All Time</PillFilter>
         </div>
@@ -83,14 +87,23 @@ export default function PracticeTimeEntries() {
                 <ListHead cols={COLS} sortCol="Date" />
                 <tbody>
                   {shown.map(r => (
-                    <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-50 align-top" data-testid={`practice-te-row-${r.id}`}>
+                    <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100 align-top" data-testid={`practice-te-row-${r.id}`}>
                       <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
-                      <td className="px-2 py-5 max-w-xs">
+                      <td className="px-2 py-5 max-w-xs relative">
                         <div className="inline-flex items-center gap-1.5 font-semibold text-[#1E88E5] text-[15px]"><Play size={13} className="fill-[#1E88E5]" />{r.item || "Time"}</div>
                         <div className="text-xs text-slate-500 whitespace-pre-line line-clamp-2">{r.description}</div>
+                        <div className="absolute -bottom-2.5 left-2 z-10 hidden group-hover:inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-600 whitespace-nowrap shadow-sm" data-testid={`practice-te-actions-${r.id}`}>
+                          <button type="button" onClick={() => setEdit(r)} className="hover:text-[#1E88E5]" data-testid={`practice-te-edit-${r.id}`}>Edit</button>
+                          {r.billing_status === "Billable" && <button type="button" className="hover:text-[#1E88E5]" data-testid={`practice-te-invoice-${r.id}`}>Invoice</button>}
+                          {r.billing_status !== "Billed" && <button type="button" onClick={() => setStatus2(r, "Billed")} className="text-[#43A047] hover:underline" data-testid={`practice-te-billed-${r.id}`}>Billed</button>}
+                          {r.billing_status !== "Billable" && <button type="button" onClick={() => setStatus2(r, "Billable")} className="hover:text-[#1E88E5]" data-testid={`practice-te-billable-${r.id}`}>Billable</button>}
+                          {r.billing_status !== "Not Billable" && <button type="button" onClick={() => setStatus2(r, "Not Billable")} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-notbillable-${r.id}`}>Not Billable</button>}
+                          <button type="button" onClick={() => clone(r)} className="hover:text-[#1E88E5]" data-testid={`practice-te-clone-${r.id}`}>Clone</button>
+                        </div>
                       </td>
                       <td className="px-2 py-5">
-                        <span className={`inline-block min-w-[110px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider text-white ${r.billable ? "bg-[#FFA726]" : "bg-slate-400"}`}>{r.billable ? "Billable" : "Non-Billable"}</span>
+                        <span data-testid={`practice-te-status-${r.id}`} className={`inline-block min-w-[110px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider ${
+                          r.billing_status === "Billed" ? "bg-[#43A047] text-white" : r.billing_status === "Not Billable" ? "border border-slate-400 bg-white text-slate-700" : "bg-[#FFA726] text-white"}`}>{r.billing_status}</span>
                       </td>
                       <td className="px-2 py-5 text-slate-700">{mdy(r.date)}</td>
                       <td className="px-2 py-5 text-slate-700">{hrs(r.hours)}</td>
@@ -114,6 +127,7 @@ export default function PracticeTimeEntries() {
         </div>
       </div>
       {modal && <NewTimeEntryModal onClose={() => setModal(false)} onSaved={() => { setModal(false); load(); }} />}
+      {edit && <NewTimeEntryModal entry={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
     </PracticeShell>
   );
 }

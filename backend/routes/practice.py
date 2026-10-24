@@ -256,7 +256,8 @@ async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, use
     mids = {d["matter_id"] for d in docs if d.get("matter_id")}
     contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
-    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
+             **({"billing_status": _te_status(d)} if "hours" in d else {})} for d in docs]
 
 
 @router.post("/tasks")
@@ -431,7 +432,8 @@ async def list_time_entries_full(user: dict = Depends(_guard)):
     mids = {d["matter_id"] for d in docs if d.get("matter_id")}
     contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
-    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
+             **({"billing_status": _te_status(d)} if "hours" in d else {})} for d in docs]
 
 
 class PracticeEventIn(BaseModel):
@@ -492,3 +494,46 @@ async def update_event(event_id: str, inp: PracticeEventIn, user: dict = Depends
     if not r.matched_count:
         raise HTTPException(404, "Event not found")
     return await db.practice_tasks.find_one({"id": event_id}, {"_id": 0})
+
+
+def _te_status(doc: dict) -> str:
+    return doc.get("billing_status") or ("Billable" if doc.get("billable", True) else "Not Billable")
+
+
+@router.patch("/time-entries/{entry_id}/status")
+async def set_time_entry_status(entry_id: str, body: dict, user: dict = Depends(_guard)):
+    status = body.get("status")
+    if status not in ("Billable", "Billed", "Not Billable"):
+        raise HTTPException(400, "Invalid status")
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    billable = status != "Not Billable"
+    total = round(doc.get("hours", 0) * doc.get("hourly_rate", 0), 2) if billable else 0
+    await db.practice_time_entries.update_one({"id": entry_id}, {"$set": {"billing_status": status, "billable": billable, "total": total}})
+    return {**doc, "billing_status": status, "billable": billable, "total": total}
+
+
+@router.post("/time-entries/{entry_id}/clone")
+async def clone_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    new = {**doc, "id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_time_entries.insert_one(new)
+    new.pop("_id", None)
+    return new
+
+
+@router.put("/time-entries/{entry_id}")
+async def update_time_entry(entry_id: str, inp: PracticeTimeEntryIn, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    status = _te_status(doc) if inp.billable else "Not Billable"
+    if inp.billable and status == "Not Billable":
+        status = "Billable"
+    data = {**inp.model_dump(), "billing_status": status, "total": round(inp.hours * inp.hourly_rate, 2) if inp.billable else 0,
+            "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_time_entries.update_one({"id": entry_id}, {"$set": data})
+    return {**doc, **data}
