@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { FileText, GripVertical, Pencil, Trash2, ChevronDown, Calendar, Check, Printer, Mail, CreditCard } from "lucide-react";
 import { RichNotes } from "@/components/practice/RichNotes";
@@ -30,7 +30,10 @@ const TH = ({ children, right }) => <th className={`px-3 py-3 text-[13px] font-s
 export default function PracticeNewInvoice() {
   const { id } = useParams();
   const nav = useNavigate();
+  const isEdit = useLocation().pathname.endsWith("/edit");
   const [inv, setInv] = useState(null);
+  const [matters, setMatters] = useState([]);
+  useEffect(() => { if (inv?.contact_id) api.get("/practice/matters", { params: { status: "All", contact_id: inv.contact_id } }).then(r => setMatters(r.data)).catch(() => {}); }, [inv?.contact_id]);
   useEffect(() => { api.get(`/practice/invoices/${id}`).then(r => setInv(r.data)).catch(() => { toast.error("Invoice not found"); nav("/practice/time-entries"); }); }, [id, nav]);
   const patch = async (data) => {
     setInv(p => { const n = { ...p, ...data }; const sub = n.time_entries.reduce((a, t) => a + (t.sub || 0), 0); n.total = +(sub * (1 - (n.discount || 0) / 100)).toFixed(2); n.balance = +(n.total - (n.paid || 0)).toFixed(2); return n; });
@@ -49,7 +52,7 @@ export default function PracticeNewInvoice() {
       <div className="space-y-4" data-testid="practice-new-invoice">
         <div className="flex items-center gap-3">
           <FileText size={30} className="text-slate-600" strokeWidth={1.5} />
-          <h1 className="text-3xl font-bold text-slate-800">New Invoice</h1>
+          <h1 className="text-3xl font-bold text-slate-800" data-testid="practice-invoice-form-title">{isEdit ? "Edit Invoice" : "New Invoice"}</h1>
         </div>
         {!inv ? <div className="p-8 text-sm text-slate-500">Loading…</div> : (
           <section className="rounded border border-slate-200 bg-white px-8 py-6 space-y-10">
@@ -57,11 +60,20 @@ export default function PracticeNewInvoice() {
               <div data-testid="practice-inv-linked">
                 <H>Linked To</H>
                 <div className="grid grid-cols-[230px_1fr] gap-y-3 mt-2">
-                  <Label>Contact</Label><div className="pt-2.5"><button type="button" onClick={() => nav(`/practice/contacts/${inv.contact_id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid="practice-inv-contact">{inv.contact_name}</button></div>
-                  <Label>Matter</Label><div className="pt-2.5 space-x-2">{inv.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid={`practice-inv-matter-${m.id}`}>{m.name}</button>)}</div>
+                  {isEdit ? <>
+                    <Label required>Contact</Label>
+                    <div className="relative"><select value={inv.contact_id} readOnly className={`${inp} appearance-none`} data-testid="practice-inv-contact"><option value={inv.contact_id}>{inv.contact_name}</option></select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
+                    <Label help>Matter</Label>
+                    <div className="relative"><select value={inv.matter_ids[0] || ""} onChange={e => patch({ matter_ids: e.target.value ? [e.target.value] : [], matters: matters.filter(m => m.id === e.target.value) })} className={`${inp} appearance-none`} data-testid="practice-inv-matter-select">
+                      <option value="">None</option>{matters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
+                  </> : <>
+                    <Label>Contact</Label><div className="pt-2.5"><button type="button" onClick={() => nav(`/practice/contacts/${inv.contact_id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid="practice-inv-contact">{inv.contact_name}</button></div>
+                    <Label>Matter</Label><div className="pt-2.5 space-x-2">{inv.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid={`practice-inv-matter-${m.id}`}>{m.name}</button>)}</div>
+                  </>}
                   <Label required>Template</Label>
                   <div className="relative"><select value={inv.template} onChange={e => patch({ template: e.target.value })} className={`${inp} appearance-none`} data-testid="practice-inv-template"><option>Default Invoice Template</option></select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
                   <Label help>Submit this invoice for approval?</Label><div className="pt-1"><Toggle value={!!inv.submit_for_approval} onChange={v => patch({ submit_for_approval: v })} testId="practice-inv-approval" /></div>
+                  {isEdit && <><Label>Unbilled Time &amp; Expenses</Label><div className="pt-2.5"><button type="button" className="text-[15px] text-[#1E88E5] hover:underline" data-testid="practice-inv-add-unbilled">Add unbilled time, expenses and flat fees</button></div></>}
                 </div>
               </div>
               <div data-testid="practice-inv-details">

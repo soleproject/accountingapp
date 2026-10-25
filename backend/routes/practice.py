@@ -705,7 +705,7 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
     return {"ok": True}
 
 
-INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number",
+INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids",
                   "notes", "terms", "pay_operating", "pay_trust", "send_reminders", "add_unpaid", "add_interest")
 
 

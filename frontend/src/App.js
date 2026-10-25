@@ -272,6 +272,7 @@ function App() {
             <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
             <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
             <Route path="/practice/invoices/:id/new" element={<Protected><PracticeNewInvoice /></Protected>} />
+            <Route path="/practice/invoices/:id/edit" element={<Protected><PracticeNewInvoice /></Protected>} />
             <Route path="/practice/invoices/:id" element={<Protected><PracticeInvoiceDetail /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />

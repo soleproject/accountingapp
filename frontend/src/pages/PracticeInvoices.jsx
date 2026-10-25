@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { FileText, Plus, ChevronDown, Settings2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
-import { sel, UserFilter, PillFilter, TagsFilter, ListToolbar, ListHead, ListFooter, EmptyIllustration } from "@/components/practice/listParts";
+import { sel, UserFilter, PillFilter, TagsFilter, ListToolbar, ListHead, ListFooter, EmptyIllustration, HoverPill } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
 
 const COLS = ["Number", "Date", "Status", "Approval Date", "Approved By", "Total", "Balance", "Contact", "Matter"];
@@ -67,9 +67,16 @@ export default function PracticeInvoices() {
                 <ListHead cols={COLS} />
                 <tbody>
                   {rows.map(r => (
-                    <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-100" data-testid={`practice-invoice-row-${r.id}`}>
+                    <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100" data-testid={`practice-invoice-row-${r.id}`}>
                       <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
-                      <td className="px-2 py-5"><button type="button" onClick={() => nav(`/practice/invoices/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-invoice-link-${r.id}`}>Invoice I-{r.number}</button></td>
+                      <td className="px-2 py-5 relative">
+                        <button type="button" onClick={() => nav(`/practice/invoices/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-invoice-link-${r.id}`}>Invoice I-{r.number}</button>
+                        <HoverPill testId={`practice-invoice-actions-${r.id}`}>
+                          <button type="button" onClick={() => nav(`/practice/invoices/${r.id}/edit`)} className="hover:text-[#1E88E5]" data-testid={`practice-invoice-row-edit-${r.id}`}>Edit</button>
+                          {["Approve", "Submit for Approval", "Enter Payment", "Mark as Sent", "Send", "PDF"].map(a => <span key={a}>{a}</span>)}
+                          <button type="button" onClick={() => window.open(`/practice/invoices/${r.id}`, "_blank")} className="hover:text-[#1E88E5]">Print</button>
+                        </HoverPill>
+                      </td>
                       <td className="px-2 py-5 text-slate-700">{mdy(r.date)}</td>
                       <td className="px-2 py-5"><span className="inline-block min-w-[110px] rounded-full border border-slate-400 bg-white px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider text-slate-700" data-testid={`practice-invoice-status-${r.id}`}>{r.status}</span></td>
                       <td className="px-2 py-5" /><td className="px-2 py-5" />

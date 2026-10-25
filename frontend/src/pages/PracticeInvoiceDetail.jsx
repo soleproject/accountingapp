@@ -89,7 +89,7 @@ export default function PracticeInvoiceDetail() {
             {inv.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="hover:text-[#1E88E5]">{m.name}</button>)}
             <span className="text-slate-300 font-light">|</span>Invoice - {label}
           </h1>
-          <button type="button" onClick={() => nav(`/practice/invoices/${id}/new`)} className="text-[#1E88E5]" data-testid="practice-invoice-edit"><Pencil size={15} /></button>
+          <button type="button" onClick={() => nav(`/practice/invoices/${id}/edit`)} className="text-[#1E88E5]" data-testid="practice-invoice-edit"><Pencil size={15} /></button>
           <button type="button" onClick={del} className="text-[#1E88E5]" data-testid="practice-invoice-delete"><Trash2 size={15} /></button>
           <div className="flex-1" />
           <button type="button" className={pill} data-testid="practice-invoice-enter-payment">Enter Payment <ArrowRightCircle size={14} /></button>
