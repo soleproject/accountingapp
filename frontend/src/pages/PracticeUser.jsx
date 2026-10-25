@@ -12,8 +12,26 @@ const fmtAt = (iso) => new Date(iso).toLocaleString("en-US", { month: "numeric",
 function Agenda({ first }) {
   const nav = useNavigate();
   const [items, setItems] = useState([]);
+  const [overdue, setOverdue] = useState([]);
   const today = toISO(new Date());
-  useEffect(() => { api.get("/practice/tasks", { params: { start: today, end: today } }).then(r => setItems(r.data)).catch(() => {}); }, [today]);
+  useEffect(() => {
+    api.get("/practice/tasks", { params: { start: today, end: today } }).then(r => setItems(r.data)).catch(() => {});
+    api.get("/practice/tasks", { params: { start: "2000-01-01", end: toISO(new Date(Date.now() - 86400000)) } })
+      .then(r => setOverdue(r.data.filter(t => t.kind !== "event" && t.status !== "Completed"))).catch(() => {});
+  }, [today]);
+  const dueLabel = (d) => {
+    const days = Math.round((new Date(today) - new Date(d)) / 86400000);
+    return days === 1 ? "Yesterday" : new Date(d + "T00:00:00").toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
+  };
+  const renderItem = (t, showDue) => (
+    <li key={t.id} className="text-[13px] leading-[18px]" data-testid={`practice-user-agenda-${t.id}`}>
+      <div className="flex items-center gap-1.5 text-[#1E88E5] font-semibold text-[15px]">{t.kind === "event" ? <CalendarDays size={14} /> : <ClipboardList size={14} />}{t.subject}</div>
+      {showDue && <div className="text-slate-700 ml-6">{dueLabel(t.due_date)}</div>}
+      {t.kind === "event" && !t.all_day && <div className="text-slate-700 ml-6">{fmtTime(t.start_time)} – {fmtTime(t.end_time)}</div>}
+      {t.description && <div className="text-slate-700 ml-6">{t.description.replace(/<[^>]+>/g, "")}</div>}
+      {(t.contact_name || t.matter_name) && <div className="ml-6 font-semibold text-slate-800">Re: {[t.contact_name, t.matter_name].filter(Boolean).join(" / ")}</div>}
+    </li>
+  );
   return (
     <section className="rounded border border-slate-200 bg-white px-4 py-4" data-testid="practice-user-agenda">
       <div className="flex items-center justify-between">
@@ -23,18 +41,15 @@ function Agenda({ first }) {
           <button type="button" onClick={() => nav("/practice/calendar")} className="hover:text-[#1E88E5]" data-testid="practice-user-all-tasks">All Tasks ⊕</button>
         </div>
       </div>
+      {overdue.length > 0 && (
+        <div data-testid="practice-user-agenda-overdue">
+          <div className="mt-5 text-[13px] font-bold uppercase tracking-wider text-slate-800">Overdue</div>
+          <ul className="mt-4 space-y-4">{overdue.map(t => renderItem(t, true))}</ul>
+        </div>
+      )}
       <div className="mt-5 text-[13px] font-bold uppercase tracking-wider text-slate-800">Today</div>
       {items.length === 0 ? <div className="mt-3 text-[13px] text-slate-500">Nothing on the agenda today.</div> : (
-        <ul className="mt-4 space-y-4">
-          {items.map(t => (
-            <li key={t.id} className="text-[13px] leading-[18px]" data-testid={`practice-user-agenda-${t.id}`}>
-              <div className="flex items-center gap-1.5 text-[#1E88E5] font-semibold text-[15px]">{t.kind === "event" ? <CalendarDays size={14} /> : <ClipboardList size={14} />}{t.subject}</div>
-              {t.kind === "event" && !t.all_day && <div className="text-slate-700 ml-6">{fmtTime(t.start_time)} – {fmtTime(t.end_time)}</div>}
-              {t.description && <div className="text-slate-700 ml-6">{t.description.replace(/<[^>]+>/g, "")}</div>}
-              {(t.contact_name || t.matter_name) && <div className="ml-6 font-semibold text-slate-800">Re: {[t.contact_name, t.matter_name].filter(Boolean).join(" / ")}</div>}
-            </li>
-          ))}
-        </ul>
+        <ul className="mt-4 space-y-4">{items.map(t => renderItem(t, false))}</ul>
       )}
     </section>
   );
