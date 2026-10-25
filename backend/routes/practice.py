@@ -1304,3 +1304,36 @@ async def update_user(puser_id: str, body: dict, user: dict = Depends(_guard)):
         raise HTTPException(404, "User not found")
     doc = await db.practice_users.find_one({"id": puser_id}, {"_id": 0})
     return (await _users_out(user["id"], [doc]))[0]
+
+
+@router.get("/ledger/{src}/{item_id}")
+async def ledger_item(src: str, item_id: str, user: dict = Depends(_guard)):
+    rows = await _ledger(user["id"])
+    row = next((r for r in rows if r["src"] == src and r["id"] == item_id), None)
+    if not row:
+        raise HTTPException(404, "Not found")
+    doc = await db[_SRC[src]].find_one({"id": item_id, "owner_id": user["id"]}, {"_id": 0})
+    apps = []
+    for a in doc.get("applications", []) if src == "payment" else []:
+        inv = await db.practice_invoices.find_one({"id": a["invoice_id"]}, {"_id": 0})
+        if inv:
+            apps.append({"invoice_id": inv["id"], "number": inv.get("number"), "open_balance": _inv_totals(inv)["balance"], "amount": a["amount"], "applied_date": a.get("applied_date") or doc["date"]})
+    return {**row, "applications": apps, "detail": doc}
+
+
+@router.delete("/ledger/{src}/{item_id}")
+async def ledger_delete(src: str, item_id: str, user: dict = Depends(_guard)):
+    if src not in _SRC:
+        raise HTTPException(404, "Not found")
+    doc = await db[_SRC[src]].find_one({"id": item_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Not found")
+    if src == "payment":
+        for a in doc.get("applications", []):
+            inv = await db.practice_invoices.find_one({"id": a["invoice_id"]}, {"_id": 0})
+            if inv:
+                paid = round(max(0, inv.get("paid", 0) - a["amount"]), 2)
+                status = "Paid" if paid >= _inv_totals(inv)["total"] - 0.005 else ("Partially Paid" if paid > 0 else "Saved")
+                await db.practice_invoices.update_one({"id": inv["id"]}, {"$set": {"paid": paid, "status": status}})
+    await db[_SRC[src]].delete_one({"id": item_id})
+    return {"ok": True}

@@ -197,6 +197,7 @@ import PracticeAddPayment from "@/pages/PracticeAddPayment";
 import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
 import PracticeNewUser, { PracticeRoleForm } from "@/pages/PracticeUsersRoles";
 import { PracticeAccess } from "@/components/practice/PracticeAccess";
+import PracticePaymentDetail from "@/pages/PracticePaymentDetail";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -290,6 +291,7 @@ function App() {
             <Route path="/practice/payments/reconciliation" element={<Protected><PracticeAccess><PracticeReconciliation /></PracticeAccess></Protected>} />
             <Route path="/practice/payments/print-checks" element={<Protected><PracticeAccess><PracticePrintChecks /></PracticeAccess></Protected>} />
             <Route path="/practice/payments/new" element={<Protected><PracticeAccess><PracticeAddPayment /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/:src/:id" element={<Protected><PracticeAccess><PracticePaymentDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/checks/new" element={<Protected><PracticeAccess><PracticeWriteCheck /></PracticeAccess></Protected>} />
             <Route path="/practice/invoices/:id/new" element={<Protected><PracticeAccess><PracticeNewInvoice /></PracticeAccess></Protected>} />
             <Route path="/practice/invoices/:id/edit" element={<Protected><PracticeAccess><PracticeNewInvoice /></PracticeAccess></Protected>} />

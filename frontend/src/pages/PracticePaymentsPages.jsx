@@ -11,7 +11,7 @@ const usd = (n) => `${n < 0 ? "-" : ""}$${Math.abs(Number(n || 0)).toLocaleStrin
 const mdy = (iso) => { if (!iso) return "-"; const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
 const link = "text-[#1E88E5] hover:underline";
 const pill = "inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50";
-const Neg = ({ v }) => v < 0 ? <span className="inline-block rounded-full bg-[#E53935] px-3 py-0.5 text-xs font-semibold text-white">{usd(v)} <span className="text-[9px] font-normal">USD</span></span> : <span className="text-slate-700">{usd(v)} <span className="text-[10px] text-slate-500">USD</span></span>;
+const Neg = ({ v }) => <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white ${v < 0 ? "bg-[#E53935]" : "bg-[#43A047]"}`}>{usd(v)} <span className="text-[9px] font-normal">USD</span></span>;
 const Stat = ({ label, value, sub, testId }) => (
   <div className="rounded border border-slate-200 bg-white px-3 py-3 flex items-center justify-between" data-testid={testId}>
     <span className="text-[11px] uppercase tracking-wider text-slate-600">{label}</span>
@@ -121,7 +121,7 @@ export function PracticePayments() {
               {shown.map(r => (
                 <tr key={r.ref} className="border-t border-slate-200 hover:bg-slate-50" data-testid={`practice-payment-row-${r.ref}`}>
                   <td className="px-4 py-4"><input type="checkbox" className="h-4 w-4" /></td>
-                  <td className="px-2 py-4"><button type="button" onClick={() => nav("/practice/payments/reconciliation")} className="font-semibold text-[#1E88E5] hover:underline text-[15px]">{r.type} {r.ref}</button></td>
+                  <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/payments/${r.src}/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-payment-link-${r.ref}`}>{r.type} {r.ref}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav("/practice/payments/accounts")} className={link}>{r.account}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className={link}>{r.contact_name}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/matters/${r.matter_id}`)} className={link}>{r.matter_name}</button></td>
@@ -246,7 +246,7 @@ export function PracticeReconciliation() {
                 <tr key={r.ref} className="border-t border-slate-200" data-testid={`practice-recon-row-${r.ref}`}>
                   <td className="px-3 py-3"><input type="checkbox" className="h-4 w-4" checked={!!sel2[r.ref]} onChange={e => setSel2(s => ({ ...s, [r.ref]: e.target.checked }))} /></td><td className="text-slate-400">⋮</td>
                   <td className="px-3 py-3"><button type="button" onClick={() => mark(r, !r.reconciled)} className="inline-flex items-center gap-1 text-slate-800 hover:text-[#1E88E5]" data-testid={`practice-recon-mark-${r.ref}`}>{r.reconciled ? <><X size={14} /> Mark Not Reconciled</> : <><Check size={14} /> Mark Reconciled</>}</button></td>
-                  <td className="px-3 py-3 text-[#1E88E5]">{r.ref}</td><td className="px-3 py-3 text-slate-700">{r.type}</td><td className="px-3 py-3 text-slate-700">{r.notes || "-"}</td><td className="px-3 py-3 text-slate-700">{mdy(r.date)}</td>
+                  <td className="px-3 py-3"><button type="button" onClick={() => nav(`/practice/payments/${r.src}/${r.id}`)} className="text-[#1E88E5] hover:underline">{r.ref}</button></td><td className="px-3 py-3 text-slate-700">{r.type}</td><td className="px-3 py-3 text-slate-700">{r.notes || "-"}</td><td className="px-3 py-3 text-slate-700">{mdy(r.date)}</td>
                   <td className="px-3 py-3 text-right text-slate-700">{r.amount > 0 ? usd(r.amount) : "-"}</td>
                   <td className="px-3 py-3 text-right">{r.amount < 0 ? <span className="rounded-full bg-[#E53935] px-3 py-0.5 text-sm text-white">{usd(r.amount)}</span> : "-"}</td>
                   <td className="px-3 py-3 text-slate-700">{r.method}</td>
