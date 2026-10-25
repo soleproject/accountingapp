@@ -44,7 +44,7 @@ export default function PracticeActivities() {
           <div className="flex items-center gap-3"><ListChecks size={30} className="text-slate-600" strokeWidth={1.5} /><h1 className="text-3xl font-bold text-slate-800">Activities</h1></div>
           <div className="flex items-center gap-2">
             <button type="button" className={white}><Upload size={14} /> Import</button>
-            <button type="button" className={white}><Workflow size={14} /> Workflows</button>
+            <button type="button" onClick={() => nav("/practice/workflows")} className={white} data-testid="practice-activities-workflows"><Workflow size={14} /> Workflows</button>
             <NewActivityMenu align="right" testId="practice-activities-new" onPick={setModal} />
           </div>
         </div>

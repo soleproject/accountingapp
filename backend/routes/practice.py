@@ -17,7 +17,7 @@ _role_guard = require_role("superadmin", "practice")
 # path prefix -> permission feature
 _FEATURE_BY_PATH = [
     ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
-    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/notes", "Activities (Tasks, Events & Calls)"), ("/calls", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
+    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/notes", "Activities (Tasks, Events & Calls)"), ("/calls", "Activities (Tasks, Events & Calls)"), ("/workflows", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
     ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
     ("/payments", "Contact Payments"), ("/retainers", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
     ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
@@ -405,6 +405,108 @@ async def create_call(inp: PracticeCallIn, user: dict = Depends(_guard)):
 @router.put("/calls/{item_id}")
 async def update_call(item_id: str, inp: PracticeCallIn, user: dict = Depends(_guard)):
     return await _save_activity(inp, "call", user, item_id)
+
+
+class PracticeWorkflowIn(BaseModel):
+    name: str
+    description: str = ""
+    permissions: str = "Share this workflow with all users"
+    events: list[dict] = Field(default_factory=list)
+    tasks: list[dict] = Field(default_factory=list)
+
+
+_INTAKE_TASKS = [
+    ("Send Intake Form", "Click the white 'New' button on the top-left of PracticePanther and select 'Intake Form' to send the intake form to the lead.", "Lead Created"),
+    ("Review the Intake Form", "Read the intake form under the Files tab within the Contact. Review the answers and decide whether to take the case.", "Send Intake Form"),
+    ("Generate Letter of Engagement", "If you are interested in converting the lead into a client, automatically generate an engagement letter from a template.", "Review the Intake Form"),
+    ("Send Letter of Engagement", "Send the letter of engagement you generated to the client through the client portal or email for e-signature.", "Generate Letter of Engagement"),
+    ("Request Retainer", "Send a retainer request to the client and process the payment ASAP.", "Send Letter of Engagement"),
+    ("Create Matter", "Click the white 'New' button on the top-left of PracticePanther, and create a matter for this client.", "Request Retainer"),
+    ("Get to Work!", "Now comes the fun part! Track all of your time entries, flat fees and expenses against this matter.", "Create Matter"),
+]
+
+
+async def _ensure_example_workflow(user: dict):
+    if await db.practice_workflows.count_documents({"owner_id": user["id"]}):
+        return
+    ev_id = str(uuid.uuid4())
+    ids = {"Lead Created": ev_id}
+    tasks = []
+    for subj, desc, anchor in _INTAKE_TASKS:
+        tid = str(uuid.uuid4())
+        tasks.append({"id": tid, "subject": subj, "description": desc, "due_mode": "Automatically", "due_n": 1, "due_unit": "Business Days",
+                      "due_dir": "After", "due_field": "Due Date", "due_anchor": ids[anchor], "priority": "Medium", "private": False, "assigned_users": [], "tags": []})
+        ids[subj] = tid
+    await db.practice_workflows.insert_one({"id": str(uuid.uuid4()), "owner_id": user["id"], "name": "Client Intake Workflow", "description": "", "permissions": "Share this workflow with all users",
+        "events": [{"id": ev_id, "subject": "Lead Created in Practice", "description": "This is the kickoff event for this workflow. All task due dates will be based on this event's date.", "private": False, "assigned_users": [], "tags": []}],
+        "tasks": tasks, "created_by": user.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()})
+
+
+@router.get("/workflows")
+async def list_workflows(user: dict = Depends(_guard)):
+    await _ensure_example_workflow(user)
+    return await db.practice_workflows.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@router.get("/workflows/{wf_id}")
+async def get_workflow(wf_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Workflow not found")
+    return doc
+
+
+def _wf_items(items: list[dict]) -> list[dict]:
+    return [{**i, "id": i.get("id") or str(uuid.uuid4())} for i in items if (i.get("subject") or "").strip()]
+
+
+@router.post("/workflows")
+async def create_workflow(inp: PracticeWorkflowIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Workflow name is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "events": _wf_items(inp.events), "tasks": _wf_items(inp.tasks),
+           "created_by": user.get("name", ""), "created_at": now, "updated_at": now}
+    await db.practice_workflows.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/workflows/{wf_id}")
+async def update_workflow(wf_id: str, inp: PracticeWorkflowIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Workflow name is required.")
+    data = {**inp.model_dump(), "events": _wf_items(inp.events), "tasks": _wf_items(inp.tasks), "updated_at": datetime.now(timezone.utc).isoformat()}
+    r = await db.practice_workflows.update_one({"id": wf_id, "owner_id": user["id"]}, {"$set": data})
+    if not r.matched_count:
+        raise HTTPException(404, "Workflow not found")
+    return await db.practice_workflows.find_one({"id": wf_id}, {"_id": 0})
+
+
+@router.delete("/workflows/{wf_id}")
+async def delete_workflow(wf_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_workflows.delete_one({"id": wf_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Workflow not found")
+    return {"ok": True}
+
+
+@router.post("/workflows/{wf_id}/clone")
+async def clone_workflow(wf_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Workflow not found")
+    now = datetime.now(timezone.utc).isoformat()
+    remap = {}
+    for coll in ("events", "tasks"):
+        for i in doc[coll]:
+            remap[i["id"]] = str(uuid.uuid4())
+    for coll in ("events", "tasks"):
+        doc[coll] = [{**i, "id": remap[i["id"]], **({"due_anchor": remap.get(i.get("due_anchor"), i.get("due_anchor"))} if coll == "tasks" else {})} for i in doc[coll]]
+    doc.update({"id": str(uuid.uuid4()), "name": f"{doc['name']} (Copy)", "created_by": user.get("name", ""), "created_at": now, "updated_at": now})
+    await db.practice_workflows.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
 
 @router.get("/tasks")
