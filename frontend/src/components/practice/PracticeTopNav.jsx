@@ -41,7 +41,8 @@ function TopTimerButton() {
 const NAV = [
   { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
   { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses", to: "/practice/expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
-  { label: "Payments", menu: true },
+  { label: "Payments", menu: true, to: "/practice/payments", items: [{ label: "Payment History", to: "/practice/payments" }, { label: "Payment Plans", to: "/practice/settings?section=accept-online-payments" },
+    { label: "Banks & Credit Cards", header: true }, { label: "Manage Accounts", to: "/practice/payments/accounts", sub: true }, { label: "Account Reconciliation", to: "/practice/payments/reconciliation", sub: true }, { label: "Print Checks", to: "/practice/payments/print-checks", sub: true }, { label: "Deposit Slips", sub: true }] },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
 ];
@@ -125,8 +126,8 @@ function NavMenu({ label, items, testId, className }) {
       {open && (
         <div className="absolute left-0 top-full mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl z-50" data-testid={`${testId}-menu`}>
           {items.map(it => (
-            <button key={it.label} type="button" onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
-                    className={`w-full px-4 py-2 text-left text-sm ${it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}</button>
+            <button key={it.label} type="button" disabled={it.header} onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                    className={`w-full py-2 text-left text-sm ${it.sub ? "pl-8 pr-4" : "px-4"} ${it.header ? "text-slate-500 font-semibold border-t border-slate-100 mt-1 pt-2" : it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}{it.header && " ›"}</button>
           ))}
         </div>
       )}

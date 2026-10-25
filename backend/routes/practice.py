@@ -1138,3 +1138,102 @@ async def resend_invite(puser_id: str, user: dict = Depends(_guard)):
                                       company_names=[], magic_url=f"{public_base_url()}/set-password/{token}", brand_name="Practice")
     r = await dispatch(kind="practice_invite", to=doc["email"], subject=subject, html=html, initiating_user_id=user["id"], related={"purpose": "practice_invite"})
     return {"ok": True, "result": r}
+
+
+# ---------- Bank accounts & ledger ----------
+async def _ensure_accounts(user: dict) -> None:
+    if await db.practice_bank_accounts.find_one({"owner_id": user["id"]}):
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    await db.practice_bank_accounts.insert_many([
+        {"id": str(uuid.uuid4()), "owner_id": user["id"], "name": "Operating Account", "type": "Operating Account", "default": True, "status": "Active", "created_by": user.get("name", ""), "created_at": now},
+        {"id": str(uuid.uuid4()), "owner_id": user["id"], "name": "Trust Account", "type": "Trust Account", "default": True, "status": "Active", "created_by": user.get("name", ""), "created_at": now},
+    ])
+
+
+async def _ledger(uid: str) -> list:
+    rows = []
+    async for p in db.practice_payments.find({"owner_id": uid}, {"_id": 0}):
+        rows.append({"src": "payment", "id": p["id"], "type": "Payment", "notes": p.get("notes", ""), "date": p["date"], "amount": p.get("amount", 0), "method": p.get("payment_method", ""),
+                     "contact_id": p.get("contact_id"), "matter_id": p.get("matter_id"), "payee": "", "account": p.get("bank_account", "Operating Account"), "reconciled": p.get("reconciled", False),
+                     "deposit_date": p.get("deposit_date"), "print_queue": False, "check_no": None, "created_at": p.get("created_at", "")})
+    async for e in db.practice_expenses.find({"owner_id": uid, "cost_type": "Hard Cost"}, {"_id": 0}):
+        rows.append({"src": "expense", "id": e["id"], "type": "Expense", "notes": e.get("payment_notes") or "", "date": e["date"], "amount": -(e.get("amount") or 0), "method": e.get("payment_method", ""),
+                     "contact_id": e.get("contact_id"), "matter_id": e.get("matter_id"), "payee": e.get("payee", ""), "account": e.get("account") or "Operating Account", "reconciled": e.get("reconciled", False),
+                     "deposit_date": None, "print_queue": e.get("payment_method") == "Check" and e.get("to_print", True) and not e.get("check_no"), "check_no": e.get("check_no"), "created_at": e.get("created_at", "")})
+    async for c in db.practice_checks.find({"owner_id": uid}, {"_id": 0}):
+        rows.append({"src": "check", "id": c["id"], "type": "Check", "notes": c.get("notes", ""), "date": c["date"], "amount": -(c.get("amount") or 0), "method": c.get("payment_method", "Check"),
+                     "contact_id": c.get("contact_id"), "matter_id": c.get("matter_id"), "payee": c.get("payee", ""), "account": c.get("bank_account", "Operating Account"), "reconciled": c.get("reconciled", False),
+                     "deposit_date": None, "print_queue": c.get("payment_method") == "Check" and c.get("to_print", True) and not c.get("check_no"), "check_no": c.get("check_no"), "created_at": c.get("created_at", "")})
+    rows.sort(key=lambda r: r["created_at"])
+    ids = {r["contact_id"] for r in rows if r.get("contact_id")} | {r["payee"] for r in rows if r.get("payee")}
+    mids = {r["matter_id"] for r in rows if r.get("matter_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(ids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    out = []
+    for i, r in enumerate(rows):
+        out.append({**r, "ref": f"P-{1000 + i}", "contact_name": contacts.get(r.get("contact_id"), ""), "matter_name": matters.get(r.get("matter_id"), ""),
+                    "payee_name": contacts.get(r.get("payee"), r.get("payee") or ""), "fees": 0})
+    out.sort(key=lambda r: (r["date"], r["created_at"]), reverse=True)
+    return out
+
+
+_SRC = {"payment": "practice_payments", "expense": "practice_expenses", "check": "practice_checks"}
+
+
+@router.get("/ledger")
+async def ledger(user: dict = Depends(_guard)):
+    await _ensure_accounts(user)
+    return await _ledger(user["id"])
+
+
+@router.patch("/ledger/{src}/{item_id}")
+async def ledger_update(src: str, item_id: str, body: dict, user: dict = Depends(_guard)):
+    if src not in _SRC:
+        raise HTTPException(404, "Not found")
+    allowed = {k: v for k, v in body.items() if k in ("reconciled", "deposit_date", "check_no", "to_print")}
+    if "reconciled" in allowed:
+        allowed["reconciled_at"] = datetime.now(timezone.utc).isoformat() if allowed["reconciled"] else None
+    r = await db[_SRC[src]].update_one({"id": item_id, "owner_id": user["id"]}, {"$set": allowed})
+    if not r.matched_count:
+        raise HTTPException(404, "Not found")
+    return {"ok": True}
+
+
+class PrintChecksIn(BaseModel):
+    items: list[dict]
+    start_number: int = 100
+
+
+@router.post("/checks/print")
+async def print_checks(inp: PrintChecksIn, user: dict = Depends(_guard)):
+    n = inp.start_number
+    for it in inp.items:
+        if it.get("src") in _SRC:
+            await db[_SRC[it["src"]]].update_one({"id": it.get("id"), "owner_id": user["id"]}, {"$set": {"check_no": n, "to_print": False}})
+            n += 1
+    return {"ok": True, "last_number": n - 1}
+
+
+@router.get("/bank-accounts")
+async def bank_accounts(user: dict = Depends(_guard)):
+    await _ensure_accounts(user)
+    rows = await _ledger(user["id"])
+    accts = await db.practice_bank_accounts.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(100)
+    return [{**a, "balance": round(sum(r["amount"] for r in rows if r["account"] == a["name"]), 2),
+             "unreconciled": sum(1 for r in rows if r["account"] == a["name"] and not r["reconciled"])} for a in accts]
+
+
+class BankAccountIn(BaseModel):
+    name: str
+    type: str = "Operating Account"
+
+
+@router.post("/bank-accounts")
+async def create_bank_account(inp: BankAccountIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Enter an account name.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "name": inp.name.strip(), "type": inp.type, "default": False, "status": "Active", "created_by": user.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_bank_accounts.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
