@@ -629,13 +629,19 @@ async def invoice_generate(inp: PracticeInvoiceGenerateIn, user: dict = Depends(
         async for te in db.practice_time_entries.find(q, {"_id": 0}).sort("date", 1):
             if _te_status(te) == "Billable":
                 entries.append(te)
+    expenses = []
+    if inp.add_expenses:
+        async for ex in db.practice_expenses.find(q, {"_id": 0}).sort("date", 1):
+            if _exp_status(ex) == "Billable":
+                expenses.append({"id": ex["id"], "item": ex.get("category") or ex.get("cost_type", "Expense"), "description": ex.get("description", ""), "date": ex["date"],
+                                 "billed_by": ex.get("billed_by", ""), "qty": ex.get("qty", 1), "price": ex.get("price", 0), "sub": ex.get("total", 0)})
     now = datetime.now(timezone.utc)
     doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "status": "Draft", "number": None,
            "contact_id": inp.contact_id, "matter_ids": inp.matter_ids, "template": "Default Invoice Template", "submit_for_approval": False,
            "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
            "time_entries": [{"id": te["id"], "item": te.get("item") or "Time", "description": te.get("description", ""), "date": te["date"],
                              "billed_by": te.get("billed_by", ""), "hours": te.get("hours", 0), "rate": te.get("hourly_rate", 0), "sub": te.get("total", 0)} for te in entries],
-           "expenses": [], "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses, "paid": 0.0,
+           "expenses": expenses, "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses, "paid": 0.0,
            "notes": "", "terms": "", "pay_operating": True, "pay_trust": False, "send_reminders": True, "add_unpaid": False, "add_interest": False,
            "created_at": now.isoformat(), "updated_at": now.isoformat()}
     await db.practice_invoices.insert_one(doc)
@@ -693,6 +699,9 @@ async def save_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)
     te_ids = [t["id"] for t in allowed.get("time_entries", doc.get("time_entries", []))]
     if te_ids:
         await db.practice_time_entries.update_many({"id": {"$in": te_ids}, "owner_id": user["id"]}, {"$set": {"billing_status": "Billed", "invoice_id": invoice_id}})
+    ex_ids = [e["id"] for e in allowed.get("expenses", doc.get("expenses", []))]
+    if ex_ids:
+        await db.practice_expenses.update_many({"id": {"$in": ex_ids}, "owner_id": user["id"]}, {"$set": {"billing_status": "Billed", "invoice_id": invoice_id}})
     return await get_invoice(invoice_id, user)
 
 
@@ -702,6 +711,7 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
     if not r.deleted_count:
         raise HTTPException(404, "Invoice not found")
     await db.practice_time_entries.update_many({"invoice_id": invoice_id, "owner_id": user["id"]}, {"$set": {"billing_status": "Billable"}, "$unset": {"invoice_id": ""}})
+    await db.practice_expenses.update_many({"invoice_id": invoice_id, "owner_id": user["id"]}, {"$set": {"billing_status": "Billable"}, "$unset": {"invoice_id": ""}})
     return {"ok": True}
 
 
@@ -717,3 +727,124 @@ async def update_invoice(invoice_id: str, body: dict, user: dict = Depends(_guar
     if not r.matched_count:
         raise HTTPException(404, "Invoice not found")
     return await get_invoice(invoice_id, user)
+
+
+# ---------- Expenses ----------
+EXPENSE_CATEGORIES = [
+    ("E101", "Copying"), ("E102", "Outside printing"), ("E103", "Word processing"), ("E104", "Facsimile"), ("E105", "Telephone"),
+    ("E106", "Online research"), ("E107", "Delivery services/messengers"), ("E108", "Postage"), ("E109", "Local travel"), ("E110", "Out-of-town travel"),
+    ("E111", "Meals"), ("E112", "Court fees"), ("E113", "Subpoena fees"), ("E114", "Witness fees"), ("E115", "Deposition transcripts"),
+    ("E116", "Trial transcripts"), ("E117", "Trial exhibits"), ("E118", "Litigation support vendors"), ("E119", "Experts"), ("E120", "Private investigators"),
+    ("E121", "Arbitrators/mediators"), ("E122", "Local counsel"), ("E123", "Other professionals"), ("E124", "Other"),
+]
+
+
+class PracticeExpenseIn(BaseModel):
+    contact_id: str
+    matter_id: str
+    cost_type: str = "Soft Cost"
+    date: str
+    qty: float = 1
+    price: float
+    description: str = ""
+    category: str = ""
+    receipt_name: str = ""
+    billable: bool = True
+    billed_by: str = ""
+    private_notes: str = ""
+    account: str = ""
+    payee: str = ""
+    payment_method: str = ""
+    payment_notes: str = ""
+
+
+def _exp_status(doc: dict) -> str:
+    return doc.get("billing_status") or ("Billable" if doc.get("billable", True) else "Not Billable")
+
+
+async def _exp_names(docs: list) -> list:
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""), "billing_status": _exp_status(d)} for d in docs]
+
+
+@router.get("/expenses/categories")
+async def expense_categories(user: dict = Depends(_guard)):
+    custom = await db.practice_expense_categories.find({"owner_id": user["id"]}, {"_id": 0}).to_list(500)
+    return [{"code": c, "name": n} for c, n in EXPENSE_CATEGORIES] + [{"code": c.get("code", ""), "name": c["name"]} for c in custom]
+
+
+@router.get("/expenses")
+async def list_expenses(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if contact_id:
+        q["contact_id"] = contact_id
+    if matter_id:
+        q["matter_id"] = matter_id
+    docs = await db.practice_expenses.find(q, {"_id": 0}).sort([("date", -1), ("created_at", -1)]).to_list(2000)
+    return await _exp_names(docs)
+
+
+def _exp_doc(inp: PracticeExpenseIn) -> dict:
+    total = round(inp.qty * inp.price, 2)
+    return {**inp.model_dump(), "total": total if inp.billable else 0, "amount": total}
+
+
+@router.post("/expenses")
+async def create_expense(inp: PracticeExpenseIn, user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **_exp_doc(inp), "billing_status": "Billable" if inp.billable else "Not Billable", "created_at": now, "updated_at": now}
+    await db.practice_expenses.insert_one(doc)
+    doc.pop("_id", None)
+    return (await _exp_names([doc]))[0]
+
+
+@router.put("/expenses/{expense_id}")
+async def update_expense(expense_id: str, inp: PracticeExpenseIn, user: dict = Depends(_guard)):
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    status = _exp_status(doc) if inp.billable else "Not Billable"
+    if inp.billable and status == "Not Billable":
+        status = "Billable"
+    data = {**_exp_doc(inp), "billing_status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_expenses.update_one({"id": expense_id}, {"$set": data})
+    return (await _exp_names([{**doc, **data}]))[0]
+
+
+@router.patch("/expenses/{expense_id}/status")
+async def set_expense_status(expense_id: str, body: dict, user: dict = Depends(_guard)):
+    status = body.get("status")
+    if status not in ("Billable", "Billed", "Not Billable"):
+        raise HTTPException(400, "Invalid status")
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    billable = status != "Not Billable"
+    data = {"billing_status": status, "billable": billable, "total": doc.get("amount", 0) if billable else 0}
+    await db.practice_expenses.update_one({"id": expense_id}, {"$set": data})
+    return (await _exp_names([{**doc, **data}]))[0]
+
+
+@router.post("/expenses/{expense_id}/clone")
+async def clone_expense(expense_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    new = {**doc, "id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()}
+    new.pop("invoice_id", None)
+    if new.get("billing_status") == "Billed":
+        new["billing_status"] = "Billable"
+    await db.practice_expenses.insert_one(new)
+    new.pop("_id", None)
+    return (await _exp_names([new]))[0]
+
+
+@router.delete("/expenses/{expense_id}")
+async def delete_expense(expense_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_expenses.delete_one({"id": expense_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Expense not found")
+    return {"ok": True}

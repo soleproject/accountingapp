@@ -15,12 +15,22 @@ const Label = ({ children, required, help }) => (
   <div className="text-[13px] font-semibold uppercase tracking-wide text-slate-800 pt-2.5 flex items-start gap-1">{help && <span className="text-slate-400">?</span>}{children}{required && <span className="text-red-500">*</span>}</div>
 );
 const H = ({ children }) => <h2 className="text-lg font-bold uppercase tracking-wide text-slate-800">{children}</h2>;
-const LineTable = ({ title, cols, testId, addLabel }) => (
+const LineTable = ({ title, cols, testId, addLabel, rows = [], onRemove }) => (
   <div data-testid={testId}>
     <H>{title}</H>
     <table className="w-full mt-2">
-      <thead><tr className="border-b border-slate-200"><TH />{cols.map((c, i) => <TH key={c + i} right={i >= 2}>{c}</TH>)}</tr></thead>
-      <tbody><tr><td colSpan={cols.length + 1} className="py-10 text-center text-sm text-slate-500">No rows</td></tr></tbody>
+      <thead><tr className={rows.length ? "border-b-2 border-slate-800" : "border-b border-slate-200"}><TH />{cols.map((c, i) => <TH key={c + i} right={i >= 2}>{c}</TH>)}</tr></thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={r.id} className={`text-[15px] text-slate-700 ${i % 2 ? "" : "bg-slate-50"}`} data-testid={`${testId}-row-${r.id}`}>
+            <td className="px-3 py-5 whitespace-nowrap"><span className="inline-flex items-center gap-2 text-slate-500"><GripVertical size={14} /><Pencil size={13} /><button type="button" onClick={() => onRemove(r.id)} className="hover:text-red-600" data-testid={`${testId}-remove-${r.id}`}><Trash2 size={13} /></button></span></td>
+            <td className="px-3 py-5">{r.item}</td><td className="px-3 py-5 whitespace-pre-line">{r.description}</td>
+            <td className="px-3 py-5 text-right whitespace-nowrap">{mdy(r.date)}</td><td className="px-3 py-5 text-right whitespace-nowrap">{r.billed_by}</td>
+            <td className="px-3 py-5 text-right">{Number(r.qty).toFixed(2).replace(/\.?0+$/, "")}</td><td className="px-3 py-5 text-right">{usd(r.price)}</td><td className="px-3 py-5 text-right">{usd(r.sub)}</td><td /><td />
+          </tr>
+        ))}
+        {rows.length === 0 && <tr><td colSpan={cols.length + 1} className="py-10 text-center text-sm text-slate-500">No rows</td></tr>}
+      </tbody>
     </table>
     <button type="button" className="mt-4 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50" data-testid={`${testId}-add`}>{addLabel} <ChevronDown size={12} /></button>
   </div>
@@ -36,7 +46,7 @@ export default function PracticeNewInvoice() {
   useEffect(() => { if (inv?.contact_id) api.get("/practice/matters", { params: { status: "All", contact_id: inv.contact_id } }).then(r => setMatters(r.data)).catch(() => {}); }, [inv?.contact_id]);
   useEffect(() => { api.get(`/practice/invoices/${id}`).then(r => setInv(r.data)).catch(() => { toast.error("Invoice not found"); nav("/practice/time-entries"); }); }, [id, nav]);
   const patch = async (data) => {
-    setInv(p => { const n = { ...p, ...data }; const sub = n.time_entries.reduce((a, t) => a + (t.sub || 0), 0); n.total = +(sub * (1 - (n.discount || 0) / 100)).toFixed(2); n.balance = +(n.total - (n.paid || 0)).toFixed(2); return n; });
+    setInv(p => { const n = { ...p, ...data }; const sub = [...n.time_entries, ...(n.expenses || []), ...(n.flat_fees || [])].reduce((a, t) => a + (t.sub || 0), 0); n.total = +(sub * (1 - (n.discount || 0) / 100)).toFixed(2); n.balance = +(n.total - (n.paid || 0)).toFixed(2); return n; });
     try { await api.put(`/practice/invoices/${id}`, data); } catch { toast.error("Could not save"); }
   };
   const removeEntry = (eid) => patch({ time_entries: inv.time_entries.filter(t => t.id !== eid) });
@@ -111,7 +121,8 @@ export default function PracticeNewInvoice() {
               <button type="button" className="mt-4 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-inv-add-time-entry">+ Time Entry <ChevronDown size={12} /></button>
             </div>
 
-            <LineTable title="Expenses" cols={["Expenses", "Description", "Date", "Billed By", "Qty", "Price", "Sub", "Tax", "Tax"]} testId="practice-inv-expenses" addLabel="+ Expense" />
+            <LineTable title="Expenses" cols={["Expenses", "Description", "Date", "Billed By", "Qty", "Price", "Sub", "Tax", "Tax"]} testId="practice-inv-expenses" addLabel="+ Expense"
+                       rows={inv.expenses} onRemove={(eid) => patch({ expenses: inv.expenses.filter(e => e.id !== eid) })} />
             <LineTable title="Flat Fees" cols={["Flat Fees", "Description", "Date", "Billed By", "Qty", "Price", "Sub", "Tax", "Tax"]} testId="practice-inv-flat-fees" addLabel="+ Flat Fee" />
 
             <div className="flex justify-end" data-testid="practice-inv-totals">

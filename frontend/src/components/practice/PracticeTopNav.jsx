@@ -40,7 +40,7 @@ function TopTimerButton() {
 
 const NAV = [
   { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
-  { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
+  { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses", to: "/practice/expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
   { label: "Payments", menu: true },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
@@ -167,7 +167,7 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
         const label = typeof n === "string" ? n : n.label;
         const menu = typeof n !== "string" && n.menu;
         const to = typeof n !== "string" ? n.to : null;
-        const active = to && (n.exact ? pathname === to : pathname.startsWith(to));
+        const active = to && (n.exact ? pathname === to : (n.items ? n.items.some(i => i.to && pathname.startsWith(i.to)) : pathname.startsWith(to)));
         const key = label.toLowerCase().replace(/\s+/g, "-");
         const cls = `shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`;
         if (menu && n.items) return <NavMenu key={label} label={label} items={n.items} testId={`practice-nav-${key}`} className={cls} />;
