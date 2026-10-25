@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, PillFilter, TagsFilter } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
+import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
 
 const usd = (n) => `${n < 0 ? "-" : ""}$${Math.abs(Number(n || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const mdy = (iso) => { if (!iso) return "-"; const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
@@ -87,10 +88,30 @@ const TYPE_OF = (r) => r.type === "Payment" ? "Contact" : r.type === "Check" ? "
 const METHOD_OF = (m) => m === "Credit / Debit Card" ? "Credit Card / Debit Card" : m === "Bank Transfer" ? "Transfer" : m;
 const Chip = ({ children, active, onClear, testId }) => <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700"}`} data-testid={testId}>{children}{active && onClear ? <button type="button" onClick={onClear}><X size={12} /></button> : !active && <ChevronDown size={12} />}</span>;
 
+function ActionsMenu({ nav, onContactPayment }) {
+  const [open, setOpen] = useState(false);
+  const items = [[CreditCard, "Contact Payment", onContactPayment], null, [Printer, "Print Checks", () => nav("/practice/payments/print-checks")], [Printer, "Deposit Slips", null], null, [Download, "Daily Report", null], [Download, "Monthly Report", null]];
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white" data-testid="practice-payments-actions"><Wrench size={14} /> Actions <ChevronDown size={12} /></button>
+      {open && <>
+        <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl" data-testid="practice-payments-actions-menu">
+          {items.map((it, i) => it === null ? <div key={i} className="my-1 border-t border-slate-200" /> : (
+            <button key={it[1]} type="button" disabled={!it[2]} onClick={() => { setOpen(false); it[2]?.(); }} data-testid={`practice-payments-action-${it[1].toLowerCase().replace(/\s+/g, "-")}`}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm ${it[2] ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{(() => { const I = it[0]; return <I size={13} />; })()}{it[1]}</button>
+          ))}
+        </div>
+      </>}
+    </div>
+  );
+}
+
 export function PracticePayments() {
   const nav = useNavigate();
   const [rows] = useLedger();
   const [q, setQ] = useState("");
+  const [newPay, setNewPay] = useState(false);
   const all = rows || [];
   const shown = all.filter(r => `${r.ref} ${r.contact_name} ${r.matter_name} ${r.notes}`.toLowerCase().includes(q.toLowerCase()));
   const paid = all.reduce((a, r) => a + r.amount, 0);
@@ -104,8 +125,9 @@ export function PracticePayments() {
           <div className="flex-1" />
           <button type="button" className={pill}><CreditCard size={14} /> Get Paid Faster</button><button type="button" className={pill}><Printer size={14} /> Deposit Slips</button>
           <button type="button" onClick={() => nav("/practice/payments/print-checks")} className={pill} data-testid="practice-payments-print-checks"><Printer size={14} /> Print Checks</button>
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"><Wrench size={14} /> Actions <ChevronDown size={12} /></button>
+          <ActionsMenu nav={nav} onContactPayment={() => setNewPay(true)} />
         </div>
+        {newPay && <NewPaymentModal onClose={() => setNewPay(false)} />}
         <div className="space-y-2 text-sm text-slate-700" data-testid="practice-payments-filters">
           <div className="flex items-center gap-2"><span>Bank Account</span><select className={`${sel} w-56`} defaultValue=""><option value="">Select Bank Account...</option><option>Operating Account</option><option>Trust Account</option></select></div>
           <div className="flex flex-wrap items-center gap-2"><span>Payment Method</span><select className={`${sel} w-56`} defaultValue="Any method"><option>Any method</option><option>Cash</option><option>Check</option><option>Credit / Debit Card</option></select><span>Assigned To</span><select className={`${sel} w-24`} defaultValue="Contact"><option>Contact</option><option>Matter</option></select><UserFilter testId="practice-payments-user" /><TagsFilter testId="practice-payments-tags" /><span>Date Range</span><PillFilter testId="practice-payments-range">All Time</PillFilter></div>
