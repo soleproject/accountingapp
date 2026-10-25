@@ -5,6 +5,7 @@ import { UserPlus, KeyRound, Plus, Search, Settings, Check, X, Info } from "luci
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { GreenButton, Toggle, input as inp } from "@/components/practice/forms";
+import { Can } from "@/components/practice/perms";
 
 const fmtAt = (iso) => iso ? new Date(iso).toLocaleString("en-US", { month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "-";
 const TH = ({ children }) => <th className="px-3 py-3 text-left text-[13px] font-semibold uppercase tracking-wide text-slate-600">{children}</th>;
@@ -28,19 +29,28 @@ const SearchBar = ({ q, setQ, placeholder, testId }) => (
 export function UsersPanel() {
   const nav = useNavigate();
   const [rows, setRows] = useState(null);
+  const [roles, setRoles] = useState([]);
   const [q, setQ] = useState("");
-  useEffect(() => { api.get("/practice/users").then(r => setRows(r.data)).catch(() => setRows([])); }, []);
+  const load = () => api.get("/practice/users").then(r => setRows(r.data)).catch(() => setRows([]));
+  useEffect(() => { load(); api.get("/practice/roles").then(r => setRoles(r.data)).catch(() => {}); }, []);
+  const setRole = async (u, role_id) => { try { await api.put(`/practice/users/${u.id}`, { role_id }); toast.success("Role updated."); load(); } catch (e) { toast.error(e?.response?.data?.detail || "Could not update"); } };
+  const setActive = async (u, active) => { try { await api.put(`/practice/users/${u.id}`, { active }); load(); } catch { toast.error("Could not update"); } };
   const shown = (rows || []).filter(u => `${u.name} ${u.email}`.toLowerCase().includes(q.toLowerCase()));
   return (
-    <Panel icon={UserPlus} title="Users" testId="practice-users-panel" btn={<GreenButton onClick={() => nav("/practice/users/new")} testId="practice-users-new-btn"><Plus size={14} /> New User</GreenButton>}>
+    <Panel icon={UserPlus} title="Users" testId="practice-users-panel" btn={<Can feature="Users & User Groups" action="create"><GreenButton onClick={() => nav("/practice/users/new")} testId="practice-users-new-btn"><Plus size={14} /> New User</GreenButton></Can>}>
       <SearchBar q={q} setQ={setQ} placeholder="Users..." testId="practice-users-search" />
       <table className="w-full text-sm">
         <thead><tr className="border-b border-slate-200"><TH>Name</TH><TH>Email</TH><TH>Role</TH><TH>Last Login</TH><TH>Active</TH></tr></thead>
         <tbody>{shown.map((u, i) => (
           <tr key={u.id} className={i % 2 ? "" : "bg-slate-50"} data-testid={`practice-user-row-${u.id}`}>
             <td className="px-3 py-3"><button type="button" onClick={() => nav(u.is_owner ? "/practice/users/me" : "/practice/users/me")} className="font-semibold text-[#1E88E5] hover:underline text-[15px]">{u.name}</button></td>
-            <td className="px-3 py-3 text-[#1E88E5]">{u.email}</td><td className="px-3 py-3 text-[#1E88E5]">{u.role_name}</td><td className="px-3 py-3 text-slate-700">{fmtAt(u.last_login)}</td>
-            <td className="px-3 py-3"><span className={`inline-block min-w-[80px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold text-white ${u.active ? "bg-[#43A047]" : "bg-slate-400"}`}>{u.active ? "YES" : "NO"}</span>
+            <td className="px-3 py-3 text-[#1E88E5]">{u.email}</td>
+            <td className="px-3 py-3">{u.is_owner ? <span className="text-[#1E88E5]">{u.role_name}</span> : (
+              <Can feature="Users & User Groups" action="edit" fallback={<span className="text-[#1E88E5]">{u.role_name}</span>}>
+                <select value={u.role_id || ""} onChange={e => setRole(u, e.target.value)} className="h-8 rounded border border-slate-300 bg-white px-2 text-sm text-[#1E88E5]" data-testid={`practice-user-role-${u.id}`}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select>
+              </Can>)}</td>
+            <td className="px-3 py-3 text-slate-700">{fmtAt(u.last_login)}</td>
+            <td className="px-3 py-3"><button type="button" disabled={u.is_owner} onClick={() => setActive(u, !u.active)} className={`inline-block min-w-[80px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold text-white ${u.active ? "bg-[#43A047]" : "bg-slate-400"}`} data-testid={`practice-user-active-${u.id}`}>{u.active ? "YES" : "NO"}</button>
               {!u.is_owner && !u.last_login && <button type="button" onClick={async () => { try { await api.post(`/practice/users/${u.id}/resend-invite`); toast.success("Invitation re-sent."); } catch { toast.error("Could not send"); } }} className="ml-3 text-xs text-[#1E88E5] hover:underline" data-testid={`practice-user-resend-${u.id}`}>Resend Invite</button>}</td>
           </tr>))}</tbody>
       </table>
@@ -58,7 +68,7 @@ export function RolesPanel() {
   return (
     <div className="space-y-4">
       <div className="rounded border border-slate-200 bg-white px-6 py-4 text-sm text-slate-700" data-testid="practice-roles-info">Roles define how users access records and data, and what they can do within Practice. When you create users, you assign a role to each one. <span className="text-[#1E88E5]">Click here</span> to learn more.</div>
-      <Panel icon={KeyRound} title="Roles & Access Levels" testId="practice-roles-panel" btn={<GreenButton onClick={() => nav("/practice/roles/new")} testId="practice-roles-new-btn"><Plus size={14} /> New Role</GreenButton>}>
+      <Panel icon={KeyRound} title="Roles & Access Levels" testId="practice-roles-panel" btn={<Can feature="Roles" action="create"><GreenButton onClick={() => nav("/practice/roles/new")} testId="practice-roles-new-btn"><Plus size={14} /> New Role</GreenButton></Can>}>
         <SearchBar q={q} setQ={setQ} placeholder="Search Roles..." testId="practice-roles-search" />
         <table className="w-full text-sm">
           <thead><tr className="border-b border-slate-200"><TH>Name ↓</TH><TH>Users</TH><TH>Last Modified Date</TH><TH>Created Date</TH></tr></thead>

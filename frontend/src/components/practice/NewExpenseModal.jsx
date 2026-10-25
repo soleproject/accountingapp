@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Plus, X, Check, Move, Paperclip, ChevronDown } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useNavigate } from "react-router-dom";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { MatterPicker } from "@/components/practice/MatterPicker";
 import { SearchSelect } from "@/components/practice/SearchSelect";
@@ -48,6 +49,7 @@ function CostTypeSelect({ value, onChange }) {
 
 export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
   const { user } = useAuth();
+  const nav = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
   const [cats, setCats] = useState([]);
@@ -128,7 +130,7 @@ export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
             <button type="button" onClick={save} disabled={busy} data-testid="practice-exp-save-btn" className="inline-flex items-center gap-1.5 rounded bg-[#43A047] px-4 py-2 text-sm font-semibold text-white hover:bg-[#388E3C] disabled:opacity-60"><Check size={14} /> Save</button>
             <button type="button" onClick={onClose} data-testid="practice-exp-cancel-btn" className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"><X size={14} /> Cancel</button>
             <div className="flex-1" />
-            <button type="button" className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-exp-multiple-btn"><Plus size={14} /> Multiple Expenses</button>
+            <button type="button" onClick={() => { onClose(); nav("/practice/expenses/multiple"); }} className="inline-flex items-center gap-1.5 rounded border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-exp-multiple-btn"><Plus size={14} /> Multiple Expenses</button>
           </div>
         </div>
       </div>

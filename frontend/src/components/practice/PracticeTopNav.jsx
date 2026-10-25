@@ -7,6 +7,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerStore";
 import { TimerPanel } from "@/components/practice/TimerPanel";
+import { usePracticePerms, featureForPath, resetPracticePerms } from "@/components/practice/perms";
 
 function TopTimerButton() {
   const { active, running, seconds } = usePracticeTimer();
@@ -41,7 +42,8 @@ function TopTimerButton() {
 const NAV = [
   { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
   { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses", to: "/practice/expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
-  { label: "Payments", menu: true },
+  { label: "Payments", menu: true, to: "/practice/payments", items: [{ label: "Payment History", to: "/practice/payments" }, { label: "Payment Plans", to: "/practice/settings?section=accept-online-payments" },
+    { label: "Banks & Credit Cards", header: true }, { label: "Manage Accounts", to: "/practice/payments/accounts", sub: true }, { label: "Account Reconciliation", to: "/practice/payments/reconciliation", sub: true }, { label: "Print Checks", to: "/practice/payments/print-checks", sub: true }, { label: "Deposit Slips", sub: true }] },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
 ];
@@ -52,6 +54,7 @@ const PRODUCTS = [
 ];
 
 function ProfileMenu({ user }) {
+  const { me } = usePracticePerms();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const nav = useNavigate();
@@ -80,7 +83,7 @@ function ProfileMenu({ user }) {
         <div data-testid="practice-profile-menu"
              className="absolute right-0 top-full mt-2 w-56 rounded-md border border-slate-200 bg-white shadow-xl py-1 z-50 text-slate-800">
           <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Product</div>
-          {PRODUCTS.map(p => {
+          {PRODUCTS.filter(p => p.key === "practice" || me?.is_owner !== false).map(p => {
             const Icon = p.icon;
             const active = p.key === "practice";
             return (
@@ -100,7 +103,7 @@ function ProfileMenu({ user }) {
           <button type="button" className={item} data-testid="practice-menu-subscription" onClick={() => setOpen(false)}>
             <CreditCard size={15} className="text-slate-500" /> Subscription
           </button>
-          <button type="button" className={item} data-testid="practice-menu-signout" onClick={logout}>
+          <button type="button" className={item} data-testid="practice-menu-signout" onClick={() => { resetPracticePerms(); logout(); }}>
             <LogOut size={15} className="text-slate-500" /> Sign Out
           </button>
         </div>
@@ -125,8 +128,8 @@ function NavMenu({ label, items, testId, className }) {
       {open && (
         <div className="absolute left-0 top-full mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl z-50" data-testid={`${testId}-menu`}>
           {items.map(it => (
-            <button key={it.label} type="button" onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
-                    className={`w-full px-4 py-2 text-left text-sm ${it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}</button>
+            <button key={it.label} type="button" disabled={it.header} onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                    className={`w-full py-2 text-left text-sm ${it.sub ? "pl-8 pr-4" : "px-4"} ${it.header ? "text-slate-500 font-semibold border-t border-slate-100 mt-1 pt-2" : it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}{it.header && " ›"}</button>
           ))}
         </div>
       )}
@@ -135,6 +138,7 @@ function NavMenu({ label, items, testId, className }) {
 }
 
 export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
+  const { can } = usePracticePerms();
   const nav = useNavigate();
   const { pathname } = useLocation();
   return (
@@ -163,7 +167,14 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
         <input placeholder="Search" data-testid="practice-search-input"
                className="h-8 w-52 rounded-full bg-white pl-8 pr-3 text-sm text-slate-700 outline-none" />
       </label>
-      {NAV.map(n => {
+      {NAV.filter(n => {
+        const to = typeof n !== "string" ? n.to : null;
+        if (!to) return true;
+        if (n.items) return n.items.some(i => i.to && featureForPath(i.to) && can(featureForPath(i.to), "view"));
+        const f = featureForPath(to);
+        return !f || can(f, "view");
+      }).map(n0 => {
+        const n = n0.items ? { ...n0, items: n0.items.filter(i => !i.to || !featureForPath(i.to) || can(featureForPath(i.to), "view")) } : n0;
         const label = typeof n === "string" ? n : n.label;
         const menu = typeof n !== "string" && n.menu;
         const to = typeof n !== "string" ? n.to : null;

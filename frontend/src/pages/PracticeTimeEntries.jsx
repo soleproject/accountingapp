@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, PillFilter, TagsFilter, EmptyIllustration } from "@/components/practice/listParts";
 import { TimeEntriesTable } from "@/components/practice/tables";
+import { Can } from "@/components/practice/perms";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import { toISO } from "@/components/practice/DateTimePicker";
 import { startOfWeek } from "@/components/practice/CalendarSidebar";
@@ -52,7 +53,7 @@ export default function PracticeTimeEntries() {
           <h1 className="text-3xl font-bold text-slate-800">Time Entries</h1>
           <div className="flex-1" />
           <button type="button" data-testid="practice-te-multiple-page-btn" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Plus size={14} /> Multiple Time Entries</button>
-          <button type="button" onClick={() => setModal(true)} data-testid="practice-te-page-new-btn" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Time Entry</button>
+          <Can feature="Time Entries" action="create"><button type="button" onClick={() => setModal(true)} data-testid="practice-te-page-new-btn" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New Time Entry</button></Can>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-te-filters">
           <span>Billed By</span><UserFilter testId="practice-te-billed-by-filter" />
