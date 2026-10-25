@@ -33,6 +33,58 @@ const AccountPicker = ({ accounts, value, onChange, rows, testId }) => {
     </div>
   );
 };
+const DATE_PRESETS = ["All Time", "Today", "Yesterday", "Last 7 Days", "Last 30 Days", "This Month", "Last Month", "This Year", "Last Year", "This Quarter", "Last Quarter", "Custom"];
+export const presetBounds = (label, custom = {}) => {
+  const t = new Date(); const iso = (d) => d.toISOString().slice(0, 10); const d = (n) => { const x = new Date(t); x.setDate(x.getDate() + n); return iso(x); };
+  const y = t.getFullYear(), m = t.getMonth(), qs = Math.floor(m / 3) * 3;
+  switch (label) {
+    case "Today": return [iso(t), iso(t)]; case "Yesterday": return [d(-1), d(-1)]; case "Last 7 Days": return [d(-6), iso(t)]; case "Last 30 Days": return [d(-29), iso(t)];
+    case "This Month": return [iso(new Date(y, m, 1)), iso(new Date(y, m + 1, 0))]; case "Last Month": return [iso(new Date(y, m - 1, 1)), iso(new Date(y, m, 0))];
+    case "This Year": return [`${y}-01-01`, `${y}-12-31`]; case "Last Year": return [`${y - 1}-01-01`, `${y - 1}-12-31`];
+    case "This Quarter": return [iso(new Date(y, qs, 1)), iso(new Date(y, qs + 3, 0))]; case "Last Quarter": return [iso(new Date(y, qs - 3, 1)), iso(new Date(y, qs, 0))];
+    case "Custom": return [custom.from || null, custom.to || null]; default: return [null, null];
+  }
+};
+function FilterChip({ label, value, options, multi, date, onChange, testId }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState({ from: "", to: "" });
+  const active = date ? value && value !== "All Time" : multi ? value.length > 0 : !!value;
+  const text = date ? (value && value !== "All Time" ? `Date: ${value === "Custom" ? `${custom.from || "…"} – ${custom.to || "…"}` : value}` : label) : multi ? (value.length ? `${label}: ${value.join(", ")}` : label) : (value || label);
+  const clear = (e) => { e.stopPropagation(); onChange(date ? "All Time" : multi ? [] : ""); };
+  return (
+    <div className="relative inline-block">
+      <button type="button" onClick={() => setOpen(v => !v)} data-testid={testId} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700 bg-white"}`}>
+        {text}{active ? <span role="button" onClick={clear} data-testid={`${testId}-clear`}><X size={12} /></span> : <ChevronDown size={12} />}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-30 mt-1 rounded border border-slate-200 bg-white shadow-xl text-sm" data-testid={`${testId}-menu`}>
+          {date ? (
+            <div className="flex">
+              <ul className="w-36 py-1 max-h-80 overflow-y-auto">{DATE_PRESETS.map(o => <li key={o}><button type="button" onClick={() => { onChange(o, custom); if (o !== "Custom") setOpen(false); }} data-testid={`${testId}-opt-${o.toLowerCase().replace(/\s+/g, "-")}`} className={`w-full px-3 py-1.5 text-left text-xs ${value === o ? "bg-slate-100 font-semibold" : "hover:bg-slate-50"}`}>{o}</button></li>)}</ul>
+              <div className="border-l border-slate-200 p-3 space-y-2 w-64">
+                <label className="block text-xs text-slate-500">From<input type="date" value={custom.from} onChange={e => setCustom(c => ({ ...c, from: e.target.value }))} data-testid={`${testId}-from`} className="block w-full h-8 rounded border border-slate-300 px-2 text-sm" /></label>
+                <label className="block text-xs text-slate-500">To<input type="date" value={custom.to} onChange={e => setCustom(c => ({ ...c, to: e.target.value }))} data-testid={`${testId}-to`} className="block w-full h-8 rounded border border-slate-300 px-2 text-sm" /></label>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => { onChange("All Time"); setOpen(false); }} className="px-2 text-xs text-slate-700">All Time</button>
+                  <button type="button" onClick={() => setCustom({ from: "", to: "" })} className="h-7 px-3 rounded border border-slate-300 text-xs">Clear</button>
+                  <button type="button" onClick={() => { onChange("Custom", custom); setOpen(false); }} data-testid={`${testId}-apply`} className="h-7 px-3 rounded bg-[#1E88E5] text-xs font-semibold text-white">Apply</button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <ul className="min-w-[180px] py-1 max-h-72 overflow-y-auto">{options.map(o => (
+              <li key={o}><button type="button" onClick={() => { if (multi) onChange(value.includes(o) ? value.filter(x => x !== o) : [...value, o]); else { onChange(o); setOpen(false); } }} data-testid={`${testId}-opt-${o.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                                  className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-slate-50 ${!multi && value === o ? "bg-slate-100 font-semibold" : ""}`}>{multi && <input type="checkbox" readOnly checked={value.includes(o)} className="h-3.5 w-3.5" />}{o}</button></li>
+            ))}</ul>
+          )}
+        </div>
+      )}
+      {open && <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />}
+    </div>
+  );
+}
+const TYPE_OF = (r) => r.type === "Payment" ? "Contact" : r.type === "Check" ? "Firm" : "Expense";
+const METHOD_OF = (m) => m === "Credit / Debit Card" ? "Credit Card / Debit Card" : m === "Bank Transfer" ? "Transfer" : m;
 const Chip = ({ children, active, onClear, testId }) => <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700"}`} data-testid={testId}>{children}{active && onClear ? <button type="button" onClick={onClear}><X size={12} /></button> : !active && <ChevronDown size={12} />}</span>;
 
 export function PracticePayments() {
@@ -145,15 +197,22 @@ export function PracticeReconciliation() {
   const [rows, load] = useLedger();
   const [accounts, setAccounts] = useState([]);
   const [account, setAccount] = useState(new URLSearchParams(window.location.search).get("account") || "Operating Account");
-  const [onlyUnrec, setOnlyUnrec] = useState(true);
-  const [last30, setLast30] = useState(true);
+  const [status, setStatus] = useState("Not Reconciled");
+  const [dateF, setDateF] = useState("Last 30 Days");
+  const [customF, setCustomF] = useState({});
+  const [types, setTypes] = useState([]);
+  const [methods, setMethods] = useState([]);
   const [q, setQ] = useState("");
   const [sel2, setSel2] = useState({});
   useEffect(() => { api.get("/practice/bank-accounts").then(r => setAccounts(r.data)).catch(() => {}); }, []);
-  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const [from, to] = presetBounds(dateF, customF);
   const inAcct = (rows || []).filter(r => r.account === account);
-  const shown = inAcct.filter(r => (!onlyUnrec || !r.reconciled) && (!last30 || r.date >= cutoff) && `${r.ref} ${r.notes} ${r.contact_name} ${r.matter_name}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = inAcct.filter(r => (!status || (status === "Reconciled") === !!r.reconciled) && (!from || r.date >= from) && (!to || r.date <= to)
+    && (!types.length || types.includes(TYPE_OF(r))) && (!methods.length || methods.includes(METHOD_OF(r.method)))
+    && `${r.ref} ${r.notes} ${r.contact_name} ${r.matter_name}`.toLowerCase().includes(q.toLowerCase()));
   const unrec = inAcct.filter(r => !r.reconciled), rec = inAcct.filter(r => r.reconciled);
+  const scope = status === "Reconciled" ? rec : status === "Not Reconciled" ? unrec : inAcct;
+  const scopeLabel = status === "Reconciled" ? "Reconciled" : status === "Not Reconciled" ? "Not Reconciled" : "Total";
   const sum = (l) => l.reduce((a, r) => a + r.amount, 0);
   const mark = async (r, v) => { try { await api.patch(`/practice/ledger/${r.src}/${r.id}`, { reconciled: v }); toast.success(v ? "Marked reconciled." : "Marked not reconciled."); load(); } catch { toast.error("Could not update"); } };
   const markSelected = async () => { for (const r of shown.filter(x => sel2[x.ref])) await api.patch(`/practice/ledger/${r.src}/${r.id}`, { reconciled: true }); setSel2({}); load(); };
@@ -164,19 +223,21 @@ export function PracticeReconciliation() {
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
           <div className="rounded bg-slate-100 px-4 py-3" data-testid="practice-recon-unrec"><Sub>Total Not Reconciled</Sub><Big neg={sum(unrec) < 0} note={`from ${unrec.length} payment${unrec.length === 1 ? "" : "s"}`}>{usd(sum(unrec))} USD</Big></div>
           <div className="rounded bg-slate-100 px-4 py-3" data-testid="practice-recon-rec"><Sub>Total Reconciled</Sub><Big>{usd(sum(rec))} USD</Big></div>
-          <div className="rounded bg-slate-100 px-4 py-3"><Sub>Not Reconciled Deposits</Sub><Big>{usd(sum(unrec.filter(r => r.amount > 0)))} USD</Big></div>
-          <div className="rounded bg-slate-100 px-4 py-3"><Sub>Not Reconciled Withdrawals</Sub><Big neg={sum(unrec.filter(r => r.amount < 0)) < 0} note={`from ${unrec.filter(r => r.amount < 0).length} payment${unrec.filter(r => r.amount < 0).length === 1 ? "" : "s"}`}>{usd(sum(unrec.filter(r => r.amount < 0)))} USD</Big></div>
+          <div className="rounded bg-slate-100 px-4 py-3" data-testid="practice-recon-deposits"><Sub>{scopeLabel} Deposits</Sub><Big note={scope.filter(r => r.amount > 0).length ? `from ${scope.filter(r => r.amount > 0).length} payment${scope.filter(r => r.amount > 0).length === 1 ? "" : "s"}` : ""}>{usd(sum(scope.filter(r => r.amount > 0)))} USD</Big></div>
+          <div className="rounded bg-slate-100 px-4 py-3" data-testid="practice-recon-withdrawals"><Sub>{scopeLabel} Withdrawals</Sub><Big neg={sum(scope.filter(r => r.amount < 0)) < 0} note={scope.filter(r => r.amount < 0).length ? `from ${scope.filter(r => r.amount < 0).length} payment${scope.filter(r => r.amount < 0).length === 1 ? "" : "s"}` : ""}>{usd(sum(scope.filter(r => r.amount < 0)))} USD</Big></div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <Chip active={onlyUnrec} onClear={() => setOnlyUnrec(false)} testId="practice-recon-chip-unrec">Not Reconciled</Chip>
-          <Chip active={last30} onClear={() => setLast30(false)} testId="practice-recon-chip-date">Date: Last 30 Days</Chip>
-          {["Type", "Method", "Reconciled Date", "Deposit Date", "Amount"].map(c => <Chip key={c}>{c}</Chip>)}
-          <button type="button" onClick={() => { setOnlyUnrec(false); setLast30(false); }} className="px-2 text-slate-700" data-testid="practice-recon-clear">Clear</button>
-          <button type="button" onClick={() => { setOnlyUnrec(true); setLast30(true); }} className="px-2 text-slate-700" data-testid="practice-recon-reset">Reset</button>
+          <FilterChip label="Reconciled Status" value={status} options={["Reconciled", "Not Reconciled"]} onChange={setStatus} testId="practice-recon-chip-status" />
+          <FilterChip label="Date" date value={dateF} onChange={(v, c) => { setDateF(v); if (c) setCustomF(c); }} testId="practice-recon-chip-date" />
+          <FilterChip label="Type" multi value={types} options={["Contact", "Firm", "Refund", "Expense"]} onChange={setTypes} testId="practice-recon-chip-type" />
+          <FilterChip label="Method" multi value={methods} options={["Cash", "Check", "Credit Card / Debit Card", "Other", "Practice Payments Credit / Debit Card", "Practice Payments eCheck", "Transfer", "Wire"]} onChange={setMethods} testId="practice-recon-chip-method" />
+          {["Reconciled Date", "Deposit Date", "Amount"].map(c => <Chip key={c}>{c}</Chip>)}
+          <button type="button" onClick={() => { setStatus(""); setDateF("All Time"); setTypes([]); setMethods([]); }} className="px-2 text-slate-700" data-testid="practice-recon-clear">Clear</button>
+          <button type="button" onClick={() => { setStatus("Not Reconciled"); setDateF("Last 30 Days"); setTypes([]); setMethods([]); }} className="px-2 text-slate-700" data-testid="practice-recon-reset">Reset</button>
         </div>
         <div className="flex items-center gap-3"><div className="inline-flex items-center gap-2 h-10 w-[350px] rounded-full border border-slate-300 bg-white px-4 text-sm"><Search size={14} className="text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search ID, Notes, Contacts or Matters" className="flex-1 outline-none" data-testid="practice-recon-search" /></div><div className="flex-1" />
           <span className="inline-flex items-center gap-1 text-sm text-slate-700"><Columns3 size={14} /> Columns</span><span className="inline-flex items-center gap-1 text-sm text-slate-700"><Printer size={14} /> Print</span><span className="inline-flex items-center gap-1 text-sm text-slate-700"><Download size={14} /> Export</span>
-          <button type="button" onClick={markSelected} disabled={!Object.values(sel2).some(Boolean)} className="inline-flex items-center gap-1 rounded bg-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-60" data-testid="practice-recon-actions"><Wrench size={14} /> Actions</button></div>
+          <button type="button" onClick={markSelected} disabled={!shown.some(x => sel2[x.ref])} className="inline-flex items-center gap-1 rounded bg-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-60" data-testid="practice-recon-actions"><Wrench size={14} /> Actions</button></div>
         <div className="rounded border border-slate-200 bg-white overflow-hidden">
           <table className="w-full text-[15px]">
             <thead><tr className="text-left text-slate-800"><th className="px-3 py-3"><input type="checkbox" className="h-4 w-4" /></th><th /><th className="px-3 py-3">Reconciliation</th>{["ID", "Type", "Notes", "Date ↓", "Deposits", "Withdrawals", "Payment Method", "Contact", "Matter", "Payee / Payor", "Account"].map(c => <th key={c} className="px-3 py-3">{c}</th>)}</tr></thead>
@@ -184,7 +245,7 @@ export function PracticeReconciliation() {
               {shown.map(r => (
                 <tr key={r.ref} className="border-t border-slate-200" data-testid={`practice-recon-row-${r.ref}`}>
                   <td className="px-3 py-3"><input type="checkbox" className="h-4 w-4" checked={!!sel2[r.ref]} onChange={e => setSel2(s => ({ ...s, [r.ref]: e.target.checked }))} /></td><td className="text-slate-400">⋮</td>
-                  <td className="px-3 py-3"><button type="button" onClick={() => mark(r, !r.reconciled)} className={`inline-flex items-center gap-1 ${r.reconciled ? "text-[#43A047]" : "text-slate-800"}`} data-testid={`practice-recon-mark-${r.ref}`}><Check size={14} /> {r.reconciled ? "Reconciled" : "Mark Reconciled"}</button></td>
+                  <td className="px-3 py-3"><button type="button" onClick={() => mark(r, !r.reconciled)} className="inline-flex items-center gap-1 text-slate-800 hover:text-[#1E88E5]" data-testid={`practice-recon-mark-${r.ref}`}>{r.reconciled ? <><X size={14} /> Mark Not Reconciled</> : <><Check size={14} /> Mark Reconciled</>}</button></td>
                   <td className="px-3 py-3 text-[#1E88E5]">{r.ref}</td><td className="px-3 py-3 text-slate-700">{r.type}</td><td className="px-3 py-3 text-slate-700">{r.notes || "-"}</td><td className="px-3 py-3 text-slate-700">{mdy(r.date)}</td>
                   <td className="px-3 py-3 text-right text-slate-700">{r.amount > 0 ? usd(r.amount) : "-"}</td>
                   <td className="px-3 py-3 text-right">{r.amount < 0 ? <span className="rounded-full bg-[#E53935] px-3 py-0.5 text-sm text-white">{usd(r.amount)}</span> : "-"}</td>
