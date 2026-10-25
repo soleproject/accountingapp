@@ -1278,3 +1278,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Tab counts for Matters, Activities, Invoices, Payments, Time, Expenses.
 - New `components/practice/ContactTabs.jsx`: MattersTab (New Matter, filters, MattersTable w/ Trust/Operating/Billable pills), ActivitiesTab (New ▾ Task/Event prefilled with contact, click row to edit; COMPLETED/OVERDUE pills; `GET /activities?contact_id=`), InvoicesTab (New Invoice, status filter, PAID green pill, `InvoicesTable` extracted from PracticeInvoices), PaymentsTab (Actions ▾ → Contact Payment prefilled; `PaymentsTable`/`ActionsMenu` exported from PracticePaymentsPages; `GET /ledger?contact_id=`), TimeTab (New Time Entry prefilled, status filter, TimeEntriesTable hideContact; `GET /time-entries/all?contact_id=`). Each tab ends with a RECENT ACTIVITY collapsible.
 - Placeholder tabs still: Notes, Messages, Expenses, Flat Fees, Relationships, Intakes, Files.
+
+## 2026-06 — Activities page + Notes & Calls
+- Top nav "Activities" dropdown: All Activities, Tasks, Events, Calls, Notes (→ /practice/activities?kind=), Emails / Text Messages / Workflows placeholders.
+- `/practice/activities` (`PracticeActivities.jsx`): Import/Workflows placeholders, +New ▾ (Task/Event/Note/Call), kind + status filters, All/Completed/Incomplete/Overdue cards, ActivitiesTable with Contact column and hover pill (Edit, Log Time → time entry modal prefilled; Log Flat Fee / Time Logged placeholders). Click row → edit modal for its kind.
+- New Note / New Call modals (`NewNoteCallModals.jsx`) incl. call timer → duration, Save / Save and add time entry. Backend `POST/PUT /api/practice/notes|calls` store in practice_tasks with kind note/call; `/tasks` (calendar/agenda) excludes them; `/activities?kind=` filter + contact_name.
+- Shared `ActivityModal.jsx` (NewActivityMenu + ActivityModal) also powers the contact Activities tab.

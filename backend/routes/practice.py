@@ -17,7 +17,7 @@ _role_guard = require_role("superadmin", "practice")
 # path prefix -> permission feature
 _FEATURE_BY_PATH = [
     ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
-    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
+    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/notes", "Activities (Tasks, Events & Calls)"), ("/calls", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
     ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
     ("/payments", "Contact Payments"), ("/retainers", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
     ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
@@ -353,9 +353,63 @@ async def reminder_defaults(user: dict = Depends(_guard)):
     return (doc or {}).get("default_reminders") or []
 
 
+class PracticeNoteIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    subject: str
+    private: bool = False
+    description: str = ""
+    due_date: str
+    due_time: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    assigned_users: list[str] = Field(default_factory=list)
+
+
+class PracticeCallIn(PracticeNoteIn):
+    call_type: str = "Inbound"
+    duration: str = ""
+    assigned_contacts: str = ""
+
+
+async def _save_activity(inp, kind: str, user: dict, item_id: Optional[str] = None):
+    if not inp.subject.strip():
+        raise HTTPException(400, "Subject is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    data = {**inp.model_dump(), "all_day": False, "assigned_users": inp.assigned_users or [user.get("name", "")]}
+    if item_id:
+        r = await db.practice_tasks.update_one({"id": item_id, "owner_id": user["id"], "kind": kind}, {"$set": {**data, "updated_at": now}})
+        if not r.matched_count:
+            raise HTTPException(404, "Not found")
+        return await db.practice_tasks.find_one({"id": item_id}, {"_id": 0})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **data, "kind": kind, "created_at": now, "updated_at": now}
+    await db.practice_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.post("/notes")
+async def create_note(inp: PracticeNoteIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "note", user)
+
+
+@router.put("/notes/{item_id}")
+async def update_note(item_id: str, inp: PracticeNoteIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "note", user, item_id)
+
+
+@router.post("/calls")
+async def create_call(inp: PracticeCallIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "call", user)
+
+
+@router.put("/calls/{item_id}")
+async def update_call(item_id: str, inp: PracticeCallIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "call", user, item_id)
+
+
 @router.get("/tasks")
 async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(_guard)):
-    q = {"owner_id": user["id"]}
+    q = {"owner_id": user["id"], "kind": {"$nin": ["note", "call"]}}
     if start and end:
         q["due_date"] = {"$gte": start, "$lte": end}
     docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", 1), ("due_time", 1)]).to_list(2000)
@@ -487,23 +541,31 @@ async def _counts(user_id: str, **match) -> dict:
 
 
 @router.get("/activities")
-async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[str] = None, kind: Optional[str] = None, user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
     if contact_id:
         q["contact_id"] = contact_id
     if matter_id:
         q["matter_id"] = matter_id
+    if kind:
+        q["kind"] = kind if kind != "task" else {"$in": ["task", None]}
     docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", -1), ("start_date", -1), ("created_at", -1)]).to_list(2000)
     mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     now = datetime.now()
     today, tnow = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
     out = []
     for d in docs:
-        if d.get("kind") == "event":
+        k = d.get("kind") or "task"
+        if k == "event":
             ended = (d.get("end_date") or d.get("start_date"), d.get("end_time") or "23:59") < (today, tnow)
             status = "Completed" if ended else "Scheduled"
             when = {"start_date": d.get("start_date"), "start_time": d.get("start_time"), "end_date": d.get("end_date"), "end_time": d.get("end_time")}
+        elif k in ("note", "call"):
+            status = None
+            when = {}
         else:
             if d.get("status") == "Completed":
                 status = "Completed"
@@ -512,7 +574,7 @@ async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[
             else:
                 status = d.get("status") or "Not Completed"
             when = {"due_date": d.get("due_date"), "due_time": d.get("due_time")}
-        out.append({**d, "status": status, "matter_name": matters.get(d.get("matter_id"), ""), "assigned_users": d.get("assigned_users") or [user.get("name", "")], **when})
+        out.append({**d, "kind": k, "status": status, "matter_name": matters.get(d.get("matter_id"), ""), "contact_name": contacts.get(d.get("contact_id"), ""), "assigned_users": d.get("assigned_users") or [user.get("name", "")], **when})
     out.sort(key=lambda r: (r.get("due_date") or r.get("start_date") or "", r.get("due_time") or r.get("start_time") or ""), reverse=True)
     return out
 

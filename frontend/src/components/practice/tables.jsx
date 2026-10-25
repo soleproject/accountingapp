@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, CalendarDays, ClipboardList } from "lucide-react";
+import { Play, CalendarDays, ClipboardList, StickyNote, Phone } from "lucide-react";
 import { money, billableMoney, trustMoney, operatingMoney, Avatar, ListToolbar, ListHead, ListFooter, HoverPill } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
 import { timer, showRail } from "@/components/practice/timerStore";
@@ -151,41 +151,49 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
   );
 }
 
-const ACT_COLS = ["Activity", "Status", "Date", "Description", "Matter", "Assigned To"];
+const ACT_COLS = ["Activity", "Status", "Date", "Description", "Contact", "Matter", "Assigned To"];
 const t12 = (t) => { if (!t) return ""; const [h, m] = t.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`; };
-const StatusPill = ({ s }) => (
+const StatusPill = ({ s }) => s ? (
   <span className={`inline-block min-w-[110px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider ${
     s === "Completed" ? "bg-[#43A047] text-white" : s === "Overdue" ? "bg-[#E53935] text-white" : "border border-slate-400 bg-white text-slate-700"}`}>{s}</span>
-);
+) : null;
+const KIND_ICON = { event: CalendarDays, note: StickyNote, call: Phone };
+const strip = (h) => (h || "").replace(/<[^>]+>/g, "");
 
-export function ActivitiesTable({ rows, nav, onOpen }) {
+export function ActivitiesTable({ rows, nav, onOpen, onLogTime, showContact }) {
   const [q, setQ] = useState("");
-  const shown = rows.filter(r => `${r.subject} ${r.description} ${r.matter_name}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = rows.filter(r => `${r.subject} ${r.description} ${r.matter_name} ${r.contact_name || ""}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div data-testid="practice-activities-table">
       <ListToolbar q={q} setQ={setQ} placeholder="Search Activities..." testId="practice-activities-search" />
       <table className="w-full text-sm">
-        <ListHead cols={ACT_COLS} />
+        <ListHead cols={showContact ? ACT_COLS : ACT_COLS.filter(c => c !== "Contact")} />
         <tbody>
-          {shown.map(r => (
-            <tr key={r.id} className="border-t border-slate-200 hover:bg-slate-100 align-top" data-testid={`practice-activity-row-${r.id}`}>
+          {shown.map(r => { const Icon = KIND_ICON[r.kind] || ClipboardList; return (
+            <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100 align-top" data-testid={`practice-activity-row-${r.id}`}>
               <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
-              <td className="px-2 py-5 max-w-xs">
+              <td className="px-2 py-5 max-w-xs relative">
                 <button type="button" onClick={() => onOpen?.(r)} className="inline-flex items-center gap-1.5 font-semibold text-[#1E88E5] text-[15px] hover:underline" data-testid={`practice-activity-link-${r.id}`}>
-                  {r.kind === "event" ? <CalendarDays size={13} /> : <ClipboardList size={13} />}{r.subject}
+                  <Icon size={13} />{r.subject}
                 </button>
-                <div className="text-xs text-slate-500 line-clamp-2">{r.description}</div>
+                <div className="text-xs text-slate-500 line-clamp-2">{strip(r.description)}</div>
+                <HoverPill testId={`practice-activity-actions-${r.id}`}>
+                  <button type="button" onClick={() => onOpen?.(r)} className="hover:text-[#1E88E5]" data-testid={`practice-activity-edit-${r.id}`}>Edit</button>
+                  <button type="button" onClick={() => onLogTime?.(r)} className="hover:text-[#1E88E5]" data-testid={`practice-activity-log-time-${r.id}`}>Log Time</button>
+                  <span>Log Flat Fee</span><span>Time Logged</span>
+                </HoverPill>
               </td>
               <td className="px-2 py-5"><StatusPill s={r.status} /></td>
               <td className="px-2 py-5 text-slate-700 text-[13px]">
                 {r.kind === "event" ? (<><div><span className="font-semibold">Start:</span> {mdy(r.start_date)} {r.all_day ? "" : t12(r.start_time)}</div><div><span className="font-semibold">End:</span> {mdy(r.end_date)} {r.all_day ? "" : t12(r.end_time)}</div></>)
                   : <>{mdy(r.due_date)} {r.all_day ? "" : t12(r.due_time)}</>}
               </td>
-              <td className="px-2 py-5 text-slate-700">{r.description}</td>
+              <td className="px-2 py-5 text-slate-700">{strip(r.description)}</td>
+              {showContact && <td className="px-2 py-5">{r.contact_id && <button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className={link}>{r.contact_name}</button>}</td>}
               <td className="px-2 py-5">{r.matter_id && <button type="button" onClick={() => nav(`/practice/matters/${r.matter_id}`)} className={link}>{r.matter_name}</button>}</td>
               <td className="px-2 py-5"><div className="flex gap-1">{(r.assigned_users || []).map(u => <Avatar key={u} name={u} />)}</div></td>
             </tr>
-          ))}
+          ); })}
         </tbody>
       </table>
       <ListFooter count={shown.length} />

@@ -184,6 +184,7 @@ import PracticeMatters from "@/pages/PracticeMatters";
 import PracticeNewMatter from "@/pages/PracticeNewMatter";
 import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
 import PracticeCalendar from "@/pages/PracticeCalendar";
+import PracticeActivities from "@/pages/PracticeActivities";
 import PracticeTimeEntries from "@/pages/PracticeTimeEntries";
 import PracticeUser from "@/pages/PracticeUser";
 import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
@@ -278,6 +279,7 @@ function App() {
             <Route path="/practice/matters/:id" element={<Protected><PracticeAccess><PracticeMatterDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/matters/:id/edit" element={<Protected><PracticeAccess><PracticeNewMatter /></PracticeAccess></Protected>} />
             <Route path="/practice/calendar" element={<Protected><PracticeAccess><PracticeCalendar /></PracticeAccess></Protected>} />
+            <Route path="/practice/activities" element={<Protected><PracticeAccess><PracticeActivities /></PracticeAccess></Protected>} />
             <Route path="/practice/time-entries" element={<Protected><PracticeAccess><PracticeTimeEntries /></PracticeAccess></Protected>} />
             <Route path="/practice/time-entries/:id" element={<Protected><PracticeAccess><PracticeTimeEntryDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/users/new" element={<Protected><PracticeAccess><PracticeNewUser /></PracticeAccess></Protected>} />

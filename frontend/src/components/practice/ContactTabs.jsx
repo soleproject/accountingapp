@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, ChevronDown, ChevronRight, Mail, Workflow } from "lucide-react";
+import { Plus, ChevronRight, ChevronDown, Mail, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
 import { sel, UserFilter, PillFilter, TagsFilter } from "@/components/practice/listParts";
 import { MattersTable, TimeEntriesTable, ActivitiesTable } from "@/components/practice/tables";
 import { InvoicesTable } from "@/pages/PracticeInvoices";
 import { PaymentsTable, ActionsMenu } from "@/pages/PracticePaymentsPages";
 import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
-import { NewTaskModal } from "@/components/practice/NewTaskModal";
-import { NewEventModal } from "@/components/practice/NewEventModal";
+import { NewActivityMenu, ActivityModal } from "@/components/practice/ActivityModal";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import { Can } from "@/components/practice/perms";
 
@@ -54,7 +53,6 @@ export function MattersTab({ contactId }) {
 export function ActivitiesTab({ contactId }) {
   const nav = useNavigate();
   const [rows, setRows] = useState(null);
-  const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState(null);
   const load = () => api.get("/practice/activities", { params: { contact_id: contactId } }).then(r => setRows(r.data)).catch(() => setRows([]));
   useEffect(() => { load(); }, [contactId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,15 +60,7 @@ export function ActivitiesTab({ contactId }) {
   return (
     <div className="space-y-4" data-testid="practice-contact-activities">
       <Bar>
-        <div className="relative">
-          <Can feature="Activities (Tasks, Events & Calls)" action="create"><button type="button" onClick={() => setMenu(v => !v)} className={green} data-testid="practice-ca-new"><Plus size={14} /> New <ChevronDown size={12} /></button></Can>
-          {menu && <>
-            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-            <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded border border-slate-200 bg-white py-1 shadow-xl text-sm" data-testid="practice-ca-new-menu">
-              {[["Task", "task"], ["Event", "event"]].map(([l, k]) => <button key={k} type="button" onClick={() => { setMenu(false); setModal(k); }} className="w-full px-3 py-1.5 text-left hover:bg-slate-50" data-testid={`practice-ca-new-${k}`}>New {l}</button>)}
-            </div>
-          </>}
-        </div>
+        <NewActivityMenu onPick={setModal} />
         <button type="button" className={white}><Mail size={14} /> MailSync</button><button type="button" className={white}><Workflow size={14} /> Apply Workflow</button>
       </Bar>
       <Filters>
@@ -78,12 +68,9 @@ export function ActivitiesTab({ contactId }) {
         <span>Status</span><select className={`${sel} w-28`} defaultValue="Any"><option>Any</option><option>Completed</option><option>Overdue</option></select>
         <span>Assigned To</span><UserFilter testId="practice-ca-assigned" /><span>Created By</span><UserFilter testId="practice-ca-created-by" /><TagsFilter testId="practice-ca-tags" /><span>Date Range</span><PillFilter testId="practice-ca-range">All Time</PillFilter>
       </Filters>
-      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={rows || []} nav={nav} onOpen={(r) => setModal(r)} /></Grid>
+      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={rows || []} nav={nav} onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} /></Grid>
       <RecentActivity />
-      {modal === "task" && <NewTaskModal defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
-      {modal === "event" && <NewEventModal defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
-      {modal && typeof modal === "object" && modal.kind === "event" && <NewEventModal event={modal} onClose={() => setModal(null)} onSaved={done} />}
-      {modal && typeof modal === "object" && modal.kind !== "event" && <NewTaskModal task={modal} onClose={() => setModal(null)} onSaved={done} />}
+      <ActivityModal modal={modal} defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />
     </div>
   );
 }

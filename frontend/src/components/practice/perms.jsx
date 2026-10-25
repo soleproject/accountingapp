@@ -18,7 +18,7 @@ export const canDo = (perms, feature, action = "view") => {
 };
 
 export const FEATURE_BY_ROUTE = [
-  ["/practice/contacts", "Contacts"], ["/practice/matters", "Matters"], ["/practice/calendar", "Activities (Tasks, Events & Calls)"], ["/practice/time-entries", "Time Entries"],
+  ["/practice/contacts", "Contacts"], ["/practice/matters", "Matters"], ["/practice/calendar", "Activities (Tasks, Events & Calls)"], ["/practice/activities", "Activities (Tasks, Events & Calls)"], ["/practice/time-entries", "Time Entries"],
   ["/practice/expenses", "Expenses"], ["/practice/invoices", "Invoices"], ["/practice/payments/accounts", "Bank Accounts"], ["/practice/payments/reconciliation", "Bank Accounts"],
   ["/practice/payments/print-checks", "Firm Payments"], ["/practice/checks", "Firm Payments"], ["/practice/payments", "Contact Payments"], ["/practice/roles", "Roles"],
   ["/practice/users/new", "Users & User Groups"],
