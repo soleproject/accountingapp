@@ -635,11 +635,36 @@ async def invoice_generate(inp: PracticeInvoiceGenerateIn, user: dict = Depends(
            "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
            "time_entries": [{"id": te["id"], "item": te.get("item") or "Time", "description": te.get("description", ""), "date": te["date"],
                              "billed_by": te.get("billed_by", ""), "hours": te.get("hours", 0), "rate": te.get("hourly_rate", 0), "sub": te.get("total", 0)} for te in entries],
-           "expenses": [], "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses,
+           "expenses": [], "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses, "paid": 0.0,
+           "notes": "", "terms": "", "pay_operating": True, "pay_trust": False, "send_reminders": True, "add_unpaid": False, "add_interest": False,
            "created_at": now.isoformat(), "updated_at": now.isoformat()}
     await db.practice_invoices.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+def _inv_totals(doc: dict) -> dict:
+    sub = sum(t.get("sub", 0) for t in doc.get("time_entries", [])) + sum(e.get("sub", 0) for e in doc.get("expenses", [])) + sum(f.get("sub", 0) for f in doc.get("flat_fees", []))
+    total = round(sub * (1 - (doc.get("discount") or 0) / 100), 2)
+    paid = round(doc.get("paid", 0), 2)
+    return {"total": total, "paid": paid, "balance": round(total - paid, 2)}
+
+
+async def _inv_out(doc: dict, user: dict) -> dict:
+    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
+    matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+    prof = await db.practice_profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
+    firm = {"name": user.get("company_name") or user.get("firm_name") or user.get("name", ""), "email": prof.get("email") or user.get("email", ""), "phone": prof.get("office_phone", "")}
+    return {**doc, **_inv_totals(doc), "contact_name": _display_name(contact) if contact else "", "matters": matters, "firm": firm}
+
+
+@router.get("/invoices")
+async def list_invoices(user: dict = Depends(_guard)):
+    docs = await db.practice_invoices.find({"owner_id": user["id"], "status": {"$ne": "Draft"}}, {"_id": 0}).sort("number", -1).to_list(2000)
+    out = [await _inv_out(d, user) for d in docs]
+    today = datetime.now(timezone.utc).date().isoformat()
+    return {"rows": out, "all": round(sum(o["total"] for o in out), 2), "due": round(sum(o["balance"] for o in out), 2),
+            "overdue": round(sum(o["balance"] for o in out if o["balance"] > 0 and (o.get("due_date") or "") < today), 2)}
 
 
 @router.get("/invoices/{invoice_id}")
@@ -647,14 +672,46 @@ async def get_invoice(invoice_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Invoice not found")
-    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
-    matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
-    return {**doc, "contact_name": _display_name(contact) if contact else "", "matters": matters}
+    saved = await db.practice_invoices.find({"owner_id": user["id"], "status": {"$ne": "Draft"}}, {"_id": 0, "id": 1}).sort("number", 1).to_list(2000)
+    ids = [d["id"] for d in saved]
+    i = ids.index(invoice_id) if invoice_id in ids else -1
+    return {**(await _inv_out(doc, user)), "prev_id": ids[i - 1] if i > 0 else None, "next_id": ids[i + 1] if 0 <= i < len(ids) - 1 else None}
+
+
+@router.post("/invoices/{invoice_id}/save")
+async def save_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)):
+    doc = await db.practice_invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Invoice not found")
+    allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
+    number = doc.get("number") or allowed.get("number")
+    if not number:
+        last = await db.practice_invoices.find({"owner_id": user["id"], "number": {"$ne": None}}, {"_id": 0, "number": 1}).sort("number", -1).to_list(1)
+        number = (last[0]["number"] if last else 0) + 1
+    allowed.update({"number": number, "status": "Saved", "saved_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()})
+    await db.practice_invoices.update_one({"id": invoice_id}, {"$set": allowed})
+    te_ids = [t["id"] for t in allowed.get("time_entries", doc.get("time_entries", []))]
+    if te_ids:
+        await db.practice_time_entries.update_many({"id": {"$in": te_ids}, "owner_id": user["id"]}, {"$set": {"billing_status": "Billed", "invoice_id": invoice_id}})
+    return await get_invoice(invoice_id, user)
+
+
+@router.delete("/invoices/{invoice_id}")
+async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_invoices.delete_one({"id": invoice_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Invoice not found")
+    await db.practice_time_entries.update_many({"invoice_id": invoice_id, "owner_id": user["id"]}, {"$set": {"billing_status": "Billable"}, "$unset": {"invoice_id": ""}})
+    return {"ok": True}
+
+
+INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number",
+                  "notes", "terms", "pay_operating", "pay_trust", "send_reminders", "add_unpaid", "add_interest")
 
 
 @router.put("/invoices/{invoice_id}")
 async def update_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)):
-    allowed = {k: v for k, v in body.items() if k in ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number")}
+    allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
     allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
     r = await db.practice_invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": allowed})
     if not r.matched_count:

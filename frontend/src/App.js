@@ -187,6 +187,8 @@ import PracticeCalendar from "@/pages/PracticeCalendar";
 import PracticeTimeEntries from "@/pages/PracticeTimeEntries";
 import PracticeUser from "@/pages/PracticeUser";
 import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
+import PracticeInvoiceDetail from "@/pages/PracticeInvoiceDetail";
+import PracticeInvoices from "@/pages/PracticeInvoices";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -268,7 +270,9 @@ function App() {
             <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
             <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
             <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
+            <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
             <Route path="/practice/invoices/:id/new" element={<Protected><PracticeNewInvoice /></Protected>} />
+            <Route path="/practice/invoices/:id" element={<Protected><PracticeInvoiceDetail /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

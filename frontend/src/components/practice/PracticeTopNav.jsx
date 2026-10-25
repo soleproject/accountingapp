@@ -40,7 +40,8 @@ function TopTimerButton() {
 
 const NAV = [
   { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
-  { label: "Billing", menu: true }, { label: "Payments", menu: true },
+  { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
+  { label: "Payments", menu: true },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
 ];
@@ -108,6 +109,31 @@ function ProfileMenu({ user }) {
   );
 }
 
+function NavMenu({ label, items, testId, className }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const nav = useNavigate();
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button type="button" onClick={() => setOpen(v => !v)} data-testid={testId} className={className}>{label}<ChevronDown size={12} /></button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl z-50" data-testid={`${testId}-menu`}>
+          {items.map(it => (
+            <button key={it.label} type="button" onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                    className={`w-full px-4 py-2 text-left text-sm ${it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
   const nav = useNavigate();
   const { pathname } = useLocation();
@@ -142,10 +168,11 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
         const menu = typeof n !== "string" && n.menu;
         const to = typeof n !== "string" ? n.to : null;
         const active = to && (n.exact ? pathname === to : pathname.startsWith(to));
+        const key = label.toLowerCase().replace(/\s+/g, "-");
+        const cls = `shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`;
+        if (menu && n.items) return <NavMenu key={label} label={label} items={n.items} testId={`practice-nav-${key}`} className={cls} />;
         return (
-          <button key={label} type="button" data-testid={`practice-nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                  onClick={() => to && nav(to)}
-                  className={`shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`}>
+          <button key={label} type="button" data-testid={`practice-nav-${key}`} onClick={() => to && nav(to)} className={cls}>
             {label}{menu && <ChevronDown size={12} />}
           </button>
         );
