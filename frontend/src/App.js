@@ -190,6 +190,7 @@ import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
 import PracticeInvoiceDetail from "@/pages/PracticeInvoiceDetail";
 import PracticeInvoices from "@/pages/PracticeInvoices";
 import PracticeExpenses from "@/pages/PracticeExpenses";
+import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -270,6 +271,7 @@ function App() {
             <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
             <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
             <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
+            <Route path="/practice/time-entries/:id" element={<Protected><PracticeTimeEntryDetail /></Protected>} />
             <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
             <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
             <Route path="/practice/expenses" element={<Protected><PracticeExpenses /></Protected>} />

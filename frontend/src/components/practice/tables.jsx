@@ -109,7 +109,7 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
             <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100 align-top" data-testid={`practice-te-row-${r.id}`}>
               <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
               <td className="px-2 py-5 max-w-xs relative">
-                <div className="inline-flex items-center gap-1.5 font-semibold text-[#1E88E5] text-[15px]"><Play size={13} className="fill-[#1E88E5]" />{r.item || "Time"}</div>
+                <button type="button" onClick={() => nav(`/practice/time-entries/${r.id}`)} className="inline-flex items-center gap-1.5 font-semibold text-[#1E88E5] text-[15px] hover:underline" data-testid={`practice-te-link-${r.id}`}><Play size={13} className="fill-[#1E88E5]" />{r.item || "Time"}</button>
                 <div className="text-xs text-slate-500 whitespace-pre-line line-clamp-2">{r.description}</div>
                 <HoverPill testId={`practice-te-actions-${r.id}`}>
                   <button type="button" onClick={() => onEdit(r)} className={act} data-testid={`practice-te-edit-${r.id}`}>Edit</button>
@@ -122,7 +122,7 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
               </td>
               <td className="px-2 py-5">
                 <span data-testid={`practice-te-status-${r.id}`} className={`inline-block min-w-[110px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider ${
-                  r.billing_status === "Billed" ? "bg-[#43A047] text-white" : r.billing_status === "Not Billable" ? "border border-slate-400 bg-white text-slate-700" : "bg-[#FFA726] text-white"}`}>{r.billing_status}</span>
+                  r.billing_status === "Billed" ? "bg-[#43A047] text-white" : r.billing_status === "Not Billable" ? "border border-slate-400 bg-white text-slate-700" : "bg-[#FFA726] text-white"}`}>{r.billing_status}{r.billing_status === "Billed" && r.invoice_number ? ` I-${r.invoice_number}` : ""}</span>
               </td>
               <td className="px-2 py-5 text-slate-700">{mdy(r.date)}</td>
               <td className="px-2 py-5 text-slate-700">{hrs(r.hours)}</td>

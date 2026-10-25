@@ -436,15 +436,37 @@ async def create_item(inp: PracticeItemIn, user: dict = Depends(_guard)):
     return await _simple_create(db.practice_items, inp, user)
 
 
+async def _te_full(docs: list) -> list:
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    iids = {d["invoice_id"] for d in docs if d.get("invoice_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    invoices = {i["id"]: i.get("number") async for i in db.practice_invoices.find({"id": {"$in": list(iids)}}, {"_id": 0, "id": 1, "number": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
+             "invoice_number": invoices.get(d.get("invoice_id")), "billing_status": _te_status(d)} for d in docs]
+
+
 @router.get("/time-entries/all")
 async def list_time_entries_full(user: dict = Depends(_guard)):
     docs = await db.practice_time_entries.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
-    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
-    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
-    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
-    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
-    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
-             **({"billing_status": _te_status(d)} if "hours" in d else {})} for d in docs]
+    return await _te_full(docs)
+
+
+@router.get("/time-entries/{entry_id}")
+async def get_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    return (await _te_full([doc]))[0]
+
+
+@router.delete("/time-entries/{entry_id}")
+async def delete_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_time_entries.delete_one({"id": entry_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Time entry not found")
+    return {"ok": True}
 
 
 class PracticeEventIn(BaseModel):
