@@ -688,8 +688,11 @@ async def _inv_out(doc: dict, user: dict) -> dict:
 
 
 @router.get("/invoices")
-async def list_invoices(user: dict = Depends(_guard)):
-    docs = await db.practice_invoices.find({"owner_id": user["id"], "status": {"$ne": "Draft"}}, {"_id": 0}).sort("number", -1).to_list(2000)
+async def list_invoices(contact_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"], "status": {"$ne": "Draft"}}
+    if contact_id:
+        q["contact_id"] = contact_id
+    docs = await db.practice_invoices.find(q, {"_id": 0}).sort("number", -1).to_list(2000)
     out = [await _inv_out(d, user) for d in docs]
     today = datetime.now(timezone.utc).date().isoformat()
     return {"rows": out, "all": round(sum(o["total"] for o in out), 2), "due": round(sum(o["balance"] for o in out), 2),
@@ -893,3 +896,64 @@ async def delete_expense(expense_id: str, user: dict = Depends(_guard)):
     if not r.deleted_count:
         raise HTTPException(404, "Expense not found")
     return {"ok": True}
+
+
+# ---------- Payments ----------
+class PaymentApplication(BaseModel):
+    invoice_id: str
+    amount: float
+    applied_date: Optional[str] = None
+
+
+class PracticePaymentIn(BaseModel):
+    contact_id: str
+    matter_id: str = ""
+    date: str
+    payment_method: str = "Cash"
+    bank_account: str = "Operating Account"
+    notes: str = ""
+    applications: list[PaymentApplication]
+
+
+@router.post("/payments")
+async def add_payment(inp: PracticePaymentIn, user: dict = Depends(_guard)):
+    apps = [a for a in inp.applications if a.amount > 0]
+    if not apps:
+        raise HTTPException(400, "Enter an amount to pay.")
+    now = datetime.now(timezone.utc).isoformat()
+    for a in apps:
+        inv = await db.practice_invoices.find_one({"id": a.invoice_id, "owner_id": user["id"]}, {"_id": 0})
+        if not inv:
+            raise HTTPException(404, "Invoice not found")
+        t = _inv_totals(inv)
+        if a.amount > t["balance"] + 0.005:
+            raise HTTPException(400, f"Amount exceeds open balance for I-{inv.get('number')}.")
+        paid = round(t["paid"] + a.amount, 2)
+        status = "Paid" if paid >= t["total"] - 0.005 else "Partially Paid"
+        await db.practice_invoices.update_one({"id": a.invoice_id}, {"$set": {"paid": paid, "status": status, "last_payment_date": a.applied_date or inp.date, "updated_at": now}})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "amount": round(sum(a.amount for a in apps), 2), "created_at": now}
+    await db.practice_payments.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+class PracticeCheckIn(BaseModel):
+    contact_id: str
+    matter_id: str = ""
+    amount: float
+    bank_account: str = "Operating Account"
+    payment_method: str = "Check"
+    date: str
+    notes: str = ""
+    payee: str
+    to_print: bool = True
+
+
+@router.post("/checks")
+async def write_check(inp: PracticeCheckIn, user: dict = Depends(_guard)):
+    if inp.amount <= 0:
+        raise HTTPException(400, "Enter an amount.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_checks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc

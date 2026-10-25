@@ -5,6 +5,7 @@ import { FileText, Pencil, Trash2, ChevronLeft, ChevronRight, ChevronDown, Setti
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { fromISO } from "@/components/practice/DateTimePicker";
+import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
 
 const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
 const mdy = (iso) => { const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
@@ -85,6 +86,7 @@ export default function PracticeInvoiceDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const [inv, setInv] = useState(null);
+  const [pay, setPay] = useState(false);
   useEffect(() => { setInv(null); api.get(`/practice/invoices/${id}`).then(r => setInv(r.data)).catch(() => { toast.error("Invoice not found"); nav("/practice/invoices"); }); }, [id, nav]);
   const del = async () => {
     if (!window.confirm("Delete this invoice? Its time entries will become billable again.")) return;
@@ -106,12 +108,12 @@ export default function PracticeInvoiceDetail() {
           <button type="button" onClick={() => nav(`/practice/invoices/${id}/edit`)} className="text-[#1E88E5]" data-testid="practice-invoice-edit"><Pencil size={15} /></button>
           <button type="button" onClick={del} className="text-[#1E88E5]" data-testid="practice-invoice-delete"><Trash2 size={15} /></button>
           <div className="flex-1" />
-          <button type="button" className={pill} data-testid="practice-invoice-enter-payment">Enter Payment <ArrowRightCircle size={14} /></button>
+          <button type="button" onClick={() => setPay(true)} className={pill} data-testid="practice-invoice-enter-payment">Enter Payment <ArrowRightCircle size={14} /></button>
           <button type="button" className={`${pill} text-slate-400`} data-testid="practice-invoice-send">Send <ArrowRightCircle size={14} /></button>
           <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white" data-testid="practice-invoice-actions"><Settings2 size={14} /> Actions <ChevronDown size={12} /></button>
         </div>
         <div className="grid grid-cols-[1fr_1fr_auto] gap-6 items-center">
-          <div className="flex items-center gap-3 rounded bg-[#E53935] px-4 py-2.5 text-white" data-testid="practice-invoice-due-card">
+          <div className={`flex items-center gap-3 rounded px-4 py-2.5 text-white ${inv.balance > 0 ? "bg-[#E53935]" : "bg-[#43A047]"}`} data-testid="practice-invoice-due-card">
             <HandCoins size={26} />
             <div><div className="text-[10px] font-semibold uppercase tracking-wider">Due</div><div className="text-lg font-bold leading-tight">{usd(inv.balance)} <span className="text-[10px] font-normal">USD</span></div></div>
           </div>
@@ -127,6 +129,7 @@ export default function PracticeInvoiceDetail() {
         <div className="rounded border border-slate-200 bg-white"><InvoiceDoc inv={inv} /></div>
         <button type="button" className="w-full rounded border border-slate-200 bg-white px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1" data-testid="practice-invoice-recent-activity">Recent Activity <ChevronRight size={14} /></button>
       </div>
+      {pay && <NewPaymentModal invoice={inv} onClose={() => setPay(false)} />}
     </PracticeShell>
   );
 }
