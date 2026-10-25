@@ -1,4 +1,8 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { ActivityModal } from "@/components/practice/ActivityModal";
+import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import {
   Scale, Wallet, BadgeDollarSign, Receipt, UserPlus, Briefcase, CalendarDays,
   ClipboardList, FileText, Phone, MessageSquare, Clock, FileSignature,
@@ -35,28 +39,45 @@ export const PracticeStatTiles = ({ values }) => (
 );
 
 const QUICK = [
-  ["New Contact", UserPlus, "/practice/contacts/new"], ["New Matter", Briefcase, "/practice/matters/new"], ["New Event", CalendarDays],
-  ["New Task", ClipboardList], ["New Note", FileText], ["New Call", Phone],
-  ["Send Message", MessageSquare], ["Track Time", Clock], ["Add Expense", Wallet],
+  ["New Contact", UserPlus, "/practice/contacts/new", "Add a new person or company to your contacts."], ["New Matter", Briefcase, "/practice/matters/new", "Open a new case or matter for a contact."],
+  ["New Event", CalendarDays, "event", "Create events, meetings, or deadlines. Add reminders by Email, Popup, or SMS."],
+  ["New Task", ClipboardList, "task", "Create a new task for yourself, another team member, or even your clients."],
+  ["New Note", FileText, "note", "Add a note about any contact or matter."], ["New Call", Phone, "call", "Log the details of an inbound or outbound call."],
+  ["Send Message", MessageSquare], ["Track Time", Clock, "time", "Track your time against a contact and matter."], ["Add Expense", Wallet],
   ["New Intake", FileSignature], ["New Invoice", FileInput], ["New Payment", CreditCard],
   ["New Flat Fee", Receipt],
 ];
+const GO = {
+  event: (d) => ({ label: "Go to Calendar", to: "/practice/calendar" }), task: (d) => ({ label: "Go to Calendar", to: "/practice/calendar" }),
+  note: (d) => ({ label: "Go to Activities", to: "/practice/activities?kind=note" }), call: (d) => ({ label: "Go to Activities", to: "/practice/activities?kind=call" }),
+  time: (d) => ({ label: "Go to Time Entry", to: `/practice/time-entries/${d.id}` }),
+};
 
 export const PracticeQuickCreate = () => {
   const nav = useNavigate();
+  const [modal, setModal] = useState(null);
+  const saved = (kind) => (d) => {
+    setModal(null);
+    const g = GO[kind](d || {});
+    toast.dismiss();
+    toast.success("Item saved successfully.", { duration: 5000, position: "top-right", action: { label: g.label, onClick: () => nav(g.to) } });
+  };
   return (
   <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-quick-create">
     <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 mb-3">Quick Create</h2>
     <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 xl:grid-cols-[repeat(13,minmax(0,1fr))] gap-2">
-      {QUICK.map(([label, Icon, to]) => (
+      {QUICK.map(([label, Icon, to, tip]) => (
         <button key={label} type="button" data-testid={`practice-quick-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                onClick={() => to && nav(to)}
-                className="flex flex-col items-center justify-center gap-2 rounded border border-slate-200 bg-white py-4 px-1 text-[11px] font-medium text-slate-700 hover:border-[#1E88E5] hover:text-[#1E88E5] transition-colors">
+                onClick={() => to && (to.startsWith("/") ? nav(to) : setModal(to))}
+                className="group relative flex flex-col items-center justify-center gap-2 rounded border border-slate-200 bg-white py-4 px-1 text-[11px] font-medium text-slate-700 hover:border-[#1E88E5] hover:text-[#1E88E5] transition-colors">
           <Icon size={30} strokeWidth={1.4} className="text-slate-800" />
           <span className="whitespace-nowrap">{label}</span>
+          {tip && <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 hidden w-44 -translate-x-1/2 rounded bg-slate-800 px-2.5 py-2 text-center text-[11px] font-medium leading-snug text-white shadow-lg group-hover:block">{tip}</span>}
         </button>
       ))}
     </div>
+    {modal === "time" ? <NewTimeEntryModal onClose={() => setModal(null)} onSaved={saved("time")} />
+      : <ActivityModal modal={modal} onClose={() => setModal(null)} onSaved={modal ? saved(modal) : undefined} />}
   </section>
   );
 };

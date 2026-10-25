@@ -1296,3 +1296,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 ## 2026-06 — Apply Workflow
 - `ApplyWorkflowModal.jsx` (contact Activities tab "Apply Workflow" + Activities page button): pick workflow, Linked To (contact prefilled, matter), per-event date/time, preview of tasks + due rules → `POST /api/practice/workflows/{id}/apply`.
 - Backend creates real events/tasks in practice_tasks (tagged workflow_id/workflow_name) with due dates chained from anchors (Business Days skip weekends; Calendar Days/Weeks/Months; Before/After). Verified: Sun kickoff → 7 tasks on consecutive business days.
+
+## 2026-06 — Dashboard Quick Create squares
+- New Event / New Task / New Note / New Call / Track Time squares open their modals from the dashboard (hover tooltips added). After save: single top-right toast "Item saved successfully." for 5s with a "Go to Calendar / Activities / Time Entry" action button. Remaining squares (Send Message, Add Expense, New Intake, New Invoice, New Payment, New Flat Fee) still placeholders.
