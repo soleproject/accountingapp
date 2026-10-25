@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Play, Calculator, MessageSquare, Filter, ChevronDown, Users } from "lucide-react";
+import { usePracticeTimer } from "@/components/practice/timerStore";
+import { TimerPanel } from "@/components/practice/TimerPanel";
 
 export const PracticeRecentActivity = () => (
   <section className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-recent-activity">
@@ -85,6 +87,21 @@ function RecentCard() {
   );
 }
 
+function TimerCard() {
+  const { active } = usePracticeTimer();
+  return (
+    <>
+      {active && (
+        <button type="button" data-testid="practice-start-another-timer-btn"
+                className="w-full h-9 rounded-full bg-[#1E88E5] text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 hover:bg-[#1976D2]">
+          <Play size={11} className="fill-white" /> Start Another Timer
+        </button>
+      )}
+      <div className="rounded-md border border-slate-200 bg-white p-4" data-testid="practice-timer-card"><TimerPanel /></div>
+    </>
+  );
+}
+
 export const PracticeRightRail = ({ onHide }) => (
   <aside className="space-y-4" data-testid="practice-right-rail">
     <div className="text-right">
@@ -98,12 +115,7 @@ export const PracticeRightRail = ({ onHide }) => (
       <ChevronLeft size={16} className="absolute left-2 top-1/2 -translate-y-1/2 text-[#1E88E5]" />
       <ChevronRight size={16} className="absolute right-2 top-1/2 -translate-y-1/2 text-[#1E88E5]" />
     </div>
-    <div className="rounded-md border border-slate-200 bg-white p-4 text-center" data-testid="practice-timer-card">
-      <div className="text-xs font-bold uppercase tracking-wider text-slate-700">Timer</div>
-      <div className="mt-1 flex items-center justify-center gap-2 text-3xl font-light text-slate-700 tabular-nums">
-        <Play size={22} className="text-[#1E88E5] fill-[#1E88E5]" />00:00:00
-      </div>
-    </div>
+    <TimerCard />
     <MiniCalendar />
     <button type="button" data-testid="practice-date-calculator-btn"
             className="w-full h-9 rounded-full bg-[#1E88E5] text-white text-sm font-semibold flex items-center justify-center gap-2 hover:bg-[#1976D2]">

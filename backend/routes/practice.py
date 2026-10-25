@@ -4,13 +4,21 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, Field
 import uuid
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from db import db
-from auth import require_role
+from auth import require_role, hash_password
 
 router = APIRouter(prefix="/api/practice")
-_guard = require_role("superadmin")
+_role_guard = require_role("superadmin", "practice")
+
+
+async def _guard(user: dict = Depends(_role_guard)) -> dict:
+    # Invited staff share the firm owner's Practice data.
+    if user.get("practice_owner_id"):
+        return {**user, "id": user["practice_owner_id"], "staff_user_id": user["id"]}
+    return user
 
 
 class PracticeProfile(BaseModel):
@@ -95,13 +103,23 @@ def _display_name(c: dict) -> str:
     return name or c.get("company_name") or "Unnamed contact"
 
 
+async def _billable_sums(uid: str, key: str) -> dict:
+    sums: dict = {}
+    for coll in (db.practice_time_entries, db.practice_expenses):
+        async for d in coll.find({"owner_id": uid}, {"_id": 0, key: 1, "total": 1, "billing_status": 1, "billable": 1}):
+            if _te_status(d) == "Billable" and d.get(key):
+                sums[d[key]] = round(sums.get(d[key], 0) + (d.get("total") or 0), 2)
+    return sums
+
+
 @router.get("/contacts")
 async def list_contacts(status: str = "Active", user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
     if status != "All":
         q["status"] = status
     docs = await db.practice_contacts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [{**d, "display_name": _display_name(d)} for d in docs]
+    sums = await _billable_sums(user["id"], "contact_id")
+    return [{**d, "display_name": _display_name(d), "billable": sums.get(d["id"], 0)} for d in docs]
 
 
 @router.post("/contacts")
@@ -158,7 +176,8 @@ async def list_matters(status: str = "Open", contact_id: Optional[str] = None, u
     if contact_id:
         q["contact_id"] = contact_id
     docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [await _with_contact(d, user) for d in docs]
+    sums = await _billable_sums(user["id"], "matter_id")
+    return [{**(await _with_contact(d, user)), "billable": sums.get(d["id"], 0)} for d in docs]
 
 
 @router.get("/matters/counts")
@@ -256,7 +275,8 @@ async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, use
     mids = {d["matter_id"] for d in docs if d.get("matter_id")}
     contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
-    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), "")} for d in docs]
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
+             **({"billing_status": _te_status(d)} if "hours" in d else {})} for d in docs]
 
 
 @router.post("/tasks")
@@ -307,7 +327,7 @@ class PracticeTimeEntryIn(BaseModel):
     matter_id: str
     task_id: Optional[str] = None
     item: str = ""
-    hours: float = Field(..., gt=0)
+    hours: float = Field(..., ge=0)
     hours_raw: str = ""
     date: str
     description: str = ""
@@ -422,3 +442,699 @@ async def list_items(user: dict = Depends(_guard)):
 @router.post("/items")
 async def create_item(inp: PracticeItemIn, user: dict = Depends(_guard)):
     return await _simple_create(db.practice_items, inp, user)
+
+
+async def _te_full(docs: list) -> list:
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    iids = {d["invoice_id"] for d in docs if d.get("invoice_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    invoices = {i["id"]: i.get("number") async for i in db.practice_invoices.find({"id": {"$in": list(iids)}}, {"_id": 0, "id": 1, "number": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""),
+             "invoice_number": invoices.get(d.get("invoice_id")), "billing_status": _te_status(d)} for d in docs]
+
+
+@router.get("/time-entries/all")
+async def list_time_entries_full(user: dict = Depends(_guard)):
+    docs = await db.practice_time_entries.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+    return await _te_full(docs)
+
+
+@router.get("/time-entries/{entry_id}")
+async def get_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    return (await _te_full([doc]))[0]
+
+
+@router.delete("/time-entries/{entry_id}")
+async def delete_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_time_entries.delete_one({"id": entry_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Time entry not found")
+    return {"ok": True}
+
+
+class PracticeEventIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    subject: str
+    start_date: str
+    start_time: Optional[str] = "10:00"
+    end_date: str
+    end_time: Optional[str] = "11:00"
+    all_day: bool = False
+    description: str = ""
+    reminders: list[PracticeReminder] = Field(default_factory=list)
+    private: bool = False
+    location: str = ""
+    color: str = "#1E88E5"
+    priority: str = "Medium"
+    repeat: str = "Never"
+    assigned_users: list[str] = Field(default_factory=list)
+    assigned_contacts: str = ""
+    tags: list[str] = Field(default_factory=list)
+    email_assignees: bool = True
+
+
+def _event_doc(inp: PracticeEventIn) -> dict:
+    d = inp.model_dump()
+    if d["all_day"]:
+        d["start_time"] = d["end_time"] = None
+    return {**d, "kind": "event", "due_date": d["start_date"], "due_time": d["start_time"], "status": "Scheduled"}
+
+
+@router.get("/events/conflicts")
+async def event_conflicts(date: str, start: str = "00:00", end: str = "23:59", exclude: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"], "kind": "event", "start_date": date}
+    if exclude:
+        q["id"] = {"$ne": exclude}
+    out = []
+    async for e in db.practice_tasks.find(q, {"_id": 0, "id": 1, "subject": 1, "start_time": 1, "end_time": 1, "all_day": 1, "assigned_users": 1}):
+        if e.get("all_day") or ((e.get("start_time") or "00:00") < end and (e.get("end_time") or "23:59") > start):
+            out.append(e)
+    return out
+
+
+@router.post("/events")
+async def create_event(inp: PracticeEventIn, user: dict = Depends(_guard)):
+    if not inp.subject.strip():
+        raise HTTPException(400, "Subject is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **_event_doc(inp), "created_at": now, "updated_at": now}
+    await db.practice_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/events/{event_id}")
+async def update_event(event_id: str, inp: PracticeEventIn, user: dict = Depends(_guard)):
+    r = await db.practice_tasks.update_one({"id": event_id, "owner_id": user["id"]}, {"$set": {**_event_doc(inp), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not r.matched_count:
+        raise HTTPException(404, "Event not found")
+    return await db.practice_tasks.find_one({"id": event_id}, {"_id": 0})
+
+
+def _te_status(doc: dict) -> str:
+    return doc.get("billing_status") or ("Billable" if doc.get("billable", True) else "Not Billable")
+
+
+@router.patch("/time-entries/{entry_id}/status")
+async def set_time_entry_status(entry_id: str, body: dict, user: dict = Depends(_guard)):
+    status = body.get("status")
+    if status not in ("Billable", "Billed", "Not Billable"):
+        raise HTTPException(400, "Invalid status")
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    billable = status != "Not Billable"
+    total = round(doc.get("hours", 0) * doc.get("hourly_rate", 0), 2) if billable else 0
+    await db.practice_time_entries.update_one({"id": entry_id}, {"$set": {"billing_status": status, "billable": billable, "total": total}})
+    return {**doc, "billing_status": status, "billable": billable, "total": total}
+
+
+@router.post("/time-entries/{entry_id}/clone")
+async def clone_time_entry(entry_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    new = {**doc, "id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_time_entries.insert_one(new)
+    new.pop("_id", None)
+    return new
+
+
+@router.put("/time-entries/{entry_id}")
+async def update_time_entry(entry_id: str, inp: PracticeTimeEntryIn, user: dict = Depends(_guard)):
+    doc = await db.practice_time_entries.find_one({"id": entry_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Time entry not found")
+    status = _te_status(doc) if inp.billable else "Not Billable"
+    if inp.billable and status == "Not Billable":
+        status = "Billable"
+    data = {**inp.model_dump(), "billing_status": status, "total": round(inp.hours * inp.hourly_rate, 2) if inp.billable else 0,
+            "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_time_entries.update_one({"id": entry_id}, {"$set": data})
+    return {**doc, **data}
+
+
+@router.get("/activity")
+async def activity_feed(user: dict = Depends(_guard)):
+    uid = user["id"]
+    out = []
+    contacts = {c["id"]: c async for c in db.practice_contacts.find({"owner_id": uid}, {"_id": 0})}
+    matters = {m["id"]: m async for m in db.practice_matters.find({"owner_id": uid}, {"_id": 0})}
+    def re(cid=None, mid=None, extra=None):
+        parts = [{"label": _display_name(contacts[cid]), "to": f"/practice/contacts/{cid}"}] if cid in contacts else []
+        if mid in matters:
+            parts.append({"label": matters[mid]["name"], "to": f"/practice/matters/{mid}"})
+        if extra:
+            parts.append({"label": extra})
+        return parts
+    for c in contacts.values():
+        out.append({"at": c["created_at"], "text": f"Created a new client: {_display_name(c)}.", "re": re(c["id"])})
+    for m in matters.values():
+        out.append({"at": m["created_at"], "text": f"Created a new matter: {m['name']}.", "re": re(m["contact_id"], m["id"])})
+    async for t in db.practice_tasks.find({"owner_id": uid}, {"_id": 0}):
+        kind = "event" if t.get("kind") == "event" else "task"
+        out.append({"at": t["created_at"], "text": f"Created a new {kind}: {t['subject']}.", "re": re(t.get("contact_id"), t.get("matter_id"), t["subject"])})
+        if t.get("status") == "Completed":
+            out.append({"at": t.get("updated_at") or t["created_at"], "text": f"Completed a task: {t['subject']}.", "re": re(t.get("contact_id"), t.get("matter_id"), t["subject"])})
+    async for e in db.practice_time_entries.find({"owner_id": uid}, {"_id": 0}):
+        out.append({"at": e["created_at"], "text": f"Created a new time entry: {e.get('hours', 0):.2f} hrs / ${e.get('total', 0):.2f}.", "re": re(e.get("contact_id"), e.get("matter_id"))})
+    async for n in db.practice_notes.find({"owner_id": uid}, {"_id": 0}):
+        out.append({"at": n["created_at"], "text": n["text"], "re": []})
+    out.sort(key=lambda x: x["at"], reverse=True)
+    return out[:200]
+
+
+@router.post("/activity")
+async def post_activity(body: dict, user: dict = Depends(_guard)):
+    text = (body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Enter something first.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "text": text, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_notes.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+# ---------- Invoices ----------
+class PracticeInvoiceGenerateIn(BaseModel):
+    contact_id: str
+    matter_ids: list[str]
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    add_time_entries: bool = True
+    add_expenses: bool = True
+    add_flat_fees: bool = True
+    tax1_id: str = ""
+    tax2_id: str = ""
+    tax_expenses: bool = False
+
+
+@router.get("/invoices/preview")
+async def invoice_preview(contact_id: str, user: dict = Depends(_guard)):
+    contact = await db.practice_contacts.find_one({"id": contact_id, "owner_id": user["id"]}, {"_id": 0})
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    sums = await _billable_sums(user["id"], "matter_id")
+    matters = await db.practice_matters.find({"owner_id": user["id"], "contact_id": contact_id}, {"_id": 0, "id": 1, "name": 1}).sort("created_at", -1).to_list(500)
+    return {"contact": {"id": contact_id, "display_name": _display_name(contact)},
+            "matters": [{"id": m["id"], "name": m["name"], "billable": sums.get(m["id"], 0)} for m in matters]}
+
+
+@router.post("/invoices/generate")
+async def invoice_generate(inp: PracticeInvoiceGenerateIn, user: dict = Depends(_guard)):
+    if not inp.matter_ids:
+        raise HTTPException(400, "Select at least one matter.")
+    q = {"owner_id": user["id"], "contact_id": inp.contact_id, "matter_id": {"$in": inp.matter_ids}}
+    if inp.date_from:
+        q.setdefault("date", {})["$gte"] = inp.date_from
+    if inp.date_to:
+        q.setdefault("date", {})["$lte"] = inp.date_to
+    entries = []
+    if inp.add_time_entries:
+        async for te in db.practice_time_entries.find(q, {"_id": 0}).sort("date", 1):
+            if _te_status(te) == "Billable":
+                entries.append(te)
+    expenses = []
+    if inp.add_expenses:
+        async for ex in db.practice_expenses.find(q, {"_id": 0}).sort("date", 1):
+            if _exp_status(ex) == "Billable":
+                expenses.append({"id": ex["id"], "item": ex.get("category") or ex.get("cost_type", "Expense"), "description": ex.get("description", ""), "date": ex["date"],
+                                 "billed_by": ex.get("billed_by", ""), "qty": ex.get("qty", 1), "price": ex.get("price", 0), "sub": ex.get("total", 0)})
+    now = datetime.now(timezone.utc)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "status": "Draft", "number": None,
+           "contact_id": inp.contact_id, "matter_ids": inp.matter_ids, "template": "Default Invoice Template", "submit_for_approval": False,
+           "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
+           "time_entries": [{"id": te["id"], "item": te.get("item") or "Time", "description": te.get("description", ""), "date": te["date"],
+                             "billed_by": te.get("billed_by", ""), "hours": te.get("hours", 0), "rate": te.get("hourly_rate", 0), "sub": te.get("total", 0)} for te in entries],
+           "expenses": expenses, "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses, "paid": 0.0,
+           "notes": "", "terms": "", "pay_operating": True, "pay_trust": False, "send_reminders": True, "add_unpaid": False, "add_interest": False,
+           "created_at": now.isoformat(), "updated_at": now.isoformat()}
+    await db.practice_invoices.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+def _inv_totals(doc: dict) -> dict:
+    sub = sum(t.get("sub", 0) for t in doc.get("time_entries", [])) + sum(e.get("sub", 0) for e in doc.get("expenses", [])) + sum(f.get("sub", 0) for f in doc.get("flat_fees", []))
+    total = round(sub * (1 - (doc.get("discount") or 0) / 100), 2)
+    paid = round(doc.get("paid", 0), 2)
+    return {"total": total, "paid": paid, "balance": round(total - paid, 2)}
+
+
+async def _inv_out(doc: dict, user: dict) -> dict:
+    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
+    matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+    prof = await db.practice_profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
+    firm = {"name": user.get("company_name") or user.get("firm_name") or user.get("name", ""), "email": prof.get("email") or user.get("email", ""), "phone": prof.get("office_phone", "")}
+    return {**doc, **_inv_totals(doc), "contact_name": _display_name(contact) if contact else "", "matters": matters, "firm": firm}
+
+
+@router.get("/invoices")
+async def list_invoices(contact_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"], "status": {"$ne": "Draft"}}
+    if contact_id:
+        q["contact_id"] = contact_id
+    docs = await db.practice_invoices.find(q, {"_id": 0}).sort("number", -1).to_list(2000)
+    out = [await _inv_out(d, user) for d in docs]
+    today = datetime.now(timezone.utc).date().isoformat()
+    return {"rows": out, "all": round(sum(o["total"] for o in out), 2), "due": round(sum(o["balance"] for o in out), 2),
+            "overdue": round(sum(o["balance"] for o in out if o["balance"] > 0 and (o.get("due_date") or "") < today), 2)}
+
+
+@router.get("/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Invoice not found")
+    saved = await db.practice_invoices.find({"owner_id": user["id"], "status": {"$ne": "Draft"}}, {"_id": 0, "id": 1}).sort("number", 1).to_list(2000)
+    ids = [d["id"] for d in saved]
+    i = ids.index(invoice_id) if invoice_id in ids else -1
+    return {**(await _inv_out(doc, user)), "prev_id": ids[i - 1] if i > 0 else None, "next_id": ids[i + 1] if 0 <= i < len(ids) - 1 else None}
+
+
+@router.post("/invoices/{invoice_id}/save")
+async def save_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)):
+    doc = await db.practice_invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Invoice not found")
+    allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
+    number = doc.get("number") or allowed.get("number")
+    if not number:
+        last = await db.practice_invoices.find({"owner_id": user["id"], "number": {"$ne": None}}, {"_id": 0, "number": 1}).sort("number", -1).to_list(1)
+        number = (last[0]["number"] if last else 0) + 1
+    allowed.update({"number": number, "status": "Saved", "saved_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()})
+    await db.practice_invoices.update_one({"id": invoice_id}, {"$set": allowed})
+    te_ids = [t["id"] for t in allowed.get("time_entries", doc.get("time_entries", []))]
+    if te_ids:
+        await db.practice_time_entries.update_many({"id": {"$in": te_ids}, "owner_id": user["id"]}, {"$set": {"billing_status": "Billed", "invoice_id": invoice_id}})
+    ex_ids = [e["id"] for e in allowed.get("expenses", doc.get("expenses", []))]
+    if ex_ids:
+        await db.practice_expenses.update_many({"id": {"$in": ex_ids}, "owner_id": user["id"]}, {"$set": {"billing_status": "Billed", "invoice_id": invoice_id}})
+    return await get_invoice(invoice_id, user)
+
+
+@router.delete("/invoices/{invoice_id}")
+async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_invoices.delete_one({"id": invoice_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Invoice not found")
+    await db.practice_time_entries.update_many({"invoice_id": invoice_id, "owner_id": user["id"]}, {"$set": {"billing_status": "Billable"}, "$unset": {"invoice_id": ""}})
+    await db.practice_expenses.update_many({"invoice_id": invoice_id, "owner_id": user["id"]}, {"$set": {"billing_status": "Billable"}, "$unset": {"invoice_id": ""}})
+    return {"ok": True}
+
+
+INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids",
+                  "notes", "terms", "pay_operating", "pay_trust", "send_reminders", "add_unpaid", "add_interest")
+
+
+@router.put("/invoices/{invoice_id}")
+async def update_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)):
+    allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
+    allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.practice_invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": allowed})
+    if not r.matched_count:
+        raise HTTPException(404, "Invoice not found")
+    return await get_invoice(invoice_id, user)
+
+
+# ---------- Expenses ----------
+EXPENSE_CATEGORIES = [
+    ("E101", "Copying"), ("E102", "Outside printing"), ("E103", "Word processing"), ("E104", "Facsimile"), ("E105", "Telephone"),
+    ("E106", "Online research"), ("E107", "Delivery services/messengers"), ("E108", "Postage"), ("E109", "Local travel"), ("E110", "Out-of-town travel"),
+    ("E111", "Meals"), ("E112", "Court fees"), ("E113", "Subpoena fees"), ("E114", "Witness fees"), ("E115", "Deposition transcripts"),
+    ("E116", "Trial transcripts"), ("E117", "Trial exhibits"), ("E118", "Litigation support vendors"), ("E119", "Experts"), ("E120", "Private investigators"),
+    ("E121", "Arbitrators/mediators"), ("E122", "Local counsel"), ("E123", "Other professionals"), ("E124", "Other"),
+]
+
+
+class PracticeExpenseIn(BaseModel):
+    contact_id: str
+    matter_id: str
+    cost_type: str = "Soft Cost"
+    date: str
+    qty: float = 1
+    price: float
+    description: str = ""
+    category: str = ""
+    receipt_name: str = ""
+    billable: bool = True
+    billed_by: str = ""
+    private_notes: str = ""
+    account: str = ""
+    payee: str = ""
+    payment_method: str = ""
+    payment_notes: str = ""
+
+
+def _exp_status(doc: dict) -> str:
+    return doc.get("billing_status") or ("Billable" if doc.get("billable", True) else "Not Billable")
+
+
+async def _exp_names(docs: list) -> list:
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""), "billing_status": _exp_status(d)} for d in docs]
+
+
+async def _categories(uid: str) -> list:
+    doc = await db.practice_expense_categories.find_one({"owner_id": uid}, {"_id": 0})
+    if doc:
+        return doc["categories"]
+    cats = sorted([{"code": c, "name": n} for c, n in EXPENSE_CATEGORIES], key=lambda c: c["name"].lower())
+    await db.practice_expense_categories.insert_one({"owner_id": uid, "categories": cats})
+    return cats
+
+
+@router.get("/expenses/categories")
+async def expense_categories(user: dict = Depends(_guard)):
+    return await _categories(user["id"])
+
+
+class CategoriesIn(BaseModel):
+    categories: list[dict]
+
+
+@router.put("/expenses/categories")
+async def save_expense_categories(inp: CategoriesIn, user: dict = Depends(_guard)):
+    cats = [{"name": (c.get("name") or "").strip(), "code": (c.get("code") or "").strip()} for c in inp.categories]
+    if any(not c["name"] for c in cats):
+        raise HTTPException(400, "Every category needs a name.")
+    cats.sort(key=lambda c: c["name"].lower())
+    await db.practice_expense_categories.update_one({"owner_id": user["id"]}, {"$set": {"categories": cats}}, upsert=True)
+    return cats
+
+
+@router.get("/expenses")
+async def list_expenses(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if contact_id:
+        q["contact_id"] = contact_id
+    if matter_id:
+        q["matter_id"] = matter_id
+    docs = await db.practice_expenses.find(q, {"_id": 0}).sort([("date", -1), ("created_at", -1)]).to_list(2000)
+    return await _exp_names(docs)
+
+
+def _exp_doc(inp: PracticeExpenseIn) -> dict:
+    total = round(inp.qty * inp.price, 2)
+    return {**inp.model_dump(), "total": total if inp.billable else 0, "amount": total}
+
+
+@router.post("/expenses")
+async def create_expense(inp: PracticeExpenseIn, user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **_exp_doc(inp), "billing_status": "Billable" if inp.billable else "Not Billable", "created_at": now, "updated_at": now}
+    await db.practice_expenses.insert_one(doc)
+    doc.pop("_id", None)
+    return (await _exp_names([doc]))[0]
+
+
+@router.put("/expenses/{expense_id}")
+async def update_expense(expense_id: str, inp: PracticeExpenseIn, user: dict = Depends(_guard)):
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    status = _exp_status(doc) if inp.billable else "Not Billable"
+    if inp.billable and status == "Not Billable":
+        status = "Billable"
+    data = {**_exp_doc(inp), "billing_status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_expenses.update_one({"id": expense_id}, {"$set": data})
+    return (await _exp_names([{**doc, **data}]))[0]
+
+
+@router.patch("/expenses/{expense_id}/status")
+async def set_expense_status(expense_id: str, body: dict, user: dict = Depends(_guard)):
+    status = body.get("status")
+    if status not in ("Billable", "Billed", "Not Billable"):
+        raise HTTPException(400, "Invalid status")
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    billable = status != "Not Billable"
+    data = {"billing_status": status, "billable": billable, "total": doc.get("amount", 0) if billable else 0}
+    await db.practice_expenses.update_one({"id": expense_id}, {"$set": data})
+    return (await _exp_names([{**doc, **data}]))[0]
+
+
+@router.post("/expenses/{expense_id}/clone")
+async def clone_expense(expense_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_expenses.find_one({"id": expense_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Expense not found")
+    new = {**doc, "id": str(uuid.uuid4()), "created_at": datetime.now(timezone.utc).isoformat()}
+    new.pop("invoice_id", None)
+    if new.get("billing_status") == "Billed":
+        new["billing_status"] = "Billable"
+    await db.practice_expenses.insert_one(new)
+    new.pop("_id", None)
+    return (await _exp_names([new]))[0]
+
+
+@router.delete("/expenses/{expense_id}")
+async def delete_expense(expense_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_expenses.delete_one({"id": expense_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Expense not found")
+    return {"ok": True}
+
+
+# ---------- Payments ----------
+class PaymentApplication(BaseModel):
+    invoice_id: str
+    amount: float
+    applied_date: Optional[str] = None
+
+
+class PracticePaymentIn(BaseModel):
+    contact_id: str
+    matter_id: str = ""
+    date: str
+    payment_method: str = "Cash"
+    bank_account: str = "Operating Account"
+    notes: str = ""
+    applications: list[PaymentApplication]
+
+
+@router.post("/payments")
+async def add_payment(inp: PracticePaymentIn, user: dict = Depends(_guard)):
+    apps = [a for a in inp.applications if a.amount > 0]
+    if not apps:
+        raise HTTPException(400, "Enter an amount to pay.")
+    now = datetime.now(timezone.utc).isoformat()
+    for a in apps:
+        inv = await db.practice_invoices.find_one({"id": a.invoice_id, "owner_id": user["id"]}, {"_id": 0})
+        if not inv:
+            raise HTTPException(404, "Invoice not found")
+        t = _inv_totals(inv)
+        if a.amount > t["balance"] + 0.005:
+            raise HTTPException(400, f"Amount exceeds open balance for I-{inv.get('number')}.")
+        paid = round(t["paid"] + a.amount, 2)
+        status = "Paid" if paid >= t["total"] - 0.005 else "Partially Paid"
+        await db.practice_invoices.update_one({"id": a.invoice_id}, {"$set": {"paid": paid, "status": status, "last_payment_date": a.applied_date or inp.date, "updated_at": now}})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "amount": round(sum(a.amount for a in apps), 2), "created_at": now}
+    await db.practice_payments.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+class PracticeCheckIn(BaseModel):
+    contact_id: str
+    matter_id: str = ""
+    amount: float
+    bank_account: str = "Operating Account"
+    payment_method: str = "Check"
+    date: str
+    notes: str = ""
+    payee: str
+    to_print: bool = True
+
+
+@router.post("/checks")
+async def write_check(inp: PracticeCheckIn, user: dict = Depends(_guard)):
+    if inp.amount <= 0:
+        raise HTTPException(400, "Enter an amount.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_checks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+# ---------- Users & Roles ----------
+ROLE_FEATURES = [
+    ("Contacts", "cvedaVE"), ("Activities (Tasks, Events & Calls)", "cvedVE"), ("Files", "cvedVE"), ("Flat Fee", "cvedVE"), ("Expenses", "cvedVE"),
+    ("Recent Activity", "cvedVE"), ("Invoices", "cvedVE"), ("Items", "cved"), ("Contact Payments", "cvedVE"), ("Firm Payments", "cved"),
+    ("Financial Summary", "vV"), ("Matters", "cvedaVE"), ("Reports", "v"), ("Roles", "cved"), ("Sales Taxes", "cved"), ("Settings & Billing", "ve"),
+    ("Time Entries", "cvedVE"), ("Users & User Groups", "cvedVE"), ("Bank Accounts", "cved"),
+]
+PERM_KEYS = {"c": "create", "v": "view", "e": "edit", "d": "delete", "a": "archive", "V": "view_all", "E": "edit_all"}
+
+
+def _admin_perms() -> dict:
+    return {f: {PERM_KEYS[k]: True for k in keys} for f, keys in ROLE_FEATURES}
+
+
+async def _ensure_admin_role(uid: str) -> dict:
+    role = await db.practice_roles.find_one({"owner_id": uid, "name": "Admin"}, {"_id": 0})
+    if role:
+        return role
+    now = datetime.now(timezone.utc).isoformat()
+    role = {"id": str(uuid.uuid4()), "owner_id": uid, "name": "Admin", "permissions": _admin_perms(), "restrict_ip": False, "restrict_past_time": False, "system": True, "created_at": now, "updated_at": now}
+    await db.practice_roles.insert_one(role)
+    role.pop("_id", None)
+    return role
+
+
+async def _ensure_self_user(user: dict) -> None:
+    if await db.practice_users.find_one({"owner_id": user["id"], "email": user.get("email")}):
+        return
+    admin = await _ensure_admin_role(user["id"])
+    parts = (user.get("name") or "").split(" ")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.practice_users.insert_one({"id": str(uuid.uuid4()), "owner_id": user["id"], "first_name": parts[0], "middle_name": "", "last_name": " ".join(parts[1:]),
+                                        "email": user.get("email"), "role_id": admin["id"], "active": True, "is_owner": True, "last_login": now, "created_at": now})
+
+
+@router.get("/roles/features")
+async def role_features(user: dict = Depends(_guard)):
+    return [{"feature": f, "allowed": [PERM_KEYS[k] for k in keys]} for f, keys in ROLE_FEATURES]
+
+
+@router.get("/roles")
+async def list_roles(user: dict = Depends(_guard)):
+    await _ensure_admin_role(user["id"]); await _ensure_self_user(user)
+    roles = await db.practice_roles.find({"owner_id": user["id"]}, {"_id": 0}).sort("name", 1).to_list(200)
+    counts: dict = {}
+    async for u in db.practice_users.find({"owner_id": user["id"]}, {"_id": 0, "role_id": 1}):
+        counts[u.get("role_id")] = counts.get(u.get("role_id"), 0) + 1
+    return [{**r, "users": counts.get(r["id"], 0)} for r in roles]
+
+
+class PracticeRoleIn(BaseModel):
+    name: str
+    permissions: dict
+    restrict_ip: bool = False
+    restrict_past_time: bool = False
+
+
+@router.post("/roles")
+async def create_role(inp: PracticeRoleIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Enter a role name.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "system": False, "created_at": now, "updated_at": now}
+    await db.practice_roles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/roles/{role_id}")
+async def get_role(role_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_roles.find_one({"id": role_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Role not found")
+    return doc
+
+
+@router.put("/roles/{role_id}")
+async def update_role(role_id: str, inp: PracticeRoleIn, user: dict = Depends(_guard)):
+    r = await db.practice_roles.update_one({"id": role_id, "owner_id": user["id"]}, {"$set": {**inp.model_dump(), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not r.matched_count:
+        raise HTTPException(404, "Role not found")
+    return await get_role(role_id, user)
+
+
+class PracticeUserIn(BaseModel):
+    first_name: str = ""
+    middle_name: str = ""
+    last_name: str = ""
+    email: str
+    hourly_rate: float = 0
+    round_time_entries: bool = False
+    time_zone: str = "(UTC-08:00) Pacific Time (US & Canada)"
+    role_id: str
+    job_title: str = ""
+    notes: str = ""
+    address: str = ""
+    mobile: str = ""
+    home: str = ""
+    work: str = ""
+    fax: str = ""
+    active: bool = True
+
+
+async def _users_out(uid: str, docs: list) -> list:
+    roles = {r["id"]: r["name"] async for r in db.practice_roles.find({"owner_id": uid}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "name": " ".join(p for p in [d.get("first_name"), d.get("middle_name"), d.get("last_name")] if p), "role_name": roles.get(d.get("role_id"), "")} for d in docs]
+
+
+@router.get("/users")
+async def list_users(user: dict = Depends(_guard)):
+    await _ensure_admin_role(user["id"]); await _ensure_self_user(user)
+    await db.practice_users.update_one({"owner_id": user["id"], "is_owner": True}, {"$set": {"last_login": user.get("last_login") or datetime.now(timezone.utc).isoformat()}})
+    docs = await db.practice_users.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    acct_ids = [d["account_id"] for d in docs if d.get("account_id")]
+    logins = {a["id"]: a.get("last_login") async for a in db.users.find({"id": {"$in": acct_ids}}, {"_id": 0, "id": 1, "last_login": 1})}
+    docs = [{**d, "last_login": logins.get(d.get("account_id")) or d.get("last_login")} for d in docs]
+    return await _users_out(user["id"], docs)
+
+
+@router.post("/users")
+async def create_user(inp: PracticeUserIn, user: dict = Depends(_guard)):
+    email = inp.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Enter a valid email address.")
+    if await db.practice_users.find_one({"owner_id": user["id"], "email": email}):
+        raise HTTPException(400, "A user with this email already exists.")
+    if not await db.practice_roles.find_one({"id": inp.role_id, "owner_id": user["id"]}):
+        raise HTTPException(400, "Select a role.")
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(400, "An account with this email already exists.")
+    import secrets as _secrets
+    from routes.auth import mint_password_set_token
+    from email_dispatcher import dispatch, public_base_url
+    import email_templates as _tmpl
+    now = datetime.now(timezone.utc).isoformat()
+    name = " ".join(p for p in [inp.first_name, inp.middle_name, inp.last_name] if p) or email.split("@")[0]
+    account = {"id": str(uuid.uuid4()), "email": email, "name": name, "role": "practice", "practice_owner_id": user["id"],
+               "password": hash_password(_secrets.token_urlsafe(24)), "status": "invited", "created_at": now, "updated_at": now}
+    await db.users.insert_one(account)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "email": email, "account_id": account["id"], "last_login": None, "created_at": now}
+    await db.practice_users.insert_one(doc)
+    doc.pop("_id", None)
+    role = await db.practice_roles.find_one({"id": inp.role_id}, {"_id": 0, "name": 1})
+    invite_sent = False
+    try:
+        token = await mint_password_set_token(account["id"], purpose="welcome", ttl_days=7)
+        subject, html = _tmpl.team_invite(invitee_name=name, inviter_name=user.get("name") or "Your firm", role_label=(role or {}).get("name", "User"),
+                                          role_description="Sign in to Practice to manage matters, contacts, calendar, time and billing.",
+                                          company_names=[], magic_url=f"{public_base_url()}/set-password/{token}", brand_name="Practice")
+        r = await dispatch(kind="practice_invite", to=email, subject=subject, html=html, initiating_user_id=user["id"], related={"purpose": "practice_invite"})
+        invite_sent = bool((r or {}).get("ok", True)) and (r or {}).get("status") != "failed"
+    except Exception:
+        logging.getLogger(__name__).exception("Practice invite email failed for %s", email)
+    return {**(await _users_out(user["id"], [doc]))[0], "invite_sent": invite_sent}
+
+
+@router.post("/users/{puser_id}/resend-invite")
+async def resend_invite(puser_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_users.find_one({"id": puser_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc or not doc.get("account_id"):
+        raise HTTPException(404, "User not found")
+    from routes.auth import mint_password_set_token
+    from email_dispatcher import dispatch, public_base_url
+    import email_templates as _tmpl
+    token = await mint_password_set_token(doc["account_id"], purpose="welcome", ttl_days=7)
+    name = " ".join(p for p in [doc.get("first_name"), doc.get("last_name")] if p) or doc["email"]
+    subject, html = _tmpl.team_invite(invitee_name=name, inviter_name=user.get("name") or "Your firm", role_label="User",
+                                      role_description="Sign in to Practice to manage matters, contacts, calendar, time and billing.",
+                                      company_names=[], magic_url=f"{public_base_url()}/set-password/{token}", brand_name="Practice")
+    r = await dispatch(kind="practice_invite", to=doc["email"], subject=subject, html=html, initiating_user_id=user["id"], related={"purpose": "practice_invite"})
+    return {"ok": True, "result": r}

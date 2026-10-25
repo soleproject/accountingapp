@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { CheckCircle2 } from "lucide-react";
+import { UsersPanel, RolesPanel } from "@/pages/PracticeUsersRoles";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -28,7 +31,7 @@ const GROUPS = [
 
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
-function SettingsNav() {
+function SettingsNav({ section, onSelect }) {
   return (
     <nav className="space-y-4" data-testid="practice-settings-nav">
       {GROUPS.map(g => (
@@ -36,9 +39,9 @@ function SettingsNav() {
           <div className="text-sm font-semibold text-slate-700 mb-1.5">{g.title}</div>
           <div className="rounded border border-slate-200 bg-white overflow-hidden">
             {g.items.map(([label, Icon]) => {
-              const active = label === "Personal Settings";
+              const active = slug(label) === section;
               return (
-                <button key={label} type="button" data-testid={`practice-settings-nav-${slug(label)}`}
+                <button key={label} type="button" data-testid={`practice-settings-nav-${slug(label)}`} onClick={() => onSelect(slug(label))}
                         className={`w-full flex items-center gap-4 px-4 py-2.5 text-sm text-left transition-colors ${
                           active ? "bg-[#1E88E5] text-white font-semibold" : "text-slate-700 hover:bg-slate-50"}`}>
                   <Icon size={15} className={active ? "text-white" : "text-[#1E88E5]"} />{label}
@@ -91,6 +94,8 @@ export default function PracticeSettings() {
     } finally { setBusy(false); }
   };
 
+  const [params, setParams] = useSearchParams();
+  const section = params.get("section") || "personal-settings";
   return (
     <PracticeShell>
       <div className="space-y-4" data-testid="practice-settings">
@@ -99,7 +104,8 @@ export default function PracticeSettings() {
           <h1 className="text-3xl font-bold text-slate-800">Settings</h1>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,31%)_1fr] gap-8 pt-1">
-          <SettingsNav />
+          <SettingsNav section={section} onSelect={(sec) => setParams(sec === "personal-settings" ? {} : { section: sec })} />
+          {section === "accept-online-payments" ? <OnlinePaymentsPanel /> : section === "users" ? <UsersPanel /> : section === "roles" ? <RolesPanel /> : (
           <div className="space-y-5">
             <Section title="Personal Settings">
               <Row label="Profile Picture" required>
@@ -163,8 +169,29 @@ export default function PracticeSettings() {
               </button>
             </div>
           </div>
+          )}
         </div>
       </div>
     </PracticeShell>
+  );
+}
+
+function OnlinePaymentsPanel() {
+  return (
+    <div className="rounded border border-slate-200 bg-white px-10 py-10 text-center max-w-4xl" data-testid="practice-online-payments-panel">
+      <div className="inline-flex items-center gap-3">
+        <span className="h-16 w-16 rounded-lg bg-[#1E88E5] grid place-items-center"><CreditCard size={34} className="text-white" /></span>
+        <div className="text-left"><div className="text-4xl font-black text-slate-800 leading-none">PRACTICE</div><div className="text-lg tracking-[0.35em] text-slate-700">PAYMENTS</div></div>
+      </div>
+      <h2 className="mt-6 text-2xl font-bold text-slate-800">Easily accept credit card and<br />eCheck directly from Practice.</h2>
+      <ul className="mt-6 inline-block text-left space-y-3 text-lg text-slate-700">
+        {["100% compliant with ABA and IOLTA", "Industry-low pricing and no monthly fees", "In-app functionality, no 3rd party integration", "Place a payment link on your website with OneLink"].map(t => (
+          <li key={t} className="flex items-center gap-3"><CheckCircle2 size={22} className="text-[#43A047]" />{t}</li>
+        ))}
+      </ul>
+      <p className="mt-6 text-[#E53935]">Practice subscription is required to apply for online payments.</p>
+      <button type="button" className="mt-4 h-11 px-10 rounded-full bg-[#43A047] text-white font-bold tracking-wide hover:bg-[#388E3C]" data-testid="practice-online-payments-upgrade">UPGRADE ACCOUNT</button>
+      <div className="mt-6 flex justify-center gap-3">{["MasterCard", "VISA", "DISCOVER", "AMEX", "eCheck"].map(c => <span key={c} className="rounded border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-600">{c}</span>)}</div>
+    </div>
   );
 }

@@ -5,15 +5,24 @@ const shortT = (t) => { const [h, m] = t.split(":").map(Number); const ap = h >=
 const endT = (t) => { const [h, m] = t.split(":").map(Number); const tot = h * 60 + m + 15; return shortT(`${Math.floor(tot / 60)}:${String(tot % 60).padStart(2, "0")}`); };
 const chipLabel = (t) => {
   const re = [t.contact_name, t.matter_name].filter(Boolean).join("/");
-  return `${t.due_time ? `${shortT(t.due_time)} – ${endT(t.due_time)} ` : ""}☐ ${t.subject}${re ? ` (Re: ${re})` : ""}`;
+  const isEvent = t.kind === "event";
+  const time = isEvent
+    ? (t.start_time ? `${shortT(t.start_time)} – ${shortT(t.end_time || t.start_time)} ` : "")
+    : (t.due_time ? `${shortT(t.due_time)} – ${endT(t.due_time)} ` : "");
+  return `${time}${isEvent ? "📅" : "☐"} ${t.subject}${re ? ` (Re: ${re})` : ""}`;
 };
-const Chip = ({ t, onOpen }) => (
-  <button type="button" onClick={(e) => { e.stopPropagation(); onOpen?.({ ...t, _x: e.clientX - 200, _y: e.clientY + 12 }); }}
-          className={`block w-full truncate rounded px-1 py-px text-[11px] text-left ${t.status === "Completed" ? "bg-slate-200 text-slate-500 line-through" : "bg-[#1E88E5] text-white"}`}
-          title={chipLabel(t)} data-testid={`practice-cal-task-${t.id}`}>
-    {chipLabel(t)}
-  </button>
-);
+const Chip = ({ t, onOpen }) => {
+  const done = t.status === "Completed";
+  const isEvent = t.kind === "event";
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onOpen?.({ ...t, _x: e.clientX - 200, _y: e.clientY + 12 }); }}
+            className={`block w-full truncate rounded px-1 py-px text-[11px] text-left ${done ? "bg-slate-200 text-slate-500 line-through" : "text-white"}`}
+            style={done ? undefined : { backgroundColor: isEvent ? (t.color || "#E53935") : "#1E88E5" }}
+            title={chipLabel(t)} data-testid={`practice-cal-task-${t.id}`}>
+      {chipLabel(t)}
+    </button>
+  );
+};
 const forDay = (tasks, d) => tasks.filter(t => t.due_date === toISO(d));
 
 const HOURS = Array.from({ length: 16 }, (_, i) => i + 6);

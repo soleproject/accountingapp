@@ -1,14 +1,47 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  Scale, Play, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
+  Scale, Play, Pause, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
   Settings, CreditCard, LogOut, Calculator, Check, ChevronsLeft,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerStore";
+import { TimerPanel } from "@/components/practice/TimerPanel";
+
+function TopTimerButton() {
+  const { active, running, seconds } = usePracticeTimer();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest("[data-timer-overlay]")) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const onClick = () => { if (!active) timer.start(); else setOpen(v => !v); };
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={onClick} data-testid="practice-start-timer-btn" data-running={running}
+              className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors tabular-nums">
+        <span className="h-4 w-4 rounded-full bg-white grid place-items-center">
+          {active && !running ? <Pause size={9} className="text-[#43A047] fill-[#43A047]" /> : <Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" />}
+        </span>
+        {active ? <span data-testid="practice-top-timer-clock">{fmtClock(seconds)}</span> : "Start Timer"}
+      </button>
+      {open && active && (
+        <div data-testid="practice-top-timer-popover" data-timer-overlay
+             className="absolute left-0 top-full mt-2 w-[280px] rounded border border-slate-200 bg-white p-4 shadow-xl z-50 text-slate-800">
+          <TimerPanel idPrefix="practice-top-timer" onDone={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 const NAV = [
-  { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, "Time Entries",
-  { label: "Billing", menu: true }, { label: "Payments", menu: true },
+  { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
+  { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses", to: "/practice/expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
+  { label: "Payments", menu: true },
   { label: "Activities", menu: true }, { label: "Documents", menu: true },
   "Reports",
 ];
@@ -76,6 +109,31 @@ function ProfileMenu({ user }) {
   );
 }
 
+function NavMenu({ label, items, testId, className }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const nav = useNavigate();
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button type="button" onClick={() => setOpen(v => !v)} data-testid={testId} className={className}>{label}<ChevronDown size={12} /></button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl z-50" data-testid={`${testId}-menu`}>
+          {items.map(it => (
+            <button key={it.label} type="button" onClick={() => { setOpen(false); it.to && nav(it.to); }} data-testid={`${testId}-${it.label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+                    className={`w-full px-4 py-2 text-left text-sm ${it.to ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
   const nav = useNavigate();
   const { pathname } = useLocation();
@@ -92,18 +150,14 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
               className="h-7 px-3 rounded-full bg-[#29B6F6] text-xs font-bold hover:bg-[#4FC3F7] transition-colors">
         + New
       </button>
-      <button type="button" data-testid="practice-start-timer-btn"
-              className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors">
-        <span className="h-4 w-4 rounded-full bg-white grid place-items-center"><Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" /></span>
-        Start Timer
-      </button>
+      <TopTimerButton />
       <div className="flex-1" />
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-messages-btn"><MessagesSquare size={19} /></button>
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-notifications-btn"><Bell size={19} /></button>
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-help-btn"><CircleHelp size={19} /></button>
       <ProfileMenu user={user} />
     </div>
-    <div className="flex items-center gap-1 px-4 pb-2.5 overflow-x-auto">
+    <div className="flex items-center gap-1 px-4 pb-2.5">
       <label className="relative mr-3 shrink-0">
         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <input placeholder="Search" data-testid="practice-search-input"
@@ -113,11 +167,12 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
         const label = typeof n === "string" ? n : n.label;
         const menu = typeof n !== "string" && n.menu;
         const to = typeof n !== "string" ? n.to : null;
-        const active = to && (n.exact ? pathname === to : pathname.startsWith(to));
+        const active = to && (n.exact ? pathname === to : (n.items ? n.items.some(i => i.to && pathname.startsWith(i.to)) : pathname.startsWith(to)));
+        const key = label.toLowerCase().replace(/\s+/g, "-");
+        const cls = `shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`;
+        if (menu && n.items) return <NavMenu key={label} label={label} items={n.items} testId={`practice-nav-${key}`} className={cls} />;
         return (
-          <button key={label} type="button" data-testid={`practice-nav-${label.toLowerCase().replace(/\s+/g, "-")}`}
-                  onClick={() => to && nav(to)}
-                  className={`shrink-0 px-3 py-1 text-[15px] font-semibold hover:bg-white/15 rounded flex items-center gap-1 ${active ? "bg-white/20" : ""}`}>
+          <button key={label} type="button" data-testid={`practice-nav-${key}`} onClick={() => to && nav(to)} className={cls}>
             {label}{menu && <ChevronDown size={12} />}
           </button>
         );

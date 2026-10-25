@@ -184,6 +184,16 @@ import PracticeMatters from "@/pages/PracticeMatters";
 import PracticeNewMatter from "@/pages/PracticeNewMatter";
 import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
 import PracticeCalendar from "@/pages/PracticeCalendar";
+import PracticeTimeEntries from "@/pages/PracticeTimeEntries";
+import PracticeUser from "@/pages/PracticeUser";
+import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
+import PracticeInvoiceDetail from "@/pages/PracticeInvoiceDetail";
+import PracticeInvoices from "@/pages/PracticeInvoices";
+import PracticeExpenses from "@/pages/PracticeExpenses";
+import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
+import PracticeAddPayment from "@/pages/PracticeAddPayment";
+import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
+import PracticeNewUser, { PracticeRoleForm } from "@/pages/PracticeUsersRoles";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -204,7 +214,7 @@ function Protected({ children }) {
 // open /dashboard directly.
 function HomeRedirect() {
   const { user } = useAuth();
-  return <Navigate to={user?.role === "client" ? "/owner" : user?.role === "pro" ? "/cockpit" : "/dashboard"} replace />;
+  return <Navigate to={user?.role === "client" ? "/owner" : user?.role === "pro" ? "/cockpit" : user?.role === "practice" ? "/practice" : "/dashboard"} replace />;
 }
 
 // Sits inside BrandingProvider so the hook can read the signed-in user's
@@ -263,6 +273,19 @@ function App() {
             <Route path="/practice/matters/:id" element={<Protected><PracticeMatterDetail /></Protected>} />
             <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
             <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
+            <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
+            <Route path="/practice/time-entries/:id" element={<Protected><PracticeTimeEntryDetail /></Protected>} />
+            <Route path="/practice/users/new" element={<Protected><PracticeNewUser /></Protected>} />
+            <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
+            <Route path="/practice/roles/new" element={<Protected><PracticeRoleForm /></Protected>} />
+            <Route path="/practice/roles/:id" element={<Protected><PracticeRoleForm /></Protected>} />
+            <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
+            <Route path="/practice/expenses" element={<Protected><PracticeExpenses /></Protected>} />
+            <Route path="/practice/payments/new" element={<Protected><PracticeAddPayment /></Protected>} />
+            <Route path="/practice/checks/new" element={<Protected><PracticeWriteCheck /></Protected>} />
+            <Route path="/practice/invoices/:id/new" element={<Protected><PracticeNewInvoice /></Protected>} />
+            <Route path="/practice/invoices/:id/edit" element={<Protected><PracticeNewInvoice /></Protected>} />
+            <Route path="/practice/invoices/:id" element={<Protected><PracticeInvoiceDetail /></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

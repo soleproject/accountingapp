@@ -47,6 +47,7 @@ DEFAULT_PREFS = {
     "client_welcome_returning": True,   # "We added another company to your login"
     "password_reset":           True,   # Forgot-password magic link
     "team_invite":              True,   # Team/staff/pro/superadmin invitations
+    "practice_invite":          True,   # Practice staff invitations
     "stripe_welcome":           True,   # Post-Stripe-checkout welcome + set-password magic link
     "checkout_welcome":         True,   # Self-serve checkout done — branded welcome + plan summary
     "dunning":                  True,
