@@ -3,7 +3,9 @@ import { useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, Check, X, Trash2, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { PracticeShell } from "@/components/practice/PracticeShell";
+import { Reminders, UserPicker, Toggle } from "@/components/practice/NewTaskModal";
 
 const inp = "w-full h-8 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const sel = "h-8 rounded border border-slate-300 bg-white px-2 text-sm text-slate-700 outline-none";
@@ -11,16 +13,37 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random(
 const Section = ({ title, children, testId }) => <section className="rounded border border-slate-200 bg-white px-6 py-5 space-y-3" data-testid={testId}><h2 className="text-base font-bold uppercase tracking-wide text-slate-800">{title}</h2>{children}</section>;
 const Row = ({ label, required, children }) => <div className="grid grid-cols-[190px_1fr] items-center gap-3"><div className="text-[12px] font-semibold uppercase tracking-wide text-slate-800">{label}{required && <span className="text-red-500">*</span>}</div><div className="max-w-xl">{children}</div></div>;
 const Pill = ({ children, onClick, testId }) => <button type="button" onClick={onClick} className="inline-flex items-center gap-1 rounded-full bg-[#1E88E5] px-3 py-1 text-xs font-semibold text-white hover:bg-[#1976D2]" data-testid={testId}><Plus size={12} /> {children}</button>;
-const Card = ({ children, onDelete, testId }) => (
-  <div className="rounded border border-slate-200 px-4 py-4 space-y-2.5" data-testid={testId}>
-    {children}
-    <button type="button" className="text-xs font-semibold uppercase tracking-wide text-[#1E88E5]" data-testid={`${testId}-more`}>More Options</button>
-    <div><button type="button" onClick={onDelete} className="inline-flex items-center gap-1 text-xs text-[#1E88E5] hover:underline" data-testid={`${testId}-delete`}><Trash2 size={11} /> Delete</button></div>
-  </div>
-);
+const Card = ({ children, onDelete, testId, more }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded border border-slate-200 px-4 py-4 space-y-2.5" data-testid={testId}>
+      {children}
+      {open ? <div className="pt-2 space-y-2.5" data-testid={`${testId}-options`}>{more}</div>
+        : <button type="button" onClick={() => setOpen(true)} className="text-xs font-semibold uppercase tracking-wide text-[#1E88E5]" data-testid={`${testId}-more`}>More Options</button>}
+      <div><button type="button" onClick={onDelete} className="inline-flex items-center gap-1 text-xs text-[#1E88E5] hover:underline" data-testid={`${testId}-delete`}><Trash2 size={11} /> Delete</button></div>
+    </div>
+  );
+};
+const COLORS = ["#1E88E5", "#43A047", "#8E24AA", "#FFA726", "#F4511E", "#E53935"];
 
-const newEvent = () => ({ id: uid(), subject: "", description: "", private: false, assigned_users: [], tags: [] });
-const newTask = () => ({ id: uid(), subject: "", description: "", due_mode: "No due date.", due_n: 1, due_unit: "Business Days", due_dir: "After", due_field: "Due Date", due_anchor: "", priority: "Medium", private: false, assigned_users: [], tags: [] });
+function MoreOptions({ item, onChange, users, color, testId }) {
+  const set = (k) => (v) => onChange({ [k]: v?.target ? v.target.value : v });
+  const rem = item.reminders || [];
+  return (
+    <>
+      <Row label="Reminders">{rem.length ? <Reminders list={rem} onChange={set("reminders")} />
+        : <button type="button" onClick={() => set("reminders")([{ method: "Popup", amount: 10, unit: "Minute(s)" }])} className="text-sm text-[#1E88E5] hover:underline" data-testid={`${testId}-add-reminder`}>Add a Reminder</button>}</Row>
+      {color && <Row label="Color"><div className="flex gap-0.5" data-testid={`${testId}-colors`}>{COLORS.map(c => <button key={c} type="button" onClick={() => set("color")(c)} style={{ backgroundColor: c }} className={`h-4 w-4 ${item.color === c ? "ring-2 ring-offset-1 ring-slate-500" : ""}`} data-testid={`${testId}-color-${c.slice(1)}`} />)}</div></Row>}
+      <Row label="Priority"><select className={`${sel} w-full`} value={item.priority || "Medium"} onChange={set("priority")} data-testid={`${testId}-priority`}><option>Low</option><option>Medium</option><option>High</option></select></Row>
+      <Row label="Assigned To"><UserPicker selected={item.assigned_users || []} options={users} onChange={set("assigned_users")} /></Row>
+      <Row label="Tags"><input className={inp} value={(item.tags || []).join(", ")} onChange={e => set("tags")(e.target.value.split(",").map(t => t.trim()).filter(Boolean))} data-testid={`${testId}-tags`} /></Row>
+      <Row label="Email Assignees"><Toggle value={!!item.email_assignees} onChange={set("email_assignees")} testId={`${testId}-email`} /></Row>
+    </>
+  );
+}
+
+const newEvent = () => ({ id: uid(), subject: "", description: "", private: false, assigned_users: [], tags: [], reminders: [], color: "", priority: "Medium", email_assignees: false });
+const newTask = () => ({ id: uid(), subject: "", description: "", due_mode: "No due date.", due_n: 1, due_unit: "Business Days", due_dir: "After", due_field: "Due Date", due_anchor: "", priority: "Medium", private: false, assigned_users: [], tags: [], reminders: [], email_assignees: false });
 
 function DueDate({ t, anchors, onChange }) {
   const set = (k) => (e) => onChange({ ...t, [k]: e.target.type === "number" ? Number(e.target.value) : e.target.value });
@@ -41,8 +64,11 @@ function DueDate({ t, anchors, onChange }) {
 export default function PracticeWorkflowEdit() {
   const { id } = useParams();
   const nav = useNavigate();
+  const { user } = useAuth();
   const [f, setF] = useState(id ? null : { name: "", description: "", permissions: "Share this workflow with all users", events: [], tasks: [] });
   const [busy, setBusy] = useState(false);
+  const [users, setUsers] = useState([]);
+  useEffect(() => { api.get("/practice/users").then(r => setUsers(r.data.map(u => u.name).filter(Boolean))).catch(() => setUsers([user?.name].filter(Boolean))); }, [user]);
   useEffect(() => { if (id) api.get(`/practice/workflows/${id}`).then(r => setF(r.data)).catch(() => { toast.error("Workflow not found"); nav("/practice/workflows"); }); }, [id, nav]);
   if (!f) return <PracticeShell withRail={false}><div className="p-6 text-sm text-slate-500">Loading…</div></PracticeShell>;
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
@@ -70,7 +96,7 @@ export default function PracticeWorkflowEdit() {
         </Section>
         <Section title={`Workflow Events (${f.events.length})`} testId="practice-wf-events">
           {f.events.map(ev => (
-            <Card key={ev.id} onDelete={() => rm("events", ev)} testId={`practice-wf-event-${ev.id}`}>
+            <Card key={ev.id} onDelete={() => rm("events", ev)} testId={`practice-wf-event-${ev.id}`} more={<MoreOptions item={ev} users={users} color onChange={(p) => upd("events", ev, p)} testId={`practice-wf-event-${ev.id}`} />}>
               <Row label="Event Subject" required><input className={inp} placeholder="Add Subject..." value={ev.subject} onChange={e => upd("events", ev, { subject: e.target.value })} data-testid={`practice-wf-event-${ev.id}-subject`} /></Row>
               <Row label="Event Description"><input className={inp} placeholder="Add description..." value={ev.description} onChange={e => upd("events", ev, { description: e.target.value })} /></Row>
             </Card>
@@ -79,7 +105,7 @@ export default function PracticeWorkflowEdit() {
         </Section>
         <Section title={`Workflow Tasks (${f.tasks.length})`} testId="practice-wf-tasks">
           {f.tasks.map((t, idx) => (
-            <Card key={t.id} onDelete={() => rm("tasks", t)} testId={`practice-wf-task-${t.id}`}>
+            <Card key={t.id} onDelete={() => rm("tasks", t)} testId={`practice-wf-task-${t.id}`} more={<MoreOptions item={t} users={users} onChange={(p) => upd("tasks", t, p)} testId={`practice-wf-task-${t.id}`} />}>
               <Row label="Task Subject" required><input className={inp} placeholder="Add Subject..." value={t.subject} onChange={e => upd("tasks", t, { subject: e.target.value })} data-testid={`practice-wf-task-${t.id}-subject`} /></Row>
               <Row label="Task Description"><input className={inp} placeholder="Add description..." value={t.description} onChange={e => upd("tasks", t, { description: e.target.value })} /></Row>
               <div className="grid grid-cols-[190px_1fr] items-center gap-3"><div className="text-[12px] font-semibold uppercase tracking-wide text-slate-800">Due Date{t.due_mode === "Automatically" && <span className="text-red-500">*</span>}</div>

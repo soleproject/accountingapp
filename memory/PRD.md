@@ -1287,3 +1287,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-06 — Activities working filters
 - Status, Assigned To (options from rows' assigned users) and Date Range (presets + Custom from/to) now filter the Activities page list AND the All/Completed/Incomplete/Overdue cards; same filters (plus kind) work on the contact Activities tab. Shared `UserFilter`(value/onChange/options), `DateRangeFilter`, `inRange` in listParts.jsx; `filterActivities` exported from PracticeActivities.jsx.
+
+## 2026-06 — Workflows
+- Activities ▾ → Workflows and the Workflows button on Activities open `/practice/workflows` (`PracticeWorkflows.jsx`): Created By filter, search, Name/Permissions/Created Date/Created By grid, hover pill Edit/Delete/Clone, +New Workflow. Example "Client Intake Workflow" (1 event, 7 chained tasks) auto-seeded per owner.
+- `/practice/workflows/new` & `/:id/edit` (`PracticeWorkflowEdit.jsx`): Workflow (name/description/permissions), Workflow Events (n) and Workflow Tasks (n) cards with New Event/New Task pills; task Due Date "No due date." or Automatically → n · unit · After/Before · Due/Start Date · anchor (earlier event/task). More Options expands Reminders (Add a Reminder), Color (events), Priority, Assigned To (user picker), Tags, Email Assignees. Save / Save & Add New / Cancel.
+- Backend: `GET/POST /api/practice/workflows`, `GET/PUT/DELETE /workflows/{id}`, `POST /workflows/{id}/clone` (practice_workflows). Feature: Activities. Applying a workflow to a contact/matter is NOT built yet.
