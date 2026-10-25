@@ -106,7 +106,7 @@ export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
             <Card title="Payment Details">
               <p className="-mt-1 mb-1 text-xs text-slate-600">Learn more about the <span className="text-[#1E88E5]">difference between paying expenses from the trust account</span> or operating account.</p>
               <Row label="Account" required help><select className={inp} value={f.account} onChange={set("account")} data-testid="practice-exp-account"><option value="">Select Account...</option><option>Operating Account</option><option>Trust Account</option></select></Row>
-              <Row label="Payee" help><input className={inp} placeholder="Payee name..." value={f.payee} onChange={set("payee")} data-testid="practice-exp-payee" /></Row>
+              <Row label="Payee" help><ContactPicker value={f.payee} onChange={set("payee")} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-exp-payee" /></Row>
               <Row label="Payment Method"><select className={inp} value={f.payment_method} onChange={set("payment_method")} data-testid="practice-exp-payment-method"><option>Credit / Debit Card</option><option>Check</option><option>Cash</option><option>Bank Transfer</option><option>Other</option></select></Row>
               <Row label="Notes"><input className={inp} placeholder="Add Notes..." value={f.payment_notes} onChange={set("payment_notes")} data-testid="practice-exp-payment-notes" /></Row>
             </Card>

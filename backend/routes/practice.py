@@ -97,9 +97,10 @@ def _display_name(c: dict) -> str:
 
 async def _billable_sums(uid: str, key: str) -> dict:
     sums: dict = {}
-    async for te in db.practice_time_entries.find({"owner_id": uid}, {"_id": 0, key: 1, "total": 1, "billing_status": 1, "billable": 1}):
-        if _te_status(te) == "Billable" and te.get(key):
-            sums[te[key]] = round(sums.get(te[key], 0) + (te.get("total") or 0), 2)
+    for coll in (db.practice_time_entries, db.practice_expenses):
+        async for d in coll.find({"owner_id": uid}, {"_id": 0, key: 1, "total": 1, "billing_status": 1, "billable": 1}):
+            if _te_status(d) == "Billable" and d.get(key):
+                sums[d[key]] = round(sums.get(d[key], 0) + (d.get("total") or 0), 2)
     return sums
 
 

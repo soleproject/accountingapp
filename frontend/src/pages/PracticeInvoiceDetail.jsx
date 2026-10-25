@@ -63,7 +63,7 @@ function InvoiceDoc({ inv }) {
               {inv.expenses.map(e => (
                 <tr key={e.id} className="border-b border-slate-200 align-top"><td className="px-2 py-3"><div className="font-semibold">{e.item}</div><div>{mdy(e.date)}</div><div className="whitespace-pre-line">{e.description}</div></td><td className="px-2 py-3">{e.billed_by}</td><td className="px-2 py-3 text-right">{usd(e.price)}</td><td className="px-2 py-3 text-right">{Number(e.qty).toFixed(2)}</td><td className="px-2 py-3 text-right">{usd(e.sub)}</td></tr>
               ))}
-              <tr className="font-semibold"><td colSpan={2} /><td className="px-2 py-3 text-right">Expenses Total</td><td /><td className="px-2 py-3 text-right">{usd(inv.expenses.reduce((a, e) => a + (e.sub || 0), 0))}</td></tr>
+              <tr className="font-semibold"><td colSpan={2} /><td className="px-2 py-3 text-right">Expenses Total:</td><td className="px-2 py-3 text-right">{inv.expenses.reduce((a, e) => a + (Number(e.qty) || 0), 0).toFixed(2)}</td><td className="px-2 py-3 text-right">{usd(inv.expenses.reduce((a, e) => a + (e.sub || 0), 0))}</td></tr>
             </tbody>
           </table>
         </div>
