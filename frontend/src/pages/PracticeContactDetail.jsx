@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { PracticeStatTiles } from "@/components/practice/PracticeDashboardBlocks";
 import { pushRecent } from "@/components/practice/PracticeRightRail";
+import { MattersTab, ActivitiesTab, InvoicesTab, PaymentsTab, TimeTab } from "@/components/practice/ContactTabs";
 
 const TABS = ["About", "Matters", "Activities", "Notes", "Messages", "Invoices", "Payments", "Time", "Expenses", "Flat Fees", "Relationships", "Intakes", "Files"];
 const slug = (s) => s.toLowerCase().replace(/\s+/g, "-");
@@ -59,33 +60,6 @@ function AboutTab({ c }) {
   );
 }
 
-function MattersTab({ contactId }) {
-  const nav = useNavigate();
-  const [rows, setRows] = useState(null);
-  useEffect(() => {
-    api.get("/practice/matters", { params: { status: "All", contact_id: contactId } }).then(r => setRows(r.data)).catch(() => setRows([]));
-  }, [contactId]);
-  if (rows === null) return <div className="p-6 text-sm text-slate-500">Loading…</div>;
-  return (
-    <section className="rounded border border-slate-200 bg-white overflow-hidden" data-testid="practice-contact-matters">
-      {rows.length === 0 ? (
-        <div className="px-6 py-10 text-center text-sm text-slate-500">No matters yet.
-          <button type="button" onClick={() => nav(`/practice/matters/new?contact=${contactId}`)} className="ml-1 text-[#1E88E5] font-semibold" data-testid="practice-contact-matters-new">Create one</button>
-        </div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500"><tr>{["Matter", "Status", "Matter Rate", "Assigned To", "Opened"].map(h => <th key={h} className="px-4 py-2 text-left font-semibold">{h}</th>)}</tr></thead>
-          <tbody>{rows.map(m => (
-            <tr key={m.id} className="border-t border-slate-100" data-testid={`practice-contact-matter-${m.id}`}>
-              <td className="px-4 py-3"><button type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="font-semibold text-[#1E88E5] hover:underline">{m.name}</button></td><td className="px-4 py-3">{m.status}</td><td className="px-4 py-3">{m.matter_rate}</td>
-              <td className="px-4 py-3">{m.assigned_to}</td><td className="px-4 py-3 text-slate-500">{m.open_date || new Date(m.created_at).toLocaleDateString("en-US")}</td>
-            </tr>))}</tbody>
-        </table>
-      )}
-    </section>
-  );
-}
-
 export default function PracticeContactDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -119,10 +93,10 @@ export default function PracticeContactDetail() {
               <Plus size={14} /> New <ChevronDown size={12} />
             </button>
           </div>
-          <PracticeStatTiles />
+          <PracticeStatTiles values={c.financials} />
           <div className="flex flex-wrap border-b border-slate-200" data-testid="practice-contact-tabs">
             {TABS.map(t => {
-              const n = { Matters: c.counts?.matters, Activities: c.counts?.activities, Time: c.counts?.time }[t];
+              const n = { Matters: c.counts?.matters, Activities: c.counts?.activities, Time: c.counts?.time, Invoices: c.counts?.invoices, Payments: c.counts?.payments, Expenses: c.counts?.expenses }[t];
               return (
               <button key={t} type="button" onClick={() => setTab(t)} data-testid={`practice-contact-tab-${slug(t)}`}
                       className={`-mb-px px-3 py-2 text-sm border inline-flex items-center gap-1 ${tab === t
@@ -132,7 +106,8 @@ export default function PracticeContactDetail() {
               </button>
             ); })}
           </div>
-          {tab === "About" ? <AboutTab c={c} /> : tab === "Matters" ? <MattersTab contactId={c.id} /> : (
+          {tab === "About" ? <AboutTab c={c} /> : tab === "Matters" ? <MattersTab contactId={c.id} /> : tab === "Activities" ? <ActivitiesTab contactId={c.id} />
+            : tab === "Invoices" ? <InvoicesTab contactId={c.id} /> : tab === "Payments" ? <PaymentsTab contactId={c.id} /> : tab === "Time" ? <TimeTab contactId={c.id} /> : (
             <section className="rounded border border-slate-200 bg-white px-6 py-10 text-center text-sm text-slate-500" data-testid={`practice-contact-panel-${slug(tab)}`}>
               No {tab.toLowerCase()} for {c.display_name} yet.
             </section>

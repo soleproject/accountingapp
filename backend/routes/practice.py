@@ -17,7 +17,7 @@ _role_guard = require_role("superadmin", "practice")
 # path prefix -> permission feature
 _FEATURE_BY_PATH = [
     ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
-    ("/events", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
+    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
     ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
     ("/payments", "Contact Payments"), ("/retainers", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
     ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
@@ -167,14 +167,46 @@ async def _billable_sums(uid: str, key: str) -> dict:
     return sums
 
 
+_ZERO = {"trust": 0.0, "paid": 0.0, "due": 0.0, "billable": 0.0}
+
+
+async def _money(uid: str) -> dict:
+    c: dict = {}
+    m: dict = {}
+
+    def add(key_c, key_m, field, v):
+        for d, k in ((c, key_c), (m, key_m)):
+            if k:
+                e = d.setdefault(k, dict(_ZERO))
+                e[field] = round(e[field] + v, 2)
+
+    async for p in db.practice_payments.find({"owner_id": uid}, {"_id": 0}):
+        add(p.get("contact_id"), p.get("matter_id"), "trust" if p.get("bank_account") == "Trust Account" else "paid", p.get("amount") or 0)
+    async for e in db.practice_expenses.find({"owner_id": uid, "cost_type": "Hard Cost"}, {"_id": 0}):
+        add(e.get("contact_id"), e.get("matter_id"), "trust" if e.get("account") == "Trust Account" else "paid", -(e.get("amount") or 0))
+    async for k in db.practice_checks.find({"owner_id": uid}, {"_id": 0}):
+        add(k.get("contact_id"), k.get("matter_id"), "trust" if k.get("bank_account") == "Trust Account" else "paid", -(k.get("amount") or 0))
+    async for inv in db.practice_invoices.find({"owner_id": uid, "status": {"$ne": "Draft"}}, {"_id": 0}):
+        bal = _inv_totals(inv)["balance"]
+        mids = inv.get("matter_ids") or []
+        add(inv.get("contact_id"), None, "due", bal)
+        for mid in mids:
+            add(None, mid, "due", round(bal / len(mids), 2))
+    for coll in (db.practice_time_entries, db.practice_expenses):
+        async for d in coll.find({"owner_id": uid}, {"_id": 0, "contact_id": 1, "matter_id": 1, "total": 1, "billing_status": 1, "billable": 1}):
+            if _te_status(d) == "Billable":
+                add(d.get("contact_id"), d.get("matter_id"), "billable", d.get("total") or 0)
+    return {"contacts": c, "matters": m}
+
+
 @router.get("/contacts")
 async def list_contacts(status: str = "Active", user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
     if status != "All":
         q["status"] = status
     docs = await db.practice_contacts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    sums = await _billable_sums(user["id"], "contact_id")
-    return [{**d, "display_name": _display_name(d), "billable": sums.get(d["id"], 0)} for d in docs]
+    sums = (await _money(user["id"]))["contacts"]
+    return [{**d, "display_name": _display_name(d), **sums.get(d["id"], _ZERO)} for d in docs]
 
 
 @router.post("/contacts")
@@ -196,7 +228,8 @@ async def get_contact(contact_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_contacts.find_one({"id": contact_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Contact not found")
-    return {**doc, "display_name": _display_name(doc), "counts": await _counts(user["id"], contact_id=contact_id)}
+    return {**doc, "display_name": _display_name(doc), "counts": await _counts(user["id"], contact_id=contact_id),
+            "financials": (await _money(user["id"]))["contacts"].get(contact_id, _ZERO)}
 
 
 class PracticeMatterIn(BaseModel):
@@ -231,8 +264,8 @@ async def list_matters(status: str = "Open", contact_id: Optional[str] = None, u
     if contact_id:
         q["contact_id"] = contact_id
     docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    sums = await _billable_sums(user["id"], "matter_id")
-    return [{**(await _with_contact(d, user)), "billable": sums.get(d["id"], 0)} for d in docs]
+    sums = (await _money(user["id"]))["matters"]
+    return [{**(await _with_contact(d, user)), **sums.get(d["id"], _ZERO)} for d in docs]
 
 
 @router.get("/matters/counts")
@@ -442,11 +475,46 @@ async def create_time_entry(inp: PracticeTimeEntryIn, user: dict = Depends(_guar
 
 async def _counts(user_id: str, **match) -> dict:
     q = {"owner_id": user_id, **match}
+    iq = {"owner_id": user_id, "status": {"$ne": "Draft"}, **({"contact_id": match["contact_id"]} if "contact_id" in match else {}), **({"matter_ids": match["matter_id"]} if "matter_id" in match else {})}
     return {
         "matters": await db.practice_matters.count_documents(q) if "contact_id" in match and "matter_id" not in match else None,
         "activities": await db.practice_tasks.count_documents(q),
         "time": await db.practice_time_entries.count_documents(q),
+        "invoices": await db.practice_invoices.count_documents(iq),
+        "expenses": await db.practice_expenses.count_documents(q),
+        "payments": await db.practice_payments.count_documents(q) + await db.practice_checks.count_documents(q) + await db.practice_expenses.count_documents({**q, "cost_type": "Hard Cost"}),
     }
+
+
+@router.get("/activities")
+async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if contact_id:
+        q["contact_id"] = contact_id
+    if matter_id:
+        q["matter_id"] = matter_id
+    docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", -1), ("start_date", -1), ("created_at", -1)]).to_list(2000)
+    mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    now = datetime.now()
+    today, tnow = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
+    out = []
+    for d in docs:
+        if d.get("kind") == "event":
+            ended = (d.get("end_date") or d.get("start_date"), d.get("end_time") or "23:59") < (today, tnow)
+            status = "Completed" if ended else "Scheduled"
+            when = {"start_date": d.get("start_date"), "start_time": d.get("start_time"), "end_date": d.get("end_date"), "end_time": d.get("end_time")}
+        else:
+            if d.get("status") == "Completed":
+                status = "Completed"
+            elif (d.get("due_date") or "", d.get("due_time") or "23:59") < (today, tnow):
+                status = "Overdue"
+            else:
+                status = d.get("status") or "Not Completed"
+            when = {"due_date": d.get("due_date"), "due_time": d.get("due_time")}
+        out.append({**d, "status": status, "matter_name": matters.get(d.get("matter_id"), ""), "assigned_users": d.get("assigned_users") or [user.get("name", "")], **when})
+    out.sort(key=lambda r: (r.get("due_date") or r.get("start_date") or "", r.get("due_time") or r.get("start_time") or ""), reverse=True)
+    return out
 
 
 class PracticeTaxIn(BaseModel):
@@ -511,8 +579,13 @@ async def _te_full(docs: list) -> list:
 
 
 @router.get("/time-entries/all")
-async def list_time_entries_full(user: dict = Depends(_guard)):
-    docs = await db.practice_time_entries.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(2000)
+async def list_time_entries_full(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+    q = {"owner_id": user["id"]}
+    if contact_id:
+        q["contact_id"] = contact_id
+    if matter_id:
+        q["matter_id"] = matter_id
+    docs = await db.practice_time_entries.find(q, {"_id": 0}).sort("created_at", -1).to_list(2000)
     return await _te_full(docs)
 
 
@@ -1277,9 +1350,14 @@ _SRC = {"payment": "practice_payments", "expense": "practice_expenses", "check":
 
 
 @router.get("/ledger")
-async def ledger(user: dict = Depends(_guard)):
+async def ledger(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
     await _ensure_accounts(user)
-    return await _ledger(user["id"])
+    rows = await _ledger(user["id"])
+    if contact_id:
+        rows = [r for r in rows if r.get("contact_id") == contact_id]
+    if matter_id:
+        rows = [r for r in rows if r.get("matter_id") == matter_id]
+    return rows
 
 
 @router.patch("/ledger/{src}/{item_id}")

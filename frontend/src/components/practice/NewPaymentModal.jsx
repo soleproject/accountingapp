@@ -12,11 +12,11 @@ const Tile = ({ icon: Icon, label, onClick, active, title, testId }) => (
   </button>
 );
 
-export const NewPaymentModal = ({ invoice, onClose }) => {
+export const NewPaymentModal = ({ invoice, onClose, contactId }) => {
   const nav = useNavigate();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
-  const [link, setLink] = useState({ contact_id: invoice?.contact_id || "", matter_id: invoice?.matter_ids?.[0] || "" });
+  const [link, setLink] = useState({ contact_id: invoice?.contact_id || contactId || "", matter_id: invoice?.matter_ids?.[0] || "" });
   const [step, setStep] = useState(invoice ? 2 : 1);
   const [mode, setMode] = useState(invoice ? "invoice" : "");
   const payInvoice = mode === "invoice", retainer = mode === "retainer";

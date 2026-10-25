@@ -75,7 +75,7 @@ export const Toggle = ({ value, onChange, testId }) => (
 );
 export const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4">{title && <h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>}{children}</section>;
 
-export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
+export const NewTaskModal = ({ defaultDate, task, onSaved, onClose, defaults = {} }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
@@ -84,7 +84,7 @@ export const NewTaskModal = ({ defaultDate, task, onSaved, onClose }) => {
     contact_id: "", matter_id: "", subject: "", due_date: toISO(defaultDate || new Date()), due_time: "09:00", all_day: true,
     status: "Not Completed", description: "", private: false, priority: "Medium", repeat: "Never",
     assigned_users: [user?.name].filter(Boolean), assigned_contacts: "", tags: "", email_assignees: true,
-    reminders: [], save_reminders: true,
+    reminders: [], save_reminders: true, ...defaults,
   });
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));
 

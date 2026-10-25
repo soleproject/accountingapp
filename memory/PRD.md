@@ -1272,3 +1272,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Add a Retainer page (`PracticeAddRetainer.jsx`): Linked To, Payment Details (Amount, Bank Account Operating/Trust, Date, Payment Method, Notes). With Operating Account and open invoices: "N OUTSTANDING INVOICE(S) DETECTED!" + auto-apply checkbox (hidden for Trust).
 - Backend `POST /api/practice/retainers`: stores payment doc with kind=retainer; optional auto-apply to oldest outstanding invoices (Operating only).
 - Payments history: Trust rows show blue amount pill; TRUST stat sums trust rows, PAID sums non-trust rows. Payment detail amount card is blue for trust.
+
+## 2026-06 — Contact detail tabs (Matters / Activities / Invoices / Payments / Time)
+- Contact header tiles now real: Trust (trust-account net), Paid (operating net), Due (−open invoice balances), Billable (unbilled time+expenses) via `financials` on `GET /contacts/{id}`; shared `_money()` helper also powers Trust/Operating/Billable columns on Contacts & Matters lists.
+- Tab counts for Matters, Activities, Invoices, Payments, Time, Expenses.
+- New `components/practice/ContactTabs.jsx`: MattersTab (New Matter, filters, MattersTable w/ Trust/Operating/Billable pills), ActivitiesTab (New ▾ Task/Event prefilled with contact, click row to edit; COMPLETED/OVERDUE pills; `GET /activities?contact_id=`), InvoicesTab (New Invoice, status filter, PAID green pill, `InvoicesTable` extracted from PracticeInvoices), PaymentsTab (Actions ▾ → Contact Payment prefilled; `PaymentsTable`/`ActionsMenu` exported from PracticePaymentsPages; `GET /ledger?contact_id=`), TimeTab (New Time Entry prefilled, status filter, TimeEntriesTable hideContact; `GET /time-entries/all?contact_id=`). Each tab ends with a RECENT ACTIVITY collapsible.
+- Placeholder tabs still: Notes, Messages, Expenses, Flat Fees, Relationships, Intakes, Files.
