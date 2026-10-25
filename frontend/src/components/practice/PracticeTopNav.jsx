@@ -157,7 +157,7 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-help-btn"><CircleHelp size={19} /></button>
       <ProfileMenu user={user} />
     </div>
-    <div className="flex items-center gap-1 px-4 pb-2.5 overflow-x-auto">
+    <div className="flex items-center gap-1 px-4 pb-2.5">
       <label className="relative mr-3 shrink-0">
         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
         <input placeholder="Search" data-testid="practice-search-input"
