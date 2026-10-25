@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Play } from "lucide-react";
 import { money, billableMoney, Avatar, ListToolbar, ListHead, ListFooter, HoverPill } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
+import { timer, showRail } from "@/components/practice/timerStore";
 
 const link = "text-[#1E88E5] hover:underline";
 const titleLink = "font-semibold text-[#1E88E5] hover:underline text-[15px]";
@@ -64,7 +65,8 @@ export function MattersTable({ rows, nav, onTrackTime }) {
                 <HoverPill testId={`practice-matter-actions-${r.id}`}>
                   <button type="button" onClick={() => nav(`/practice/matters/${r.id}/edit`)} className={act} data-testid={`practice-matter-row-edit-${r.id}`}>Edit</button>
                   <button type="button" onClick={() => onTrackTime?.(r)} className={act} data-testid={`practice-matter-row-track-time-${r.id}`}>Track Time</button>
-                  {["Start Timer", "Add Expense", "Invoice", "Enter Payment", "Mailsync"].map(a => <span key={a}>{a}</span>)}
+                  <button type="button" onClick={() => { timer.start({ contact_id: r.contact_id, matter_id: r.id }); showRail(); }} className={act} data-testid={`practice-matter-row-start-timer-${r.id}`}>Start Timer</button>
+                  {["Add Expense", "Invoice", "Enter Payment", "Mailsync"].map(a => <span key={a}>{a}</span>)}
                 </HoverPill>
               </td>
               <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className={link}>{r.contact_name}</button></td>

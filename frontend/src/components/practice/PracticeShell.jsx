@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { Toaster } from "sonner";
 import { useAuth } from "@/lib/auth";
@@ -10,9 +10,14 @@ const KEY = "practice_sidebar_hidden";
 export const PracticeShell = ({ children, withRail = true }) => {
   const { user } = useAuth();
   const [railHidden, setRailHidden] = useState(() => localStorage.getItem(KEY) === "1");
+  const setHidden = (v) => { localStorage.setItem(KEY, v ? "1" : "0"); setRailHidden(v); };
+  useEffect(() => {
+    const h = () => setHidden(false);
+    window.addEventListener("practice:show-rail", h);
+    return () => window.removeEventListener("practice:show-rail", h);
+  }, []);
   if (user?.role !== "superadmin") return <Navigate to="/" replace />;
 
-  const setHidden = (v) => { localStorage.setItem(KEY, v ? "1" : "0"); setRailHidden(v); };
   const showRail = withRail && !railHidden;
 
   return (

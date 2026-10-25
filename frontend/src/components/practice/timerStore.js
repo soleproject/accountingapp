@@ -9,7 +9,7 @@ export const timerSeconds = (t) => t ? t.base + (t.running ? Math.floor((Date.no
 export const fmtClock = (s) => [s / 3600, (s % 3600) / 60, s % 60].map(n => String(Math.floor(n)).padStart(2, "0")).join(":");
 
 export const timer = {
-  start: () => write({ base: 0, running: true, startedAt: Date.now(), notes: "" }),
+  start: (link = {}) => write({ base: 0, running: true, startedAt: Date.now(), notes: "", contact_id: link.contact_id || "", matter_id: link.matter_id || "" }),
   pause: () => { const t = read(); if (t) write({ ...t, base: timerSeconds(t), running: false }); },
   resume: () => { const t = read(); if (t) write({ ...t, running: true, startedAt: Date.now() }); },
   setNotes: (notes) => { const t = read(); if (t) write({ ...t, notes }); },
@@ -26,5 +26,7 @@ export function usePracticeTimer() {
     const i = setInterval(() => tick(n => n + 1), 1000);
     return () => { listeners.delete(sync); window.removeEventListener("storage", sync); clearInterval(i); };
   }, []);
-  return { active: !!t, running: !!t?.running, seconds: timerSeconds(t), notes: t?.notes || "" };
+  return { active: !!t, running: !!t?.running, seconds: timerSeconds(t), notes: t?.notes || "", contact_id: t?.contact_id || "", matter_id: t?.matter_id || "" };
 }
+
+export const showRail = () => window.dispatchEvent(new Event("practice:show-rail"));

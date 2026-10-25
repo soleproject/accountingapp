@@ -36,7 +36,7 @@ export const NewTimeEntryModal = ({ task, entry, timerSeconds = 0, timerNotes = 
   const [newItem, setNewItem] = useState(null);
   const [f, setF] = useState(entry ? { ...entry, hours_raw: entry.hours_raw || String(entry.hours), private_notes: entry.private_notes || "" } : {
     contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: timerSeconds ? fmtHours(timerSeconds) : "", date: task?.due_date || toISO(new Date()),
-    description: task ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : timerNotes,
+    description: task?.subject ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : timerNotes,
     billable: true, billed_by: user?.name || "", hourly_rate: 0, private_notes: "",
   });
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));

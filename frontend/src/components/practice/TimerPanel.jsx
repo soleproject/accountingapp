@@ -4,7 +4,7 @@ import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerSt
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 export function TimerPanel({ idPrefix = "practice-rail-timer", onDone }) {
-  const { active, running, seconds, notes } = usePracticeTimer();
+  const { active, running, seconds, notes, contact_id, matter_id } = usePracticeTimer();
   const [confirm, setConfirm] = useState(false);
   const [save, setSave] = useState(false);
   return (
@@ -43,7 +43,7 @@ export function TimerPanel({ idPrefix = "practice-rail-timer", onDone }) {
           </div>
         </div>
       )}
-      {save && <NewTimeEntryModal timerSeconds={seconds} timerNotes={notes} onClose={() => { setSave(false); timer.resume(); }} onSaved={() => { setSave(false); timer.clear(); onDone?.(); }} />}
+      {save && <NewTimeEntryModal task={contact_id ? { contact_id, matter_id } : undefined} timerSeconds={seconds} timerNotes={notes} onClose={() => { setSave(false); timer.resume(); }} onSaved={() => { setSave(false); timer.clear(); onDone?.(); }} />}
     </>
   );
 }
