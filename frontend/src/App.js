@@ -190,6 +190,7 @@ import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
 import PracticeInvoiceDetail from "@/pages/PracticeInvoiceDetail";
 import PracticeInvoices from "@/pages/PracticeInvoices";
 import PracticeExpenses from "@/pages/PracticeExpenses";
+import PracticeMultipleExpenses from "@/pages/PracticeMultipleExpenses";
 import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
 import PracticeAddPayment from "@/pages/PracticeAddPayment";
 import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
@@ -281,6 +282,7 @@ function App() {
             <Route path="/practice/roles/:id" element={<Protected><PracticeRoleForm /></Protected>} />
             <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
             <Route path="/practice/expenses" element={<Protected><PracticeExpenses /></Protected>} />
+            <Route path="/practice/expenses/multiple" element={<Protected><PracticeMultipleExpenses /></Protected>} />
             <Route path="/practice/payments/new" element={<Protected><PracticeAddPayment /></Protected>} />
             <Route path="/practice/checks/new" element={<Protected><PracticeWriteCheck /></Protected>} />
             <Route path="/practice/invoices/:id/new" element={<Protected><PracticeNewInvoice /></Protected>} />
