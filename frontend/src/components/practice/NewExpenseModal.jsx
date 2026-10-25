@@ -7,6 +7,7 @@ import { ContactPicker } from "@/components/practice/ContactPicker";
 import { MatterPicker } from "@/components/practice/MatterPicker";
 import { SearchSelect } from "@/components/practice/SearchSelect";
 import { toISO } from "@/components/practice/DateTimePicker";
+import { ExpenseCategoriesModal } from "@/components/practice/ExpenseCategoriesModal";
 
 const inp = "w-full h-9 rounded border border-slate-300 bg-white px-3 text-sm text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const Row = ({ label, required, help, sub, children }) => (
@@ -51,6 +52,7 @@ export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
   const [matters, setMatters] = useState([]);
   const [cats, setCats] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [manage, setManage] = useState(false);
   const [f, setF] = useState(expense ? { ...expense } : {
     contact_id: "", matter_id: "", cost_type: "Soft Cost", date: toISO(new Date()), qty: 1, price: "", description: "", category: "",
     receipt_name: "", billable: true, billed_by: user?.name || "", private_notes: "", account: "", payee: "", payment_method: "Credit / Debit Card", payment_notes: "",
@@ -98,7 +100,7 @@ export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
             <Row label="Price" sub="USD" required><input type="number" step="0.01" className={inp} placeholder="Enter Amount..." value={f.price} onChange={set("price")} data-testid="practice-exp-price" /></Row>
             <Row label="Total" sub="USD"><input readOnly className={`${inp} bg-slate-50`} value={total.toFixed(2)} data-testid="practice-exp-total" /></Row>
             <Row label="Description" help><textarea rows={4} className={`${inp} !h-auto py-2`} value={f.description} onChange={set("description")} data-testid="practice-exp-description" /></Row>
-            <Row label="Category" help><SearchSelect value={f.category} onChange={set("category")} options={catOpts} placeholder="Select Category..." clearable newLabel="Manage Categories" onNew={() => toast.info("Categories coming soon")} testId="practice-exp-category" /></Row>
+            <Row label="Category" help><SearchSelect value={f.category} onChange={set("category")} options={catOpts} placeholder="Select Category..." clearable newLabel="Manage Categories" onNew={() => setManage(true)} testId="practice-exp-category" /></Row>
           </Card>
           {f.cost_type === "Hard Cost" && (
             <Card title="Payment Details">
@@ -130,6 +132,7 @@ export const NewExpenseModal = ({ expense, onSaved, onClose }) => {
           </div>
         </div>
       </div>
+      {manage && <ExpenseCategoriesModal onClose={() => setManage(false)} onSaved={(c) => { setCats(c); if (f.category && !c.some(x => x.name === f.category)) setF(p => ({ ...p, category: "" })); }} />}
     </div>
   );
 };

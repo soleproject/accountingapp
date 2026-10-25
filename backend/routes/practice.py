@@ -770,10 +770,32 @@ async def _exp_names(docs: list) -> list:
     return [{**d, "contact_name": contacts.get(d.get("contact_id"), ""), "matter_name": matters.get(d.get("matter_id"), ""), "billing_status": _exp_status(d)} for d in docs]
 
 
+async def _categories(uid: str) -> list:
+    doc = await db.practice_expense_categories.find_one({"owner_id": uid}, {"_id": 0})
+    if doc:
+        return doc["categories"]
+    cats = sorted([{"code": c, "name": n} for c, n in EXPENSE_CATEGORIES], key=lambda c: c["name"].lower())
+    await db.practice_expense_categories.insert_one({"owner_id": uid, "categories": cats})
+    return cats
+
+
 @router.get("/expenses/categories")
 async def expense_categories(user: dict = Depends(_guard)):
-    custom = await db.practice_expense_categories.find({"owner_id": user["id"]}, {"_id": 0}).to_list(500)
-    return [{"code": c, "name": n} for c, n in EXPENSE_CATEGORIES] + [{"code": c.get("code", ""), "name": c["name"]} for c in custom]
+    return await _categories(user["id"])
+
+
+class CategoriesIn(BaseModel):
+    categories: list[dict]
+
+
+@router.put("/expenses/categories")
+async def save_expense_categories(inp: CategoriesIn, user: dict = Depends(_guard)):
+    cats = [{"name": (c.get("name") or "").strip(), "code": (c.get("code") or "").strip()} for c in inp.categories]
+    if any(not c["name"] for c in cats):
+        raise HTTPException(400, "Every category needs a name.")
+    cats.sort(key=lambda c: c["name"].lower())
+    await db.practice_expense_categories.update_one({"owner_id": user["id"]}, {"$set": {"categories": cats}}, upsert=True)
+    return cats
 
 
 @router.get("/expenses")
