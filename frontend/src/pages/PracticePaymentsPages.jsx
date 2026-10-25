@@ -6,12 +6,13 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, PillFilter, TagsFilter } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
+import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
 
 const usd = (n) => `${n < 0 ? "-" : ""}$${Math.abs(Number(n || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const mdy = (iso) => { if (!iso) return "-"; const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
 const link = "text-[#1E88E5] hover:underline";
 const pill = "inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50";
-const Neg = ({ v }) => v < 0 ? <span className="inline-block rounded-full bg-[#E53935] px-3 py-0.5 text-xs font-semibold text-white">{usd(v)} <span className="text-[9px] font-normal">USD</span></span> : <span className="text-slate-700">{usd(v)} <span className="text-[10px] text-slate-500">USD</span></span>;
+const Neg = ({ v, trust }) => <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white ${v < 0 ? "bg-[#E53935]" : trust ? "bg-[#1E88E5]" : "bg-[#43A047]"}`}>{usd(v)} <span className="text-[9px] font-normal">USD</span></span>;
 const Stat = ({ label, value, sub, testId }) => (
   <div className="rounded border border-slate-200 bg-white px-3 py-3 flex items-center justify-between" data-testid={testId}>
     <span className="text-[11px] uppercase tracking-wider text-slate-600">{label}</span>
@@ -87,46 +88,41 @@ const TYPE_OF = (r) => r.type === "Payment" ? "Contact" : r.type === "Check" ? "
 const METHOD_OF = (m) => m === "Credit / Debit Card" ? "Credit Card / Debit Card" : m === "Bank Transfer" ? "Transfer" : m;
 const Chip = ({ children, active, onClear, testId }) => <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${active ? "bg-[#1E88E5] text-white" : "border border-slate-300 text-slate-700"}`} data-testid={testId}>{children}{active && onClear ? <button type="button" onClick={onClear}><X size={12} /></button> : !active && <ChevronDown size={12} />}</span>;
 
-export function PracticePayments() {
-  const nav = useNavigate();
-  const [rows] = useLedger();
-  const [q, setQ] = useState("");
-  const all = rows || [];
-  const shown = all.filter(r => `${r.ref} ${r.contact_name} ${r.matter_name} ${r.notes}`.toLowerCase().includes(q.toLowerCase()));
-  const paid = all.reduce((a, r) => a + r.amount, 0);
-  const trust = all.filter(r => r.account === "Trust Account").reduce((a, r) => a + r.amount, 0);
-  const cols = ["Name", "Bank Account", "Contact", "Matter", "Email", "Company Name", "Amount", "Fees", "Date", "Deposit Date", "Payment Method"];
+export function ActionsMenu({ nav, onContactPayment }) {
+  const [open, setOpen] = useState(false);
+  const items = [[CreditCard, "Contact Payment", onContactPayment], null, [Printer, "Print Checks", () => nav("/practice/payments/print-checks")], [Printer, "Deposit Slips", null], null, [Download, "Daily Report", null], [Download, "Monthly Report", null]];
   return (
-    <PracticeShell withRail={false}>
-      <div className="space-y-4" data-testid="practice-payments">
-        <div className="flex items-center gap-3">
-          <Banknote size={30} className="text-slate-600" strokeWidth={1.5} /><h1 className="text-3xl font-bold text-slate-800">Payments</h1><span className="text-sm text-[#1E88E5]">Switch to Modern Grid</span>
-          <div className="flex-1" />
-          <button type="button" className={pill}><CreditCard size={14} /> Get Paid Faster</button><button type="button" className={pill}><Printer size={14} /> Deposit Slips</button>
-          <button type="button" onClick={() => nav("/practice/payments/print-checks")} className={pill} data-testid="practice-payments-print-checks"><Printer size={14} /> Print Checks</button>
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"><Wrench size={14} /> Actions <ChevronDown size={12} /></button>
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white" data-testid="practice-payments-actions"><Wrench size={14} /> Actions <ChevronDown size={12} /></button>
+      {open && <>
+        <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+        <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded border border-slate-200 bg-white py-1 shadow-xl" data-testid="practice-payments-actions-menu">
+          {items.map((it, i) => it === null ? <div key={i} className="my-1 border-t border-slate-200" /> : (
+            <button key={it[1]} type="button" disabled={!it[2]} onClick={() => { setOpen(false); it[2]?.(); }} data-testid={`practice-payments-action-${it[1].toLowerCase().replace(/\s+/g, "-")}`}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm ${it[2] ? "text-slate-700 hover:bg-slate-50" : "text-slate-400"}`}>{(() => { const I = it[0]; return <I size={13} />; })()}{it[1]}</button>
+          ))}
         </div>
-        <div className="space-y-2 text-sm text-slate-700" data-testid="practice-payments-filters">
-          <div className="flex items-center gap-2"><span>Bank Account</span><select className={`${sel} w-56`} defaultValue=""><option value="">Select Bank Account...</option><option>Operating Account</option><option>Trust Account</option></select></div>
-          <div className="flex flex-wrap items-center gap-2"><span>Payment Method</span><select className={`${sel} w-56`} defaultValue="Any method"><option>Any method</option><option>Cash</option><option>Check</option><option>Credit / Debit Card</option></select><span>Assigned To</span><select className={`${sel} w-24`} defaultValue="Contact"><option>Contact</option><option>Matter</option></select><UserFilter testId="practice-payments-user" /><TagsFilter testId="practice-payments-tags" /><span>Date Range</span><PillFilter testId="practice-payments-range">All Time</PillFilter></div>
-        </div>
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-6">
-          <Stat label="# of Transactions" value={all.length} testId="practice-payments-count" /><Stat label="Paid" value={usd(paid)} sub="USD" testId="practice-payments-paid" /><Stat label="Trust" value={usd(trust)} sub="USD" testId="practice-payments-trust" /><Stat label="Unapplied" value="$0.00" sub="USD" testId="practice-payments-unapplied" />
-        </div>
+      </>}
+    </div>
+  );
+}
+
+export function PaymentsTable({ rows, nav, q, setQ, shown }) {
+  return (
         <div className="rounded border border-slate-200 bg-white overflow-hidden">
           <div className="flex items-center gap-3 px-3 py-2 border-b border-slate-200"><Search size={15} className="text-slate-400" /><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search Payments..." className="flex-1 h-8 text-sm outline-none" data-testid="practice-payments-search" /><span className="inline-flex items-center gap-1 text-sm text-slate-400"><Settings size={13} /> Choose Columns</span><FileSpreadsheet size={15} className="text-slate-400" /><FileText size={15} className="text-slate-400" /></div>
           <table className="w-full text-sm">
-            <thead><tr className="text-left text-[12px] font-semibold uppercase tracking-wide text-slate-600"><th className="px-4 py-3"><input type="checkbox" className="h-4 w-4" /></th>{cols.map(c => <th key={c} className="px-2 py-3">{c}</th>)}</tr></thead>
+            <thead><tr className="text-left text-[12px] font-semibold uppercase tracking-wide text-slate-600"><th className="px-4 py-3"><input type="checkbox" className="h-4 w-4" /></th>{PAY_COLS.map(c => <th key={c} className="px-2 py-3">{c}</th>)}</tr></thead>
             <tbody>
               {shown.map(r => (
                 <tr key={r.ref} className="border-t border-slate-200 hover:bg-slate-50" data-testid={`practice-payment-row-${r.ref}`}>
                   <td className="px-4 py-4"><input type="checkbox" className="h-4 w-4" /></td>
-                  <td className="px-2 py-4"><button type="button" onClick={() => nav("/practice/payments/reconciliation")} className="font-semibold text-[#1E88E5] hover:underline text-[15px]">{r.type} {r.ref}</button></td>
+                  <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/payments/${r.src}/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-payment-link-${r.ref}`}>{r.type} {r.ref}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav("/practice/payments/accounts")} className={link}>{r.account}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className={link}>{r.contact_name}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/matters/${r.matter_id}`)} className={link}>{r.matter_name}</button></td>
                   <td className="px-2 py-4" /><td className="px-2 py-4" />
-                  <td className="px-2 py-4"><Neg v={r.amount} /></td>
+                  <td className="px-2 py-4"><Neg v={r.amount} trust={r.account === "Trust Account"} /></td>
                   <td className="px-2 py-4 text-slate-700">$0.00 <span className="text-[10px] text-slate-500">USD</span></td>
                   <td className="px-2 py-4 text-slate-700">{mdy(r.date)}</td><td className="px-2 py-4 text-slate-700">{mdy(r.deposit_date)}</td><td className="px-2 py-4 text-slate-700">{r.method}</td>
                 </tr>
@@ -137,6 +133,38 @@ export function PracticePayments() {
           </table>
           <div className="flex items-center gap-3 px-3 py-2 border-t border-slate-200 text-xs uppercase tracking-wider text-slate-500"><span className="text-slate-300">« ‹</span><span className="text-slate-800 text-sm border-b border-slate-400 px-2">1</span><span className="text-slate-300">› »</span><span className="ml-3 rounded-full border border-slate-300 px-2.5 py-0.5 normal-case text-slate-700">50 ▾</span><span>Items per page</span><span className="flex-1 text-right">1 - {shown.length} of {shown.length} items</span></div>
         </div>
+  );
+}
+const PAY_COLS = ["Name", "Bank Account", "Contact", "Matter", "Email", "Company Name", "Amount", "Fees", "Date", "Deposit Date", "Payment Method"];
+
+export function PracticePayments() {
+  const nav = useNavigate();
+  const [rows] = useLedger();
+  const [q, setQ] = useState("");
+  const [newPay, setNewPay] = useState(false);
+  const all = rows || [];
+  const shown = all.filter(r => `${r.ref} ${r.contact_name} ${r.matter_name} ${r.notes}`.toLowerCase().includes(q.toLowerCase()));
+  const paid = all.filter(r => r.account !== "Trust Account").reduce((a, r) => a + r.amount, 0);
+  const trust = all.filter(r => r.account === "Trust Account").reduce((a, r) => a + r.amount, 0);
+  return (
+    <PracticeShell withRail={false}>
+      <div className="space-y-4" data-testid="practice-payments">
+        <div className="flex items-center gap-3">
+          <Banknote size={30} className="text-slate-600" strokeWidth={1.5} /><h1 className="text-3xl font-bold text-slate-800">Payments</h1><span className="text-sm text-[#1E88E5]">Switch to Modern Grid</span>
+          <div className="flex-1" />
+          <button type="button" className={pill}><CreditCard size={14} /> Get Paid Faster</button><button type="button" className={pill}><Printer size={14} /> Deposit Slips</button>
+          <button type="button" onClick={() => nav("/practice/payments/print-checks")} className={pill} data-testid="practice-payments-print-checks"><Printer size={14} /> Print Checks</button>
+          <ActionsMenu nav={nav} onContactPayment={() => setNewPay(true)} />
+        </div>
+        {newPay && <NewPaymentModal onClose={() => setNewPay(false)} />}
+        <div className="space-y-2 text-sm text-slate-700" data-testid="practice-payments-filters">
+          <div className="flex items-center gap-2"><span>Bank Account</span><select className={`${sel} w-56`} defaultValue=""><option value="">Select Bank Account...</option><option>Operating Account</option><option>Trust Account</option></select></div>
+          <div className="flex flex-wrap items-center gap-2"><span>Payment Method</span><select className={`${sel} w-56`} defaultValue="Any method"><option>Any method</option><option>Cash</option><option>Check</option><option>Credit / Debit Card</option></select><span>Assigned To</span><select className={`${sel} w-24`} defaultValue="Contact"><option>Contact</option><option>Matter</option></select><UserFilter testId="practice-payments-user" /><TagsFilter testId="practice-payments-tags" /><span>Date Range</span><PillFilter testId="practice-payments-range">All Time</PillFilter></div>
+        </div>
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-6">
+          <Stat label="# of Transactions" value={all.length} testId="practice-payments-count" /><Stat label="Paid" value={usd(paid)} sub="USD" testId="practice-payments-paid" /><Stat label="Trust" value={usd(trust)} sub="USD" testId="practice-payments-trust" /><Stat label="Unapplied" value="$0.00" sub="USD" testId="practice-payments-unapplied" />
+        </div>
+        <PaymentsTable rows={rows} nav={nav} q={q} setQ={setQ} shown={shown} />
       </div>
     </PracticeShell>
   );
@@ -246,7 +274,7 @@ export function PracticeReconciliation() {
                 <tr key={r.ref} className="border-t border-slate-200" data-testid={`practice-recon-row-${r.ref}`}>
                   <td className="px-3 py-3"><input type="checkbox" className="h-4 w-4" checked={!!sel2[r.ref]} onChange={e => setSel2(s => ({ ...s, [r.ref]: e.target.checked }))} /></td><td className="text-slate-400">⋮</td>
                   <td className="px-3 py-3"><button type="button" onClick={() => mark(r, !r.reconciled)} className="inline-flex items-center gap-1 text-slate-800 hover:text-[#1E88E5]" data-testid={`practice-recon-mark-${r.ref}`}>{r.reconciled ? <><X size={14} /> Mark Not Reconciled</> : <><Check size={14} /> Mark Reconciled</>}</button></td>
-                  <td className="px-3 py-3 text-[#1E88E5]">{r.ref}</td><td className="px-3 py-3 text-slate-700">{r.type}</td><td className="px-3 py-3 text-slate-700">{r.notes || "-"}</td><td className="px-3 py-3 text-slate-700">{mdy(r.date)}</td>
+                  <td className="px-3 py-3"><button type="button" onClick={() => nav(`/practice/payments/${r.src}/${r.id}`)} className="text-[#1E88E5] hover:underline">{r.ref}</button></td><td className="px-3 py-3 text-slate-700">{r.type}</td><td className="px-3 py-3 text-slate-700">{r.notes || "-"}</td><td className="px-3 py-3 text-slate-700">{mdy(r.date)}</td>
                   <td className="px-3 py-3 text-right text-slate-700">{r.amount > 0 ? usd(r.amount) : "-"}</td>
                   <td className="px-3 py-3 text-right">{r.amount < 0 ? <span className="rounded-full bg-[#E53935] px-3 py-0.5 text-sm text-white">{usd(r.amount)}</span> : "-"}</td>
                   <td className="px-3 py-3 text-slate-700">{r.method}</td>

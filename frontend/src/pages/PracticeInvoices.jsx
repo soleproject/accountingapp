@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { FileText, Plus, ChevronDown, Settings2 } from "lucide-react";
+import { FileText, Plus, ChevronDown, Settings2, Check } from "lucide-react";
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, PillFilter, TagsFilter, ListToolbar, ListHead, ListFooter, EmptyIllustration, HoverPill } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
 
 const COLS = ["Number", "Date", "Status", "Approval Date", "Approved By", "Total", "Balance", "Contact", "Matter"];
-const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
+const usd = (n) => `$${Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const mdy = (iso) => { const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
 const Money = ({ v }) => <>{usd(v)} <span className="text-[10px] text-slate-500">USD</span></>;
 
@@ -19,6 +19,46 @@ const StatCard = ({ label, value, testId }) => (
   </div>
 );
 
+export function InvoicesTable({ rows, nav, q, setQ, hideContact }) {
+  const sumT = rows.reduce((a, r) => a + r.total, 0), sumB = rows.reduce((a, r) => a + r.balance, 0);
+  return (
+            <div data-testid="practice-invoices-table">
+              <ListToolbar q={q} setQ={setQ} placeholder="Search Invoices..." testId="practice-invoices-search" />
+              <table className="w-full text-sm">
+                <ListHead cols={hideContact ? COLS.filter(c => c !== "Contact") : COLS} />
+                <tbody>
+                  {rows.map(r => (
+                    <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100" data-testid={`practice-invoice-row-${r.id}`}>
+                      <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
+                      <td className="px-2 py-5 relative">
+                        <button type="button" onClick={() => nav(`/practice/invoices/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-invoice-link-${r.id}`}>Invoice I-{r.number}</button>
+                        <HoverPill testId={`practice-invoice-actions-${r.id}`}>
+                          <button type="button" onClick={() => nav(`/practice/invoices/${r.id}/edit`)} className="hover:text-[#1E88E5]" data-testid={`practice-invoice-row-edit-${r.id}`}>Edit</button>
+                          {["Approve", "Submit for Approval", "Enter Payment", "Mark as Sent", "Send", "PDF"].map(a => <span key={a}>{a}</span>)}
+                          <button type="button" onClick={() => window.open(`/practice/invoices/${r.id}`, "_blank")} className="hover:text-[#1E88E5]">Print</button>
+                        </HoverPill>
+                      </td>
+                      <td className="px-2 py-5 text-slate-700">{mdy(r.date)}</td>
+                      <td className="px-2 py-5"><span className={`inline-flex items-center justify-center gap-1 min-w-[110px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider ${r.status === "Paid" ? "bg-[#43A047] text-white" : "border border-slate-400 bg-white text-slate-700"}`} data-testid={`practice-invoice-status-${r.id}`}>{r.status === "Paid" && <Check size={10} />}{r.status}</span></td>
+                      <td className="px-2 py-5 text-slate-700">{r.status === "Paid" && r.last_payment_date ? mdy(r.last_payment_date) : ""}</td><td className="px-2 py-5" />
+                      <td className="px-2 py-5 text-slate-700"><Money v={r.total} /></td>
+                      <td className="px-2 py-5 text-slate-700"><Money v={r.balance} /></td>
+                      {!hideContact && <td className="px-2 py-5"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className="text-[#1E88E5] hover:underline">{r.contact_name}</button></td>}
+                      <td className="px-2 py-5 space-x-2">{r.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="text-[#1E88E5] hover:underline">{m.name}</button>)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-800" data-testid="practice-invoices-totals-row">
+                    <td colSpan={6} /><td className="px-2 py-2"><Money v={sumT} /></td><td className="px-2 py-2"><Money v={sumB} /></td><td colSpan={hideContact ? 1 : 2} />
+                  </tr>
+                </tfoot>
+              </table>
+              <ListFooter count={rows.length} />
+            </div>
+  );
+}
+
 export default function PracticeInvoices() {
   const nav = useNavigate();
   const [data, setData] = useState(null);
@@ -27,7 +67,6 @@ export default function PracticeInvoices() {
   useEffect(() => { api.get("/practice/invoices").then(r => setData(r.data)).catch(() => { setData({ rows: [], all: 0, due: 0, overdue: 0 }); toast.error("Could not load invoices"); }); }, []);
   const rows = (data?.rows || []).filter(r => status === "Any" || r.status === status)
     .filter(r => `I-${r.number} ${r.contact_name} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
-  const sumT = rows.reduce((a, r) => a + r.total, 0), sumB = rows.reduce((a, r) => a + r.balance, 0);
 
   return (
     <PracticeShell withRail={false}>
@@ -61,40 +100,7 @@ export default function PracticeInvoices() {
               <p className="text-sm text-slate-700">Use Invoice on a billable time entry to generate your first invoice.</p>
             </EmptyIllustration>
           ) : (
-            <div data-testid="practice-invoices-table">
-              <ListToolbar q={q} setQ={setQ} placeholder="Search Invoices..." testId="practice-invoices-search" />
-              <table className="w-full text-sm">
-                <ListHead cols={COLS} />
-                <tbody>
-                  {rows.map(r => (
-                    <tr key={r.id} className="group relative border-t border-slate-200 hover:bg-slate-100" data-testid={`practice-invoice-row-${r.id}`}>
-                      <td className="px-4 py-5"><input type="checkbox" className="h-4 w-4" /></td>
-                      <td className="px-2 py-5 relative">
-                        <button type="button" onClick={() => nav(`/practice/invoices/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-invoice-link-${r.id}`}>Invoice I-{r.number}</button>
-                        <HoverPill testId={`practice-invoice-actions-${r.id}`}>
-                          <button type="button" onClick={() => nav(`/practice/invoices/${r.id}/edit`)} className="hover:text-[#1E88E5]" data-testid={`practice-invoice-row-edit-${r.id}`}>Edit</button>
-                          {["Approve", "Submit for Approval", "Enter Payment", "Mark as Sent", "Send", "PDF"].map(a => <span key={a}>{a}</span>)}
-                          <button type="button" onClick={() => window.open(`/practice/invoices/${r.id}`, "_blank")} className="hover:text-[#1E88E5]">Print</button>
-                        </HoverPill>
-                      </td>
-                      <td className="px-2 py-5 text-slate-700">{mdy(r.date)}</td>
-                      <td className="px-2 py-5"><span className="inline-block min-w-[110px] rounded-full border border-slate-400 bg-white px-3 py-0.5 text-center text-[10px] font-bold uppercase tracking-wider text-slate-700" data-testid={`practice-invoice-status-${r.id}`}>{r.status}</span></td>
-                      <td className="px-2 py-5" /><td className="px-2 py-5" />
-                      <td className="px-2 py-5 text-slate-700"><Money v={r.total} /></td>
-                      <td className="px-2 py-5 text-slate-700"><Money v={r.balance} /></td>
-                      <td className="px-2 py-5"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className="text-[#1E88E5] hover:underline">{r.contact_name}</button></td>
-                      <td className="px-2 py-5 space-x-2">{r.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="text-[#1E88E5] hover:underline">{m.name}</button>)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-slate-200 bg-slate-50 font-semibold text-slate-800" data-testid="practice-invoices-totals-row">
-                    <td colSpan={6} /><td className="px-2 py-2"><Money v={sumT} /></td><td className="px-2 py-2"><Money v={sumB} /></td><td colSpan={2} />
-                  </tr>
-                </tfoot>
-              </table>
-              <ListFooter count={rows.length} />
-            </div>
+            <InvoicesTable rows={rows} nav={nav} q={q} setQ={setQ} />
           )}
         </div>
       </div>

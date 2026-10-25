@@ -12,18 +12,21 @@ const TILES = [
   { label: "Billable", bg: "#FFA726", icon: Receipt },
 ];
 
-export const PracticeStatTiles = () => (
+const tileFmt = (v) => `$${Number(v) < 0 ? "-" : ""}${Math.abs(Number(v || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+export const PracticeStatTiles = ({ values }) => (
   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6" data-testid="practice-stat-tiles">
     {TILES.map(t => {
       const Icon = t.icon;
+      const k = t.label.toLowerCase();
+      const v = values ? (k === "due" ? -(values.due || 0) : values[k] || 0) : 0;
       return (
-        <div key={t.label} data-testid={`practice-tile-${t.label.toLowerCase()}`}
+        <div key={t.label} data-testid={`practice-tile-${k}`}
              className="rounded-md text-white px-5 py-3.5 flex items-center gap-4 shadow-sm"
              style={{ backgroundColor: t.bg }}>
           <Icon size={30} strokeWidth={1.6} className="opacity-90" />
           <div>
             <div className="text-[11px] uppercase tracking-wider font-semibold opacity-90">{t.label}</div>
-            <div className="text-lg font-bold leading-tight">$0.00 <span className="text-xs font-semibold">USD</span></div>
+            <div className="text-lg font-bold leading-tight" data-testid={`practice-tile-${k}-value`}>{tileFmt(v)} <span className="text-xs font-semibold">USD</span></div>
           </div>
         </div>
       );

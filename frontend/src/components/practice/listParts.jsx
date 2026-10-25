@@ -2,17 +2,21 @@ import { User, ChevronDown, Tag, Search, Settings, FileSpreadsheet, FileText, Mo
 
 export const sel = "h-8 rounded border border-slate-300 bg-white px-2 text-sm text-slate-700 outline-none";
 
+const fmt = (v) => `$${Number(v) < 0 ? "-" : ""}${Math.abs(Number(v || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const money = (v = 0) => (
   <span className="inline-block min-w-[140px] rounded-full border border-slate-300 px-3 py-0.5 text-center text-xs text-slate-700">
-    ${Number(v).toFixed(2)} <span className="text-[10px]">USD</span>
+    {fmt(v)} <span className="text-[10px]">USD</span>
+  </span>
+);
+const filled = (v, bg) => (
+  <span className={`inline-block min-w-[140px] rounded-full ${bg} px-3 py-0.5 text-center text-xs font-semibold text-white`}>
+    {fmt(v)} <span className="text-[10px] font-normal">USD</span>
   </span>
 );
 
-export const billableMoney = (v = 0) => Number(v) > 0 ? (
-  <span className="inline-block min-w-[140px] rounded-full bg-[#FFA726] px-3 py-0.5 text-center text-xs font-semibold text-white">
-    ${Number(v).toFixed(2)} <span className="text-[10px] font-normal">USD</span>
-  </span>
-) : money(v);
+export const billableMoney = (v = 0) => Number(v) > 0 ? filled(v, "bg-[#FFA726]") : money(v);
+export const trustMoney = (v = 0) => Number(v) > 0 ? filled(v, "bg-[#1E88E5]") : money(v);
+export const operatingMoney = (due = 0) => Number(due) > 0 ? filled(-due, "bg-[#E53935]") : money(0);
 
 export const HoverPill = ({ children, testId }) => (
   <div className="absolute -bottom-2.5 left-2 z-10 hidden group-hover:inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-600 whitespace-nowrap shadow-sm" data-testid={testId}>

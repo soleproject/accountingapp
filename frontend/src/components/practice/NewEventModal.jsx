@@ -34,7 +34,7 @@ function ColorField({ value, onChange }) {
   );
 }
 
-export const NewEventModal = ({ defaultDate, event, onSaved, onClose }) => {
+export const NewEventModal = ({ defaultDate, event, onSaved, onClose, defaults = {} }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
@@ -45,7 +45,7 @@ export const NewEventModal = ({ defaultDate, event, onSaved, onClose }) => {
     contact_id: "", matter_id: "", subject: "", start_date: d0, start_time: "10:00", end_date: d0, end_time: "11:00", all_day: false, description: "",
     reminders: [{ method: "Popup", amount: 10, unit: "Minute(s)" }, { method: "Popup", amount: 10, unit: "Minute(s)" }],
     private: false, location: "", color: "#1E88E5", priority: "Medium", repeat: "Never",
-    assigned_users: [user?.name].filter(Boolean), assigned_contacts: "", tags: "", email_assignees: true,
+    assigned_users: [user?.name].filter(Boolean), assigned_contacts: "", tags: "", email_assignees: true, ...defaults,
   });
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));
   const setStart = (k) => (v) => setF(p => {
