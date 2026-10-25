@@ -214,7 +214,7 @@ function Protected({ children }) {
 // open /dashboard directly.
 function HomeRedirect() {
   const { user } = useAuth();
-  return <Navigate to={user?.role === "client" ? "/owner" : user?.role === "pro" ? "/cockpit" : "/dashboard"} replace />;
+  return <Navigate to={user?.role === "client" ? "/owner" : user?.role === "pro" ? "/cockpit" : user?.role === "practice" ? "/practice" : "/dashboard"} replace />;
 }
 
 // Sits inside BrandingProvider so the hook can read the signed-in user's

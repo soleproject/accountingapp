@@ -16,7 +16,7 @@ export const PracticeShell = ({ children, withRail = true }) => {
     window.addEventListener("practice:show-rail", h);
     return () => window.removeEventListener("practice:show-rail", h);
   }, []);
-  if (user?.role !== "superadmin") return <Navigate to="/" replace />;
+  if (!["superadmin", "practice"].includes(user?.role)) return <Navigate to="/" replace />;
 
   const showRail = withRail && !railHidden;
 

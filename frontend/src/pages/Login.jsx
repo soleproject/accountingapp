@@ -143,6 +143,7 @@ export default function Login() {
       const u = await login(email, password);
       nav(
         u.role === "superadmin" ? "/admin"
+        : u.role === "practice" ? "/practice"
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/cockpit"
@@ -166,6 +167,7 @@ export default function Login() {
       const u = await login(e, p);
       nav(
         u.role === "superadmin" ? "/admin"
+        : u.role === "practice" ? "/practice"
         : u.role === "underwriter" ? "/admin/merchant-review"
         : u.role === "partner" ? "/partner"
         : u.role === "pro" ? "/cockpit"

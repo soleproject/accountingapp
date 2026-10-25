@@ -40,7 +40,8 @@ export function UsersPanel() {
           <tr key={u.id} className={i % 2 ? "" : "bg-slate-50"} data-testid={`practice-user-row-${u.id}`}>
             <td className="px-3 py-3"><button type="button" onClick={() => nav(u.is_owner ? "/practice/users/me" : "/practice/users/me")} className="font-semibold text-[#1E88E5] hover:underline text-[15px]">{u.name}</button></td>
             <td className="px-3 py-3 text-[#1E88E5]">{u.email}</td><td className="px-3 py-3 text-[#1E88E5]">{u.role_name}</td><td className="px-3 py-3 text-slate-700">{fmtAt(u.last_login)}</td>
-            <td className="px-3 py-3"><span className={`inline-block min-w-[80px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold text-white ${u.active ? "bg-[#43A047]" : "bg-slate-400"}`}>{u.active ? "YES" : "NO"}</span></td>
+            <td className="px-3 py-3"><span className={`inline-block min-w-[80px] rounded-full px-3 py-0.5 text-center text-[10px] font-bold text-white ${u.active ? "bg-[#43A047]" : "bg-slate-400"}`}>{u.active ? "YES" : "NO"}</span>
+              {!u.is_owner && !u.last_login && <button type="button" onClick={async () => { try { await api.post(`/practice/users/${u.id}/resend-invite`); toast.success("Invitation re-sent."); } catch { toast.error("Could not send"); } }} className="ml-3 text-xs text-[#1E88E5] hover:underline" data-testid={`practice-user-resend-${u.id}`}>Resend Invite</button>}</td>
           </tr>))}</tbody>
       </table>
       <Footer n={shown.length} />
@@ -91,8 +92,8 @@ export default function PracticeNewUser() {
   const save = async (again) => {
     if (!f.email.trim()) return toast.error("Enter an email address.");
     try {
-      await api.post("/practice/users", { ...f, hourly_rate: Number(f.hourly_rate) || 0 });
-      toast.success("User added. An invitation email will be sent.");
+      const r = await api.post("/practice/users", { ...f, hourly_rate: Number(f.hourly_rate) || 0 });
+      r.data.invite_sent ? toast.success(`Invitation sent to ${r.data.email}.`) : toast.warning("User added, but the invitation email could not be sent. Use Resend Invite.");
       if (again) setF(p => ({ ...EMPTY_USER, role_id: p.role_id })); else nav("/practice/settings?section=users");
     } catch (e) { toast.error(e?.response?.data?.detail || "Could not add user"); }
   };

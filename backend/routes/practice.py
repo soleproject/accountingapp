@@ -4,13 +4,21 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, Field
 import uuid
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 
 from db import db
-from auth import require_role
+from auth import require_role, hash_password
 
 router = APIRouter(prefix="/api/practice")
-_guard = require_role("superadmin")
+_role_guard = require_role("superadmin", "practice")
+
+
+async def _guard(user: dict = Depends(_role_guard)) -> dict:
+    # Invited staff share the firm owner's Practice data.
+    if user.get("practice_owner_id"):
+        return {**user, "id": user["practice_owner_id"], "staff_user_id": user["id"]}
+    return user
 
 
 class PracticeProfile(BaseModel):
@@ -1072,6 +1080,9 @@ async def list_users(user: dict = Depends(_guard)):
     await _ensure_admin_role(user["id"]); await _ensure_self_user(user)
     await db.practice_users.update_one({"owner_id": user["id"], "is_owner": True}, {"$set": {"last_login": user.get("last_login") or datetime.now(timezone.utc).isoformat()}})
     docs = await db.practice_users.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    acct_ids = [d["account_id"] for d in docs if d.get("account_id")]
+    logins = {a["id"]: a.get("last_login") async for a in db.users.find({"id": {"$in": acct_ids}}, {"_id": 0, "id": 1, "last_login": 1})}
+    docs = [{**d, "last_login": logins.get(d.get("account_id")) or d.get("last_login")} for d in docs]
     return await _users_out(user["id"], docs)
 
 
@@ -1084,7 +1095,46 @@ async def create_user(inp: PracticeUserIn, user: dict = Depends(_guard)):
         raise HTTPException(400, "A user with this email already exists.")
     if not await db.practice_roles.find_one({"id": inp.role_id, "owner_id": user["id"]}):
         raise HTTPException(400, "Select a role.")
-    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "email": email, "last_login": None, "created_at": datetime.now(timezone.utc).isoformat()}
+    if await db.users.find_one({"email": email}):
+        raise HTTPException(400, "An account with this email already exists.")
+    import secrets as _secrets
+    from routes.auth import mint_password_set_token
+    from email_dispatcher import dispatch, public_base_url
+    import email_templates as _tmpl
+    now = datetime.now(timezone.utc).isoformat()
+    name = " ".join(p for p in [inp.first_name, inp.middle_name, inp.last_name] if p) or email.split("@")[0]
+    account = {"id": str(uuid.uuid4()), "email": email, "name": name, "role": "practice", "practice_owner_id": user["id"],
+               "password": hash_password(_secrets.token_urlsafe(24)), "status": "invited", "created_at": now, "updated_at": now}
+    await db.users.insert_one(account)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "email": email, "account_id": account["id"], "last_login": None, "created_at": now}
     await db.practice_users.insert_one(doc)
     doc.pop("_id", None)
-    return (await _users_out(user["id"], [doc]))[0]
+    role = await db.practice_roles.find_one({"id": inp.role_id}, {"_id": 0, "name": 1})
+    invite_sent = False
+    try:
+        token = await mint_password_set_token(account["id"], purpose="welcome", ttl_days=7)
+        subject, html = _tmpl.team_invite(invitee_name=name, inviter_name=user.get("name") or "Your firm", role_label=(role or {}).get("name", "User"),
+                                          role_description="Sign in to Practice to manage matters, contacts, calendar, time and billing.",
+                                          company_names=[], magic_url=f"{public_base_url()}/set-password/{token}", brand_name="Practice")
+        r = await dispatch(kind="practice_invite", to=email, subject=subject, html=html, initiating_user_id=user["id"], related={"purpose": "practice_invite"})
+        invite_sent = bool((r or {}).get("ok", True)) and (r or {}).get("status") != "failed"
+    except Exception:
+        logging.getLogger(__name__).exception("Practice invite email failed for %s", email)
+    return {**(await _users_out(user["id"], [doc]))[0], "invite_sent": invite_sent}
+
+
+@router.post("/users/{puser_id}/resend-invite")
+async def resend_invite(puser_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_users.find_one({"id": puser_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc or not doc.get("account_id"):
+        raise HTTPException(404, "User not found")
+    from routes.auth import mint_password_set_token
+    from email_dispatcher import dispatch, public_base_url
+    import email_templates as _tmpl
+    token = await mint_password_set_token(doc["account_id"], purpose="welcome", ttl_days=7)
+    name = " ".join(p for p in [doc.get("first_name"), doc.get("last_name")] if p) or doc["email"]
+    subject, html = _tmpl.team_invite(invitee_name=name, inviter_name=user.get("name") or "Your firm", role_label="User",
+                                      role_description="Sign in to Practice to manage matters, contacts, calendar, time and billing.",
+                                      company_names=[], magic_url=f"{public_base_url()}/set-password/{token}", brand_name="Practice")
+    r = await dispatch(kind="practice_invite", to=doc["email"], subject=subject, html=html, initiating_user_id=user["id"], related={"purpose": "practice_invite"})
+    return {"ok": True, "result": r}
