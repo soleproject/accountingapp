@@ -1284,3 +1284,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - `/practice/activities` (`PracticeActivities.jsx`): Import/Workflows placeholders, +New ▾ (Task/Event/Note/Call), kind + status filters, All/Completed/Incomplete/Overdue cards, ActivitiesTable with Contact column and hover pill (Edit, Log Time → time entry modal prefilled; Log Flat Fee / Time Logged placeholders). Click row → edit modal for its kind.
 - New Note / New Call modals (`NewNoteCallModals.jsx`) incl. call timer → duration, Save / Save and add time entry. Backend `POST/PUT /api/practice/notes|calls` store in practice_tasks with kind note/call; `/tasks` (calendar/agenda) excludes them; `/activities?kind=` filter + contact_name.
 - Shared `ActivityModal.jsx` (NewActivityMenu + ActivityModal) also powers the contact Activities tab.
+
+## 2026-06 — Activities working filters
+- Status, Assigned To (options from rows' assigned users) and Date Range (presets + Custom from/to) now filter the Activities page list AND the All/Completed/Incomplete/Overdue cards; same filters (plus kind) work on the contact Activities tab. Shared `UserFilter`(value/onChange/options), `DateRangeFilter`, `inRange` in listParts.jsx; `filterActivities` exported from PracticeActivities.jsx.

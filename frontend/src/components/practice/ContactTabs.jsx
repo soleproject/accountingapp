@@ -3,9 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Plus, ChevronRight, ChevronDown, Mail, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
-import { sel, UserFilter, PillFilter, TagsFilter } from "@/components/practice/listParts";
+import { sel, UserFilter, PillFilter, TagsFilter, DateRangeFilter } from "@/components/practice/listParts";
 import { MattersTable, TimeEntriesTable, ActivitiesTable } from "@/components/practice/tables";
 import { InvoicesTable } from "@/pages/PracticeInvoices";
+import { filterActivities } from "@/pages/PracticeActivities";
 import { PaymentsTable, ActionsMenu } from "@/pages/PracticePaymentsPages";
 import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
 import { NewActivityMenu, ActivityModal } from "@/components/practice/ActivityModal";
@@ -54,9 +55,15 @@ export function ActivitiesTab({ contactId }) {
   const nav = useNavigate();
   const [rows, setRows] = useState(null);
   const [modal, setModal] = useState(null);
+  const [kind, setKind] = useState("");
+  const [status, setStatus] = useState("Any");
+  const [assigned, setAssigned] = useState("");
+  const [range, setRange] = useState({ preset: "All Time" });
   const load = () => api.get("/practice/activities", { params: { contact_id: contactId } }).then(r => setRows(r.data)).catch(() => setRows([]));
   useEffect(() => { load(); }, [contactId]); // eslint-disable-line react-hooks/exhaustive-deps
   const done = () => { setModal(null); load(); };
+  const users = [...new Set((rows || []).flatMap(r => r.assigned_users || []))].sort();
+  const shown = filterActivities((rows || []).filter(r => !kind || r.kind === kind), { status, assigned, range });
   return (
     <div className="space-y-4" data-testid="practice-contact-activities">
       <Bar>
@@ -64,11 +71,11 @@ export function ActivitiesTab({ contactId }) {
         <button type="button" className={white}><Mail size={14} /> MailSync</button><button type="button" className={white}><Workflow size={14} /> Apply Workflow</button>
       </Bar>
       <Filters>
-        <select className={`${sel} w-36 font-semibold`} defaultValue="All Activities"><option>All Activities</option><option>Tasks</option><option>Events</option></select>
-        <span>Status</span><select className={`${sel} w-28`} defaultValue="Any"><option>Any</option><option>Completed</option><option>Overdue</option></select>
-        <span>Assigned To</span><UserFilter testId="practice-ca-assigned" /><span>Created By</span><UserFilter testId="practice-ca-created-by" /><TagsFilter testId="practice-ca-tags" /><span>Date Range</span><PillFilter testId="practice-ca-range">All Time</PillFilter>
+        <select className={`${sel} w-36 font-semibold`} value={kind} onChange={e => setKind(e.target.value)} data-testid="practice-ca-kind"><option value="">All Activities</option><option value="task">Tasks</option><option value="event">Events</option><option value="note">Notes</option><option value="call">Calls</option></select>
+        <span>Status</span><select className={`${sel} w-32`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-ca-status"><option>Any</option><option>Completed</option><option>Overdue</option><option>Not Completed</option><option>In Progress</option><option>Scheduled</option></select>
+        <span>Assigned To</span><UserFilter testId="practice-ca-assigned" value={assigned} onChange={setAssigned} options={users} /><span>Created By</span><UserFilter testId="practice-ca-created-by" /><TagsFilter testId="practice-ca-tags" /><span>Date Range</span><DateRangeFilter value={range} onChange={setRange} testId="practice-ca-range" />
       </Filters>
-      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={rows || []} nav={nav} onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} /></Grid>
+      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={shown} nav={nav} onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} /></Grid>
       <RecentActivity />
       <ActivityModal modal={modal} defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />
     </div>
