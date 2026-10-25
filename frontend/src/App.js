@@ -193,6 +193,7 @@ import PracticeExpenses from "@/pages/PracticeExpenses";
 import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
 import PracticeAddPayment from "@/pages/PracticeAddPayment";
 import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
+import PracticeNewUser, { PracticeRoleForm } from "@/pages/PracticeUsersRoles";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -274,7 +275,10 @@ function App() {
             <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
             <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
             <Route path="/practice/time-entries/:id" element={<Protected><PracticeTimeEntryDetail /></Protected>} />
+            <Route path="/practice/users/new" element={<Protected><PracticeNewUser /></Protected>} />
             <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
+            <Route path="/practice/roles/new" element={<Protected><PracticeRoleForm /></Protected>} />
+            <Route path="/practice/roles/:id" element={<Protected><PracticeRoleForm /></Protected>} />
             <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
             <Route path="/practice/expenses" element={<Protected><PracticeExpenses /></Protected>} />
             <Route path="/practice/payments/new" element={<Protected><PracticeAddPayment /></Protected>} />

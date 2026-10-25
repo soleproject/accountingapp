@@ -957,3 +957,134 @@ async def write_check(inp: PracticeCheckIn, user: dict = Depends(_guard)):
     await db.practice_checks.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+# ---------- Users & Roles ----------
+ROLE_FEATURES = [
+    ("Contacts", "cvedaVE"), ("Activities (Tasks, Events & Calls)", "cvedVE"), ("Files", "cvedVE"), ("Flat Fee", "cvedVE"), ("Expenses", "cvedVE"),
+    ("Recent Activity", "cvedVE"), ("Invoices", "cvedVE"), ("Items", "cved"), ("Contact Payments", "cvedVE"), ("Firm Payments", "cved"),
+    ("Financial Summary", "vV"), ("Matters", "cvedaVE"), ("Reports", "v"), ("Roles", "cved"), ("Sales Taxes", "cved"), ("Settings & Billing", "ve"),
+    ("Time Entries", "cvedVE"), ("Users & User Groups", "cvedVE"), ("Bank Accounts", "cved"),
+]
+PERM_KEYS = {"c": "create", "v": "view", "e": "edit", "d": "delete", "a": "archive", "V": "view_all", "E": "edit_all"}
+
+
+def _admin_perms() -> dict:
+    return {f: {PERM_KEYS[k]: True for k in keys} for f, keys in ROLE_FEATURES}
+
+
+async def _ensure_admin_role(uid: str) -> dict:
+    role = await db.practice_roles.find_one({"owner_id": uid, "name": "Admin"}, {"_id": 0})
+    if role:
+        return role
+    now = datetime.now(timezone.utc).isoformat()
+    role = {"id": str(uuid.uuid4()), "owner_id": uid, "name": "Admin", "permissions": _admin_perms(), "restrict_ip": False, "restrict_past_time": False, "system": True, "created_at": now, "updated_at": now}
+    await db.practice_roles.insert_one(role)
+    role.pop("_id", None)
+    return role
+
+
+async def _ensure_self_user(user: dict) -> None:
+    if await db.practice_users.find_one({"owner_id": user["id"], "email": user.get("email")}):
+        return
+    admin = await _ensure_admin_role(user["id"])
+    parts = (user.get("name") or "").split(" ")
+    now = datetime.now(timezone.utc).isoformat()
+    await db.practice_users.insert_one({"id": str(uuid.uuid4()), "owner_id": user["id"], "first_name": parts[0], "middle_name": "", "last_name": " ".join(parts[1:]),
+                                        "email": user.get("email"), "role_id": admin["id"], "active": True, "is_owner": True, "last_login": now, "created_at": now})
+
+
+@router.get("/roles/features")
+async def role_features(user: dict = Depends(_guard)):
+    return [{"feature": f, "allowed": [PERM_KEYS[k] for k in keys]} for f, keys in ROLE_FEATURES]
+
+
+@router.get("/roles")
+async def list_roles(user: dict = Depends(_guard)):
+    await _ensure_admin_role(user["id"]); await _ensure_self_user(user)
+    roles = await db.practice_roles.find({"owner_id": user["id"]}, {"_id": 0}).sort("name", 1).to_list(200)
+    counts: dict = {}
+    async for u in db.practice_users.find({"owner_id": user["id"]}, {"_id": 0, "role_id": 1}):
+        counts[u.get("role_id")] = counts.get(u.get("role_id"), 0) + 1
+    return [{**r, "users": counts.get(r["id"], 0)} for r in roles]
+
+
+class PracticeRoleIn(BaseModel):
+    name: str
+    permissions: dict
+    restrict_ip: bool = False
+    restrict_past_time: bool = False
+
+
+@router.post("/roles")
+async def create_role(inp: PracticeRoleIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Enter a role name.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "system": False, "created_at": now, "updated_at": now}
+    await db.practice_roles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/roles/{role_id}")
+async def get_role(role_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_roles.find_one({"id": role_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Role not found")
+    return doc
+
+
+@router.put("/roles/{role_id}")
+async def update_role(role_id: str, inp: PracticeRoleIn, user: dict = Depends(_guard)):
+    r = await db.practice_roles.update_one({"id": role_id, "owner_id": user["id"]}, {"$set": {**inp.model_dump(), "updated_at": datetime.now(timezone.utc).isoformat()}})
+    if not r.matched_count:
+        raise HTTPException(404, "Role not found")
+    return await get_role(role_id, user)
+
+
+class PracticeUserIn(BaseModel):
+    first_name: str = ""
+    middle_name: str = ""
+    last_name: str = ""
+    email: str
+    hourly_rate: float = 0
+    round_time_entries: bool = False
+    time_zone: str = "(UTC-08:00) Pacific Time (US & Canada)"
+    role_id: str
+    job_title: str = ""
+    notes: str = ""
+    address: str = ""
+    mobile: str = ""
+    home: str = ""
+    work: str = ""
+    fax: str = ""
+    active: bool = True
+
+
+async def _users_out(uid: str, docs: list) -> list:
+    roles = {r["id"]: r["name"] async for r in db.practice_roles.find({"owner_id": uid}, {"_id": 0, "id": 1, "name": 1})}
+    return [{**d, "name": " ".join(p for p in [d.get("first_name"), d.get("middle_name"), d.get("last_name")] if p), "role_name": roles.get(d.get("role_id"), "")} for d in docs]
+
+
+@router.get("/users")
+async def list_users(user: dict = Depends(_guard)):
+    await _ensure_admin_role(user["id"]); await _ensure_self_user(user)
+    await db.practice_users.update_one({"owner_id": user["id"], "is_owner": True}, {"$set": {"last_login": user.get("last_login") or datetime.now(timezone.utc).isoformat()}})
+    docs = await db.practice_users.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    return await _users_out(user["id"], docs)
+
+
+@router.post("/users")
+async def create_user(inp: PracticeUserIn, user: dict = Depends(_guard)):
+    email = inp.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Enter a valid email address.")
+    if await db.practice_users.find_one({"owner_id": user["id"], "email": email}):
+        raise HTTPException(400, "A user with this email already exists.")
+    if not await db.practice_roles.find_one({"id": inp.role_id, "owner_id": user["id"]}):
+        raise HTTPException(400, "Select a role.")
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "email": email, "last_login": None, "created_at": datetime.now(timezone.utc).isoformat()}
+    await db.practice_users.insert_one(doc)
+    doc.pop("_id", None)
+    return (await _users_out(user["id"], [doc]))[0]

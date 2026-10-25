@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
+import { UsersPanel, RolesPanel } from "@/pages/PracticeUsersRoles";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -104,7 +105,7 @@ export default function PracticeSettings() {
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,31%)_1fr] gap-8 pt-1">
           <SettingsNav section={section} onSelect={(sec) => setParams(sec === "personal-settings" ? {} : { section: sec })} />
-          {section === "accept-online-payments" ? <OnlinePaymentsPanel /> : (
+          {section === "accept-online-payments" ? <OnlinePaymentsPanel /> : section === "users" ? <UsersPanel /> : section === "roles" ? <RolesPanel /> : (
           <div className="space-y-5">
             <Section title="Personal Settings">
               <Row label="Profile Picture" required>
