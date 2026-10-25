@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { toISO, fmtTime } from "@/components/practice/DateTimePicker";
+import { ContactsTable, MattersTable, TimeEntriesTable } from "@/components/practice/tables";
+import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 const fmtAt = (iso) => new Date(iso).toLocaleString("en-US", { month: "numeric", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -139,7 +141,7 @@ export default function PracticeUser() {
           ))}
         </div>
         {tab === "Dashboard" ? <div className="space-y-4"><Agenda first={first} /><Activity first={first} name={name} /></div>
-          : <UserTabList tab={tab} />}
+          : <UserTabList key={tab} tab={tab} />}
       </div>
     </PracticeShell>
   );
@@ -148,15 +150,22 @@ export default function PracticeUser() {
 function UserTabList({ tab }) {
   const nav = useNavigate();
   const [rows, setRows] = useState(null);
+  const [edit, setEdit] = useState(null);
+  const [track, setTrack] = useState(null);
   const url = { Contacts: "/practice/contacts?status=All", Matters: "/practice/matters?status=All", "Time Entries": "/practice/time-entries/all" }[tab];
-  useEffect(() => { setRows(null); api.get(url).then(r => setRows(r.data)).catch(() => setRows([])); }, [url]);
-  const label = (r) => tab === "Contacts" ? r.display_name : tab === "Matters" ? `${r.contact_name} | ${r.name}` : `${r.date} · ${r.item || "Time"} · ${Number(r.hours).toFixed(2)} hrs · $${Number(r.total).toFixed(2)}`;
-  const to = (r) => tab === "Contacts" ? `/practice/contacts/${r.id}` : tab === "Matters" ? `/practice/matters/${r.id}` : "/practice/time-entries";
+  const load = () => api.get(url).then(r => setRows(r.data)).catch(() => setRows([]));
+  useEffect(() => { setRows(null); load(); }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saved = () => toast.success("Item saved successfully.");
+  const setStatus = async (r, st) => { try { await api.patch(`/practice/time-entries/${r.id}/status`, { status: st }); saved(); load(); } catch { toast.error("Could not update"); } };
+  const clone = async (r) => { try { await api.post(`/practice/time-entries/${r.id}/clone`); saved(); load(); } catch { toast.error("Could not clone"); } };
   return (
-    <section className="rounded border border-slate-200 bg-white" data-testid={`practice-user-list-${tab.toLowerCase().replace(/\s+/g, "-")}`}>
-      {rows === null ? <div className="p-6 text-[13px] text-slate-500">Loading…</div> : rows.length === 0 ? <div className="p-6 text-[13px] text-slate-500">Nothing here yet.</div> : (
-        <ul className="divide-y divide-slate-100">{rows.map(r => <li key={r.id} className="px-4 py-2.5 text-[15px]"><button type="button" onClick={() => nav(to(r))} className="text-[#1E88E5] hover:underline">{label(r)}</button></li>)}</ul>
-      )}
+    <section className="rounded border border-slate-200 bg-white overflow-hidden" data-testid={`practice-user-list-${tab.toLowerCase().replace(/\s+/g, "-")}`}>
+      {rows === null ? <div className="p-6 text-[13px] text-slate-500">Loading…</div> : rows.length === 0 ? <div className="p-6 text-[13px] text-slate-500">Nothing here yet.</div>
+        : tab === "Contacts" ? <ContactsTable rows={rows} nav={nav} />
+        : tab === "Matters" ? <MattersTable rows={rows} nav={nav} onTrackTime={setTrack} />
+        : <TimeEntriesTable rows={rows} nav={nav} onEdit={setEdit} onStatus={setStatus} onClone={clone} />}
+      {edit && <NewTimeEntryModal entry={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); load(); }} />}
+      {track && <NewTimeEntryModal task={{ contact_id: track.contact_id, matter_id: track.id }} onClose={() => setTrack(null)} onSaved={() => setTrack(null)} />}
     </section>
   );
 }

@@ -5,49 +5,16 @@ import { Briefcase, Upload, Plus } from "lucide-react";
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { GreenButton } from "@/components/practice/forms";
-import { sel, money, Avatar, UserFilter, PillFilter, TagsFilter, CountCard, ListToolbar, ListHead, ListFooter, EmptyIllustration } from "@/components/practice/listParts";
-
-const COLS = ["Matter", "Contact", "Matter Rate", "Trust", "Operating", "Billable", "Assigned To", "Contact Tags", "Tags"];
-
-function MattersTable({ rows, nav }) {
-  const [q, setQ] = useState("");
-  const shown = rows.filter(r => (r.name + " " + r.contact_name).toLowerCase().includes(q.toLowerCase()));
-  return (
-    <div data-testid="practice-matters-table">
-      <ListToolbar q={q} setQ={setQ} placeholder="Search Matters..." testId="practice-matters-search" />
-      <table className="w-full text-sm">
-        <ListHead cols={COLS} />
-        <tbody>
-          {shown.map(r => (
-            <tr key={r.id} className="group border-t border-slate-200 hover:bg-slate-50" data-testid={`practice-matter-row-${r.id}`}>
-              <td className="px-4 py-4"><input type="checkbox" className="h-4 w-4" /></td>
-              <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/matters/${r.id}`)} className="font-semibold text-[#1E88E5] hover:underline text-[15px]" data-testid={`practice-matter-link-${r.id}`}>{r.name}</button>
-                <div className="hidden group-hover:flex gap-3 mt-1 text-[9px] uppercase tracking-wider text-slate-500 whitespace-nowrap">
-                  <button type="button" onClick={() => nav(`/practice/matters/${r.id}/edit`)} className="hover:text-[#1E88E5]" data-testid={`practice-matter-row-edit-${r.id}`}>Edit</button>
-                  {["Track Time", "Start Timer", "Add Expense", "Invoice", "Enter Payment"].map(a => <span key={a}>{a}</span>)}
-                </div></td>
-              <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className="text-[#1E88E5] hover:underline">{r.contact_name}</button></td>
-              <td className="px-2 py-4 text-slate-700">{r.matter_rate}</td>
-              <td className="px-2 py-4">{money(0)}</td>
-              <td className="px-2 py-4">{money(0)}</td>
-              <td className="px-2 py-4">{money(0)}</td>
-              <td className="px-2 py-4"><Avatar name={r.assigned_to} /></td>
-              <td className="px-2 py-4 text-slate-500">{(r.contact_tags || []).join(", ")}</td>
-              <td className="px-2 py-4 text-slate-500">{(r.tags || []).join(", ")}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <ListFooter count={shown.length} />
-    </div>
-  );
-}
+import { sel, UserFilter, PillFilter, TagsFilter, CountCard, EmptyIllustration } from "@/components/practice/listParts";
+import { MattersTable } from "@/components/practice/tables";
+import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 export default function PracticeMatters() {
   const nav = useNavigate();
   const [status, setStatus] = useState("Open");
   const [rows, setRows] = useState(null);
   const [counts, setCounts] = useState(null);
+  const [track, setTrack] = useState(null);
 
   useEffect(() => {
     setRows(null);
@@ -93,9 +60,10 @@ export default function PracticeMatters() {
                 <p className="text-sm text-slate-700">Keep track of your Matters.</p>
                 <p className="text-sm text-slate-700">Click the green "New" button at the top or read our <span className="text-[#1E88E5]">matters tutorial</span>.</p>
               </EmptyIllustration>
-            ) : <MattersTable rows={rows} nav={nav} />}
+            ) : <MattersTable rows={rows} nav={nav} onTrackTime={setTrack} />}
         </div>
       </div>
+      {track && <NewTimeEntryModal task={{ contact_id: track.contact_id, matter_id: track.id }} onClose={() => setTrack(null)} onSaved={() => setTrack(null)} />}
     </PracticeShell>
   );
 }

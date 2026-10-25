@@ -95,13 +95,22 @@ def _display_name(c: dict) -> str:
     return name or c.get("company_name") or "Unnamed contact"
 
 
+async def _billable_sums(uid: str, key: str) -> dict:
+    sums: dict = {}
+    async for te in db.practice_time_entries.find({"owner_id": uid}, {"_id": 0, key: 1, "total": 1, "billing_status": 1, "billable": 1}):
+        if _te_status(te) == "Billable" and te.get(key):
+            sums[te[key]] = round(sums.get(te[key], 0) + (te.get("total") or 0), 2)
+    return sums
+
+
 @router.get("/contacts")
 async def list_contacts(status: str = "Active", user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
     if status != "All":
         q["status"] = status
     docs = await db.practice_contacts.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [{**d, "display_name": _display_name(d)} for d in docs]
+    sums = await _billable_sums(user["id"], "contact_id")
+    return [{**d, "display_name": _display_name(d), "billable": sums.get(d["id"], 0)} for d in docs]
 
 
 @router.post("/contacts")
@@ -158,7 +167,8 @@ async def list_matters(status: str = "Open", contact_id: Optional[str] = None, u
     if contact_id:
         q["contact_id"] = contact_id
     docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
-    return [await _with_contact(d, user) for d in docs]
+    sums = await _billable_sums(user["id"], "matter_id")
+    return [{**(await _with_contact(d, user)), "billable": sums.get(d["id"], 0)} for d in docs]
 
 
 @router.get("/matters/counts")

@@ -8,6 +8,18 @@ export const money = (v = 0) => (
   </span>
 );
 
+export const billableMoney = (v = 0) => Number(v) > 0 ? (
+  <span className="inline-block min-w-[140px] rounded-full bg-[#FFA726] px-3 py-0.5 text-center text-xs font-semibold text-white">
+    ${Number(v).toFixed(2)} <span className="text-[10px] font-normal">USD</span>
+  </span>
+) : money(v);
+
+export const HoverPill = ({ children, testId }) => (
+  <div className="absolute -bottom-2.5 left-2 z-10 hidden group-hover:inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-600 whitespace-nowrap shadow-sm" data-testid={testId}>
+    {children}
+  </div>
+);
+
 export const initials = (n = "") => n.split(" ").filter(Boolean).map(s => s[0]).join("").slice(0, 2).toUpperCase();
 
 export const Avatar = ({ name }) => name ? (
