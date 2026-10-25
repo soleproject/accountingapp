@@ -1,10 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  Scale, Play, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
+  Scale, Play, Pause, Search, MessagesSquare, Bell, CircleHelp, ChevronDown,
   Settings, CreditCard, LogOut, Calculator, Check, ChevronsLeft,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerStore";
+
+function TopTimerButton({ railHidden, onShowRail }) {
+  const { active, running, seconds } = usePracticeTimer();
+  const onClick = () => { if (!active) timer.start(); else if (railHidden) onShowRail(); };
+  return (
+    <button type="button" onClick={onClick} data-testid="practice-start-timer-btn" data-running={running}
+            className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors tabular-nums">
+      <span className="h-4 w-4 rounded-full bg-white grid place-items-center">
+        {active && !running ? <Pause size={9} className="text-[#43A047] fill-[#43A047]" /> : <Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" />}
+      </span>
+      {active ? <span data-testid="practice-top-timer-clock">{fmtClock(seconds)}</span> : "Start Timer"}
+    </button>
+  );
+}
 
 const NAV = [
   { label: "Home", to: "/practice", exact: true }, { label: "Matters", to: "/practice/matters" }, { label: "Contacts", to: "/practice/contacts" }, { label: "Calendar", to: "/practice/calendar" }, { label: "Time Entries", to: "/practice/time-entries" },
@@ -92,11 +107,7 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
               className="h-7 px-3 rounded-full bg-[#29B6F6] text-xs font-bold hover:bg-[#4FC3F7] transition-colors">
         + New
       </button>
-      <button type="button" data-testid="practice-start-timer-btn"
-              className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors">
-        <span className="h-4 w-4 rounded-full bg-white grid place-items-center"><Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" /></span>
-        Start Timer
-      </button>
+      <TopTimerButton onShowRail={onShowRail} railHidden={railHidden} />
       <div className="flex-1" />
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-messages-btn"><MessagesSquare size={19} /></button>
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-notifications-btn"><Bell size={19} /></button>

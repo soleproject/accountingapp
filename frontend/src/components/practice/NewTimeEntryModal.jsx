@@ -26,7 +26,7 @@ const Toggle = ({ value, onChange, testId }) => (
 const Card = ({ title, children }) => <section className="rounded border border-slate-200 bg-white px-5 py-4"><h3 className="text-base font-bold uppercase tracking-wide text-slate-800 mb-2">{title}</h3>{children}</section>;
 
 
-export const NewTimeEntryModal = ({ task, entry, onSaved, onClose }) => {
+export const NewTimeEntryModal = ({ task, entry, timerSeconds = 0, timerNotes = "", onSaved, onClose }) => {
   const { user } = useAuth();
   const [contacts, setContacts] = useState([]);
   const [matters, setMatters] = useState([]);
@@ -35,14 +35,14 @@ export const NewTimeEntryModal = ({ task, entry, onSaved, onClose }) => {
   const items = [...DEFAULT_ITEMS, ...customItems.map(i => ({ id: i.id, label: i.name, code: i.code, price: i.price, use_item_price: i.use_item_price }))];
   const [newItem, setNewItem] = useState(null);
   const [f, setF] = useState(entry ? { ...entry, hours_raw: entry.hours_raw || String(entry.hours), private_notes: entry.private_notes || "" } : {
-    contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: "", date: task?.due_date || toISO(new Date()),
-    description: task ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : "",
+    contact_id: task?.contact_id || "", matter_id: task?.matter_id || "", item: "", hours_raw: timerSeconds ? fmtHours(timerSeconds) : "", date: task?.due_date || toISO(new Date()),
+    description: task ? [task.subject, (task.description || "").replace(/<[^>]+>/g, "")].filter(Boolean).join("\n") : timerNotes,
     billable: true, billed_by: user?.name || "", hourly_rate: 0, private_notes: "",
   });
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e?.target ? e.target.value : e }));
   const nav = useNavigate();
   const [running, setRunning] = useState(false);
-  const [elapsed, setElapsed] = useState(0);
+  const [elapsed, setElapsed] = useState(timerSeconds);
   const startRef = useRef(null);
   useEffect(() => {
     if (!running) return;
