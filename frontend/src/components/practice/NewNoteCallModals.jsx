@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus, X, Check, Move, Play, Pause } from "lucide-react";
+import { Plus, X, Check, Move, Play, Square } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { RichNotes } from "@/components/practice/RichNotes";
@@ -11,7 +11,7 @@ import { inp, Row, Card, Toggle, UserPicker } from "@/components/practice/NewTas
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 const nowTime = () => { const d = new Date(); return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
-const fmtDur = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return h ? `${h}h ${m}m` : `${m}m`; };
+const fmtDur = (s) => { const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return m ? `${h}h ${m}m` : `${h}h`; };
 
 function Frame({ title, kind, onClose, children, testId }) {
   return (
@@ -101,9 +101,12 @@ export const NewCallModal = ({ call, defaults = {}, onSaved, onClose }) => {
   const set = (k) => (v) => setF(p => ({ ...p, [k]: v?.target ? v.target.value : v }));
   const linked = useLinked(f, setF);
   const [timer, setTimer] = useState(null);
+  const [base, setBase] = useState(0);
   const [secs, setSecs] = useState(0);
-  useEffect(() => { if (!timer) return; const id = setInterval(() => setSecs(Math.floor((Date.now() - timer) / 1000)), 1000); return () => clearInterval(id); }, [timer]);
-  const toggleTimer = () => { if (timer) { setF(p => ({ ...p, duration: fmtDur(secs) })); setTimer(null); } else { setSecs(0); setTimer(Date.now()); } };
+  useEffect(() => { if (!timer) return; const id = setInterval(() => setSecs(base + Math.floor((Date.now() - timer) / 1000)), 1000); return () => clearInterval(id); }, [timer, base]);
+  useEffect(() => { if (timer || secs) setF(p => ({ ...p, duration: fmtDur(secs) })); }, [secs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleTimer = () => { if (timer) { setBase(secs); setTimer(null); } else { setTimer(Date.now()); } };
+  const clock = (s) => [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map(n => String(n).padStart(2, "0")).join(":");
   const { busy, save, timeFor } = useSave("call", call, f, onSaved);
   if (timeFor) return <NewTimeEntryModal task={timeFor} onClose={() => onSaved(timeFor)} onSaved={() => onSaved(timeFor)} />;
   return (
@@ -116,8 +119,9 @@ export const NewCallModal = ({ call, defaults = {}, onSaved, onClose }) => {
         <Row label="Call Duration">
           <input className={inp} placeholder="Format: 1h 10m, 1:10, 1.2h" value={f.duration} onChange={set("duration")} data-testid="practice-call-duration" />
           <button type="button" onClick={toggleTimer} className="mt-1.5 w-full h-8 rounded bg-[#1E88E5] text-sm font-semibold text-white inline-flex items-center justify-center gap-1.5 hover:bg-[#1976D2]" data-testid="practice-call-timer">
-            {timer ? <><Pause size={13} /> Stop Timer ({fmtDur(secs)})</> : <><Play size={13} /> Start Timer</>}
+            {timer ? <><Square size={12} className="fill-white" /> Pause Timer</> : <><Play size={13} /> {secs ? "Resume Timer" : "Start Timer"}</>}
           </button>
+          {(timer || secs > 0) && <div className="pt-2 text-center text-4xl font-light tabular-nums text-slate-700" data-testid="practice-call-clock">{clock(secs)}</div>}
         </Row>
         <Row label="Description"><input className={inp} placeholder="Add description..." value={f.description} onChange={set("description")} data-testid="practice-call-description" /></Row>
       </Card>
