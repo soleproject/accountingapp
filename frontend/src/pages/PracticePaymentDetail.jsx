@@ -45,7 +45,7 @@ export default function PracticePaymentDetail() {
           <div className="flex-1" />
           <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white"><Wrench size={14} /> Actions <ChevronDown size={12} /></button>
         </div>
-        <div className={`inline-flex items-center gap-3 rounded px-4 py-2.5 text-white w-[450px] ${neg ? "bg-[#E53935]" : "bg-[#43A047]"}`} data-testid="practice-payment-amount-card">
+        <div className={`inline-flex items-center gap-3 rounded px-4 py-2.5 text-white w-[450px] ${neg ? "bg-[#E53935]" : p.account === "Trust Account" ? "bg-[#1E88E5]" : "bg-[#43A047]"}`} data-testid="practice-payment-amount-card">
           <Banknote size={26} /><div><div className="text-[10px] font-semibold uppercase tracking-wider">Amount</div><div className="text-lg font-bold leading-tight">{usd(p.amount)} <span className="text-[10px] font-normal">USD</span></div></div>
         </div>
         <Section title="Linked To" testId="practice-payment-linked">
@@ -62,7 +62,7 @@ export default function PracticePaymentDetail() {
           {p.check_no && <Row label="Check No.">{p.check_no}</Row>}
           <Row label="Reconciled">{p.reconciled ? "Yes" : "No"}</Row>
         </Section>
-        {p.src === "payment" && (
+        {p.src === "payment" && p.applications.length > 0 && (
           <section className="rounded border border-slate-200 bg-white px-6 py-5" data-testid="practice-payment-invoices">
             <h2 className="text-lg font-bold uppercase tracking-wide text-slate-800 mb-3">Linked Invoices</h2>
             <table className="w-full text-[15px] text-slate-700">

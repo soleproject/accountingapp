@@ -19,7 +19,7 @@ _FEATURE_BY_PATH = [
     ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
     ("/events", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
     ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
-    ("/payments", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
+    ("/payments", "Contact Payments"), ("/retainers", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
     ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
 ]
 _ACTION_BY_METHOD = {"GET": "view", "POST": "create", "PUT": "edit", "PATCH": "edit", "DELETE": "delete"}
@@ -1000,6 +1000,46 @@ async def add_payment(inp: PracticePaymentIn, user: dict = Depends(_guard)):
     return doc
 
 
+class PracticeRetainerIn(BaseModel):
+    contact_id: str
+    matter_id: str = ""
+    amount: float
+    date: str
+    payment_method: str = "Cash"
+    bank_account: str = "Operating Account"
+    notes: str = ""
+    auto_apply: bool = False
+
+
+@router.post("/retainers")
+async def add_retainer(inp: PracticeRetainerIn, user: dict = Depends(_guard)):
+    if inp.amount <= 0:
+        raise HTTPException(400, "Enter an amount.")
+    if not inp.contact_id:
+        raise HTTPException(400, "Select a contact.")
+    now = datetime.now(timezone.utc).isoformat()
+    apps = []
+    if inp.auto_apply and inp.bank_account != "Trust Account":
+        remaining = round(inp.amount, 2)
+        invs = await db.practice_invoices.find({"owner_id": user["id"], "contact_id": inp.contact_id}, {"_id": 0}).sort("date", 1).to_list(500)
+        for inv in invs:
+            if remaining <= 0:
+                break
+            t = _inv_totals(inv)
+            if t["balance"] <= 0.005:
+                continue
+            amt = round(min(remaining, t["balance"]), 2)
+            paid = round(t["paid"] + amt, 2)
+            status = "Paid" if paid >= t["total"] - 0.005 else "Partially Paid"
+            await db.practice_invoices.update_one({"id": inv["id"]}, {"$set": {"paid": paid, "status": status, "last_payment_date": inp.date, "updated_at": now}})
+            apps.append({"invoice_id": inv["id"], "amount": amt, "applied_date": inp.date})
+            remaining = round(remaining - amt, 2)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "kind": "retainer", "applications": apps, "created_at": now}
+    await db.practice_payments.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
 class PracticeCheckIn(BaseModel):
     contact_id: str
     matter_id: str = ""
@@ -1211,7 +1251,7 @@ async def _ledger(uid: str) -> list:
     async for p in db.practice_payments.find({"owner_id": uid}, {"_id": 0}):
         rows.append({"src": "payment", "id": p["id"], "type": "Payment", "notes": p.get("notes", ""), "date": p["date"], "amount": p.get("amount", 0), "method": p.get("payment_method", ""),
                      "contact_id": p.get("contact_id"), "matter_id": p.get("matter_id"), "payee": "", "account": p.get("bank_account", "Operating Account"), "reconciled": p.get("reconciled", False),
-                     "deposit_date": p.get("deposit_date"), "print_queue": False, "check_no": None, "created_at": p.get("created_at", "")})
+                     "deposit_date": p.get("deposit_date"), "print_queue": False, "check_no": None, "created_at": p.get("created_at", ""), "kind": p.get("kind", "payment")})
     async for e in db.practice_expenses.find({"owner_id": uid, "cost_type": "Hard Cost"}, {"_id": 0}):
         rows.append({"src": "expense", "id": e["id"], "type": "Expense", "notes": e.get("payment_notes") or "", "date": e["date"], "amount": -(e.get("amount") or 0), "method": e.get("payment_method", ""),
                      "contact_id": e.get("contact_id"), "matter_id": e.get("matter_id"), "payee": e.get("payee", ""), "account": e.get("account") or "Operating Account", "reconciled": e.get("reconciled", False),

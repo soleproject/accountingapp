@@ -194,6 +194,7 @@ import PracticeMultipleExpenses from "@/pages/PracticeMultipleExpenses";
 import { PracticePayments, PracticeBankAccounts, PracticeReconciliation, PracticePrintChecks } from "@/pages/PracticePaymentsPages";
 import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
 import PracticeAddPayment from "@/pages/PracticeAddPayment";
+import PracticeAddRetainer from "@/pages/PracticeAddRetainer";
 import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
 import PracticeNewUser, { PracticeRoleForm } from "@/pages/PracticeUsersRoles";
 import { PracticeAccess } from "@/components/practice/PracticeAccess";
@@ -291,6 +292,7 @@ function App() {
             <Route path="/practice/payments/reconciliation" element={<Protected><PracticeAccess><PracticeReconciliation /></PracticeAccess></Protected>} />
             <Route path="/practice/payments/print-checks" element={<Protected><PracticeAccess><PracticePrintChecks /></PracticeAccess></Protected>} />
             <Route path="/practice/payments/new" element={<Protected><PracticeAccess><PracticeAddPayment /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/retainer" element={<Protected><PracticeAccess><PracticeAddRetainer /></PracticeAccess></Protected>} />
             <Route path="/practice/payments/:src/:id" element={<Protected><PracticeAccess><PracticePaymentDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/checks/new" element={<Protected><PracticeAccess><PracticeWriteCheck /></PracticeAccess></Protected>} />
             <Route path="/practice/invoices/:id/new" element={<Protected><PracticeAccess><PracticeNewInvoice /></PracticeAccess></Protected>} />

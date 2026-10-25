@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, X, LogOut, Landmark, CreditCard, FileText, LogIn, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, X, LogOut, Landmark, CreditCard, FileText, LogIn, ChevronLeft, ChevronRight, Mail } from "lucide-react";
 import { api } from "@/lib/api";
 import { ContactPicker } from "@/components/practice/ContactPicker";
 import { MatterPicker } from "@/components/practice/MatterPicker";
@@ -18,7 +18,9 @@ export const NewPaymentModal = ({ invoice, onClose }) => {
   const [matters, setMatters] = useState([]);
   const [link, setLink] = useState({ contact_id: invoice?.contact_id || "", matter_id: invoice?.matter_ids?.[0] || "" });
   const [step, setStep] = useState(invoice ? 2 : 1);
-  const [payInvoice, setPayInvoice] = useState(!!invoice);
+  const [mode, setMode] = useState(invoice ? "invoice" : "");
+  const payInvoice = mode === "invoice", retainer = mode === "retainer";
+  const toggle = (m) => setMode(v => (v === m ? "" : m));
   useEffect(() => {
     if (invoice) return;
     api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {});
@@ -50,8 +52,8 @@ export const NewPaymentModal = ({ invoice, onClose }) => {
         ) : (
           <div className="bg-slate-50 px-6 py-6 space-y-6">
             <div className="grid grid-cols-2 gap-3 w-fit mx-auto">
-              <Tile icon={FileText} label="Pay an Invoice" title="Pay an outstanding invoice." active={payInvoice} onClick={() => setPayInvoice(v => !v)} testId="practice-pay-invoice" />
-              <Tile icon={LogIn} label="Add a Retainer" onClick={() => go(`/practice/payments/new${q}&retainer=1`)} testId="practice-pay-retainer" />
+              <Tile icon={FileText} label="Pay an Invoice" title="Pay an outstanding invoice." active={payInvoice} onClick={() => toggle("invoice")} testId="practice-pay-invoice" />
+              <Tile icon={LogIn} label="Add a Retainer" title="Add money into your trust or operating account." active={retainer} onClick={() => toggle("retainer")} testId="practice-pay-retainer" />
               <Tile icon={LogOut} label="Withdrawal" onClick={() => go(`/practice/checks/new${q}`)} testId="practice-pay-withdrawal" />
               <Tile icon={Landmark} label="Payment Plan" onClick={() => go(settings)} testId="practice-pay-plan" />
             </div>
@@ -61,6 +63,16 @@ export const NewPaymentModal = ({ invoice, onClose }) => {
                 <div className="flex justify-center gap-3">
                   <Tile icon={CreditCard} label="Charge a Card" onClick={() => go(settings)} testId="practice-pay-card" />
                   <Tile icon={Plus} label="Add a Payment" onClick={() => go(`/practice/payments/new${q}`)} testId="practice-pay-add" />
+                </div>
+              </div>
+            )}
+            {retainer && (
+              <div className="text-center space-y-4" data-testid="practice-retainer-options">
+                <div className="text-lg font-bold uppercase tracking-wide text-slate-800">Retainer Options:</div>
+                <div className="flex justify-center gap-3">
+                  <Tile icon={CreditCard} label="Charge a Card" onClick={() => go(settings)} testId="practice-retainer-card" />
+                  <Tile icon={Mail} label="Request Payment" onClick={() => go(settings)} testId="practice-retainer-request" />
+                  <Tile icon={Plus} label="Add a Payment" onClick={() => go(`/practice/payments/retainer${q}`)} testId="practice-retainer-add" />
                 </div>
               </div>
             )}

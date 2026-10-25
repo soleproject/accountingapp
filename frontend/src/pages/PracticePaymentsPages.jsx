@@ -12,7 +12,7 @@ const usd = (n) => `${n < 0 ? "-" : ""}$${Math.abs(Number(n || 0)).toLocaleStrin
 const mdy = (iso) => { if (!iso) return "-"; const d = fromISO(iso); return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`; };
 const link = "text-[#1E88E5] hover:underline";
 const pill = "inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50";
-const Neg = ({ v }) => <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white ${v < 0 ? "bg-[#E53935]" : "bg-[#43A047]"}`}>{usd(v)} <span className="text-[9px] font-normal">USD</span></span>;
+const Neg = ({ v, trust }) => <span className={`inline-block rounded-full px-3 py-0.5 text-xs font-semibold text-white ${v < 0 ? "bg-[#E53935]" : trust ? "bg-[#1E88E5]" : "bg-[#43A047]"}`}>{usd(v)} <span className="text-[9px] font-normal">USD</span></span>;
 const Stat = ({ label, value, sub, testId }) => (
   <div className="rounded border border-slate-200 bg-white px-3 py-3 flex items-center justify-between" data-testid={testId}>
     <span className="text-[11px] uppercase tracking-wider text-slate-600">{label}</span>
@@ -114,7 +114,7 @@ export function PracticePayments() {
   const [newPay, setNewPay] = useState(false);
   const all = rows || [];
   const shown = all.filter(r => `${r.ref} ${r.contact_name} ${r.matter_name} ${r.notes}`.toLowerCase().includes(q.toLowerCase()));
-  const paid = all.reduce((a, r) => a + r.amount, 0);
+  const paid = all.filter(r => r.account !== "Trust Account").reduce((a, r) => a + r.amount, 0);
   const trust = all.filter(r => r.account === "Trust Account").reduce((a, r) => a + r.amount, 0);
   const cols = ["Name", "Bank Account", "Contact", "Matter", "Email", "Company Name", "Amount", "Fees", "Date", "Deposit Date", "Payment Method"];
   return (
@@ -148,7 +148,7 @@ export function PracticePayments() {
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/contacts/${r.contact_id}`)} className={link}>{r.contact_name}</button></td>
                   <td className="px-2 py-4"><button type="button" onClick={() => nav(`/practice/matters/${r.matter_id}`)} className={link}>{r.matter_name}</button></td>
                   <td className="px-2 py-4" /><td className="px-2 py-4" />
-                  <td className="px-2 py-4"><Neg v={r.amount} /></td>
+                  <td className="px-2 py-4"><Neg v={r.amount} trust={r.account === "Trust Account"} /></td>
                   <td className="px-2 py-4 text-slate-700">$0.00 <span className="text-[10px] text-slate-500">USD</span></td>
                   <td className="px-2 py-4 text-slate-700">{mdy(r.date)}</td><td className="px-2 py-4 text-slate-700">{mdy(r.deposit_date)}</td><td className="px-2 py-4 text-slate-700">{r.method}</td>
                 </tr>
