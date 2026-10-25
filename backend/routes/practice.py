@@ -509,6 +509,67 @@ async def clone_workflow(wf_id: str, user: dict = Depends(_guard)):
     return doc
 
 
+class PracticeWorkflowApplyIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    event_dates: dict = Field(default_factory=dict)
+    assigned_users: list[str] = Field(default_factory=list)
+
+
+def _shift(date_s: str, n: int, unit: str, direction: str) -> str:
+    d = datetime.strptime(date_s, "%Y-%m-%d").date()
+    sign = -1 if direction == "Before" else 1
+    if unit == "Business Days":
+        left = abs(n)
+        while left > 0:
+            d += timedelta(days=sign)
+            if d.weekday() < 5:
+                left -= 1
+        return d.isoformat()
+    if unit == "Weeks":
+        return (d + timedelta(weeks=sign * n)).isoformat()
+    if unit == "Months":
+        m = d.month - 1 + sign * n
+        y, m = d.year + m // 12, m % 12 + 1
+        last = (datetime(y + (m == 12), (m % 12) + 1, 1).date() - timedelta(days=1)).day
+        return d.replace(year=y, month=m, day=min(d.day, last)).isoformat()
+    return (d + timedelta(days=sign * n)).isoformat()
+
+
+@router.post("/workflows/{wf_id}/apply")
+async def apply_workflow(wf_id: str, inp: PracticeWorkflowApplyIn, user: dict = Depends(_guard)):
+    wf = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not wf:
+        raise HTTPException(404, "Workflow not found")
+    now = datetime.now(timezone.utc).isoformat()
+    today = datetime.now().strftime("%Y-%m-%d")
+    users = inp.assigned_users or [user.get("name", "")]
+    anchors: dict = {}
+    docs = []
+    base = {"owner_id": user["id"], "contact_id": inp.contact_id, "matter_id": inp.matter_id, "created_at": now, "updated_at": now, "workflow_id": wf_id, "workflow_name": wf["name"]}
+    for ev in wf.get("events", []):
+        ed = inp.event_dates.get(ev["id"]) or {}
+        start = ed.get("date") or today
+        anchors[ev["id"]] = start
+        docs.append({**base, "id": str(uuid.uuid4()), "kind": "event", "subject": ev["subject"], "description": ev.get("description", ""),
+                     "start_date": start, "start_time": ed.get("start_time") or "10:00", "end_date": ed.get("end_date") or start, "end_time": ed.get("end_time") or "11:00",
+                     "all_day": bool(ed.get("all_day", False)), "color": ev.get("color") or "#1E88E5", "priority": ev.get("priority", "Medium"), "private": ev.get("private", False),
+                     "reminders": ev.get("reminders", []), "tags": ev.get("tags", []), "assigned_users": ev.get("assigned_users") or users, "email_assignees": ev.get("email_assignees", False), "location": "", "repeat": "Never", "assigned_contacts": ""})
+    first = next(iter(anchors.values()), today)
+    for t in wf.get("tasks", []):
+        due = first
+        if t.get("due_mode") == "Automatically":
+            anchor = anchors.get(t.get("due_anchor"), first)
+            due = _shift(anchor, int(t.get("due_n") or 0), t.get("due_unit", "Business Days"), t.get("due_dir", "After"))
+        anchors[t["id"]] = due
+        docs.append({**base, "id": str(uuid.uuid4()), "kind": "task", "subject": t["subject"], "description": t.get("description", ""), "due_date": due, "due_time": None, "all_day": True,
+                     "status": "Not Completed", "priority": t.get("priority", "Medium"), "private": t.get("private", False), "repeat": "Never",
+                     "reminders": t.get("reminders", []), "save_reminders": False, "tags": t.get("tags", []), "assigned_users": t.get("assigned_users") or users, "assigned_contacts": "", "email_assignees": t.get("email_assignees", False)})
+    if docs:
+        await db.practice_tasks.insert_many(docs)
+    return {"created": len(docs), "events": sum(d["kind"] == "event" for d in docs), "tasks": sum(d["kind"] == "task" for d in docs)}
+
+
 @router.get("/tasks")
 async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(_guard)):
     q = {"owner_id": user["id"], "kind": {"$nin": ["note", "call"]}}

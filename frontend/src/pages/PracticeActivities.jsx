@@ -6,6 +6,7 @@ import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, DateRangeFilter, inRange, TagsFilter } from "@/components/practice/listParts";
 import { ActivitiesTable } from "@/components/practice/tables";
 import { NewActivityMenu, ActivityModal } from "@/components/practice/ActivityModal";
+import { ApplyWorkflowModal } from "@/components/practice/ApplyWorkflowModal";
 
 const KIND_LABEL = { "": "All Activities", task: "Tasks", event: "Events", note: "Notes", call: "Calls" };
 const actDate = (r) => r.kind === "event" ? r.start_date : r.due_date;
@@ -44,6 +45,7 @@ export default function PracticeActivities() {
           <div className="flex items-center gap-3"><ListChecks size={30} className="text-slate-600" strokeWidth={1.5} /><h1 className="text-3xl font-bold text-slate-800">Activities</h1></div>
           <div className="flex items-center gap-2">
             <button type="button" className={white}><Upload size={14} /> Import</button>
+            <button type="button" onClick={() => setModal("apply")} className={white} data-testid="practice-activities-apply-workflow"><Workflow size={14} /> Apply Workflow</button>
             <button type="button" onClick={() => nav("/practice/workflows")} className={white} data-testid="practice-activities-workflows"><Workflow size={14} /> Workflows</button>
             <NewActivityMenu align="right" testId="practice-activities-new" onPick={setModal} />
           </div>
@@ -59,7 +61,7 @@ export default function PracticeActivities() {
         <div className="rounded border border-slate-200 bg-white overflow-hidden">
           {rows === null ? <div className="p-8 text-sm text-slate-500">Loading…</div> : <ActivitiesTable rows={shown} nav={nav} showContact onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} />}
         </div>
-        <ActivityModal modal={modal} onClose={() => setModal(null)} onSaved={done} />
+        {modal === "apply" ? <ApplyWorkflowModal onClose={() => setModal(null)} onApplied={done} /> : <ActivityModal modal={modal} onClose={() => setModal(null)} onSaved={done} />}
       </div>
     </PracticeShell>
   );

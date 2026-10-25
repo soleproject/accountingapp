@@ -10,6 +10,7 @@ import { filterActivities } from "@/pages/PracticeActivities";
 import { PaymentsTable, ActionsMenu } from "@/pages/PracticePaymentsPages";
 import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
 import { NewActivityMenu, ActivityModal } from "@/components/practice/ActivityModal";
+import { ApplyWorkflowModal } from "@/components/practice/ApplyWorkflowModal";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import { Can } from "@/components/practice/perms";
 
@@ -68,7 +69,8 @@ export function ActivitiesTab({ contactId }) {
     <div className="space-y-4" data-testid="practice-contact-activities">
       <Bar>
         <NewActivityMenu onPick={setModal} />
-        <button type="button" className={white}><Mail size={14} /> MailSync</button><button type="button" className={white}><Workflow size={14} /> Apply Workflow</button>
+        <button type="button" className={white}><Mail size={14} /> MailSync</button>
+        <Can feature="Activities (Tasks, Events & Calls)" action="create"><button type="button" onClick={() => setModal("apply")} className={white} data-testid="practice-ca-apply-workflow"><Workflow size={14} /> Apply Workflow</button></Can>
       </Bar>
       <Filters>
         <select className={`${sel} w-36 font-semibold`} value={kind} onChange={e => setKind(e.target.value)} data-testid="practice-ca-kind"><option value="">All Activities</option><option value="task">Tasks</option><option value="event">Events</option><option value="note">Notes</option><option value="call">Calls</option></select>
@@ -77,7 +79,8 @@ export function ActivitiesTab({ contactId }) {
       </Filters>
       <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={shown} nav={nav} onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} /></Grid>
       <RecentActivity />
-      <ActivityModal modal={modal} defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />
+      {modal === "apply" ? <ApplyWorkflowModal contactId={contactId} onClose={() => setModal(null)} onApplied={done} />
+        : <ActivityModal modal={modal} defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
     </div>
   );
 }
