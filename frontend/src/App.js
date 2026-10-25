@@ -196,6 +196,7 @@ import PracticeTimeEntryDetail from "@/pages/PracticeTimeEntryDetail";
 import PracticeAddPayment from "@/pages/PracticeAddPayment";
 import PracticeWriteCheck from "@/pages/PracticeWriteCheck";
 import PracticeNewUser, { PracticeRoleForm } from "@/pages/PracticeUsersRoles";
+import { PracticeAccess } from "@/components/practice/PracticeAccess";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -265,34 +266,34 @@ function App() {
             <Route path="/welcome/pricing" element={<Protected><PricingPlans /></Protected>} />
             <Route path="/welcome/payments" element={<Protected><PaymentsApplication /></Protected>} />
             <Route path="/welcome/complete" element={<Protected><WelcomeComplete /></Protected>} />
-            <Route path="/practice" element={<Protected><PracticeHome /></Protected>} />
-            <Route path="/practice/settings" element={<Protected><PracticeSettings /></Protected>} />
-            <Route path="/practice/contacts" element={<Protected><PracticeContacts /></Protected>} />
-            <Route path="/practice/contacts/new" element={<Protected><PracticeNewContact /></Protected>} />
-            <Route path="/practice/contacts/:id" element={<Protected><PracticeContactDetail /></Protected>} />
-            <Route path="/practice/matters" element={<Protected><PracticeMatters /></Protected>} />
-            <Route path="/practice/matters/new" element={<Protected><PracticeNewMatter /></Protected>} />
-            <Route path="/practice/matters/:id" element={<Protected><PracticeMatterDetail /></Protected>} />
-            <Route path="/practice/matters/:id/edit" element={<Protected><PracticeNewMatter /></Protected>} />
-            <Route path="/practice/calendar" element={<Protected><PracticeCalendar /></Protected>} />
-            <Route path="/practice/time-entries" element={<Protected><PracticeTimeEntries /></Protected>} />
-            <Route path="/practice/time-entries/:id" element={<Protected><PracticeTimeEntryDetail /></Protected>} />
-            <Route path="/practice/users/new" element={<Protected><PracticeNewUser /></Protected>} />
-            <Route path="/practice/users/me" element={<Protected><PracticeUser /></Protected>} />
-            <Route path="/practice/roles/new" element={<Protected><PracticeRoleForm /></Protected>} />
-            <Route path="/practice/roles/:id" element={<Protected><PracticeRoleForm /></Protected>} />
-            <Route path="/practice/invoices" element={<Protected><PracticeInvoices /></Protected>} />
-            <Route path="/practice/expenses" element={<Protected><PracticeExpenses /></Protected>} />
-            <Route path="/practice/expenses/multiple" element={<Protected><PracticeMultipleExpenses /></Protected>} />
-            <Route path="/practice/payments" element={<Protected><PracticePayments /></Protected>} />
-            <Route path="/practice/payments/accounts" element={<Protected><PracticeBankAccounts /></Protected>} />
-            <Route path="/practice/payments/reconciliation" element={<Protected><PracticeReconciliation /></Protected>} />
-            <Route path="/practice/payments/print-checks" element={<Protected><PracticePrintChecks /></Protected>} />
-            <Route path="/practice/payments/new" element={<Protected><PracticeAddPayment /></Protected>} />
-            <Route path="/practice/checks/new" element={<Protected><PracticeWriteCheck /></Protected>} />
-            <Route path="/practice/invoices/:id/new" element={<Protected><PracticeNewInvoice /></Protected>} />
-            <Route path="/practice/invoices/:id/edit" element={<Protected><PracticeNewInvoice /></Protected>} />
-            <Route path="/practice/invoices/:id" element={<Protected><PracticeInvoiceDetail /></Protected>} />
+            <Route path="/practice" element={<Protected><PracticeAccess><PracticeHome /></PracticeAccess></Protected>} />
+            <Route path="/practice/settings" element={<Protected><PracticeAccess><PracticeSettings /></PracticeAccess></Protected>} />
+            <Route path="/practice/contacts" element={<Protected><PracticeAccess><PracticeContacts /></PracticeAccess></Protected>} />
+            <Route path="/practice/contacts/new" element={<Protected><PracticeAccess><PracticeNewContact /></PracticeAccess></Protected>} />
+            <Route path="/practice/contacts/:id" element={<Protected><PracticeAccess><PracticeContactDetail /></PracticeAccess></Protected>} />
+            <Route path="/practice/matters" element={<Protected><PracticeAccess><PracticeMatters /></PracticeAccess></Protected>} />
+            <Route path="/practice/matters/new" element={<Protected><PracticeAccess><PracticeNewMatter /></PracticeAccess></Protected>} />
+            <Route path="/practice/matters/:id" element={<Protected><PracticeAccess><PracticeMatterDetail /></PracticeAccess></Protected>} />
+            <Route path="/practice/matters/:id/edit" element={<Protected><PracticeAccess><PracticeNewMatter /></PracticeAccess></Protected>} />
+            <Route path="/practice/calendar" element={<Protected><PracticeAccess><PracticeCalendar /></PracticeAccess></Protected>} />
+            <Route path="/practice/time-entries" element={<Protected><PracticeAccess><PracticeTimeEntries /></PracticeAccess></Protected>} />
+            <Route path="/practice/time-entries/:id" element={<Protected><PracticeAccess><PracticeTimeEntryDetail /></PracticeAccess></Protected>} />
+            <Route path="/practice/users/new" element={<Protected><PracticeAccess><PracticeNewUser /></PracticeAccess></Protected>} />
+            <Route path="/practice/users/me" element={<Protected><PracticeAccess><PracticeUser /></PracticeAccess></Protected>} />
+            <Route path="/practice/roles/new" element={<Protected><PracticeAccess><PracticeRoleForm /></PracticeAccess></Protected>} />
+            <Route path="/practice/roles/:id" element={<Protected><PracticeAccess><PracticeRoleForm /></PracticeAccess></Protected>} />
+            <Route path="/practice/invoices" element={<Protected><PracticeAccess><PracticeInvoices /></PracticeAccess></Protected>} />
+            <Route path="/practice/expenses" element={<Protected><PracticeAccess><PracticeExpenses /></PracticeAccess></Protected>} />
+            <Route path="/practice/expenses/multiple" element={<Protected><PracticeAccess><PracticeMultipleExpenses /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments" element={<Protected><PracticeAccess><PracticePayments /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/accounts" element={<Protected><PracticeAccess><PracticeBankAccounts /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/reconciliation" element={<Protected><PracticeAccess><PracticeReconciliation /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/print-checks" element={<Protected><PracticeAccess><PracticePrintChecks /></PracticeAccess></Protected>} />
+            <Route path="/practice/payments/new" element={<Protected><PracticeAccess><PracticeAddPayment /></PracticeAccess></Protected>} />
+            <Route path="/practice/checks/new" element={<Protected><PracticeAccess><PracticeWriteCheck /></PracticeAccess></Protected>} />
+            <Route path="/practice/invoices/:id/new" element={<Protected><PracticeAccess><PracticeNewInvoice /></PracticeAccess></Protected>} />
+            <Route path="/practice/invoices/:id/edit" element={<Protected><PracticeAccess><PracticeNewInvoice /></PracticeAccess></Protected>} />
+            <Route path="/practice/invoices/:id" element={<Protected><PracticeAccess><PracticeInvoiceDetail /></PracticeAccess></Protected>} />
             <Route element={<Protected><Layout /></Protected>}>
               <Route path="/" element={<HomeRedirect />} />
               <Route path="/dashboard" element={<ProductGuard product="accounting"><Dashboard /></ProductGuard>} />

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CheckCircle2 } from "lucide-react";
 import { UsersPanel, RolesPanel } from "@/pages/PracticeUsersRoles";
+import { usePracticePerms } from "@/components/practice/perms";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import {
@@ -32,13 +33,15 @@ const GROUPS = [
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 
 function SettingsNav({ section, onSelect }) {
+  const { can } = usePracticePerms();
+  const FEAT = { "Users": "Users & User Groups", "User Groups": "Users & User Groups", "Roles": "Roles" };
   return (
     <nav className="space-y-4" data-testid="practice-settings-nav">
       {GROUPS.map(g => (
         <div key={g.title}>
           <div className="text-sm font-semibold text-slate-700 mb-1.5">{g.title}</div>
           <div className="rounded border border-slate-200 bg-white overflow-hidden">
-            {g.items.map(([label, Icon]) => {
+            {g.items.filter(([label]) => !FEAT[label] || can(FEAT[label], "view")).map(([label, Icon]) => {
               const active = slug(label) === section;
               return (
                 <button key={label} type="button" data-testid={`practice-settings-nav-${slug(label)}`} onClick={() => onSelect(slug(label))}

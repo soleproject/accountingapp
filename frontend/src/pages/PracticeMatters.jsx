@@ -7,6 +7,7 @@ import { PracticeShell } from "@/components/practice/PracticeShell";
 import { GreenButton } from "@/components/practice/forms";
 import { sel, UserFilter, PillFilter, TagsFilter, CountCard, EmptyIllustration } from "@/components/practice/listParts";
 import { MattersTable } from "@/components/practice/tables";
+import { Can } from "@/components/practice/perms";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 export default function PracticeMatters() {
@@ -32,7 +33,7 @@ export default function PracticeMatters() {
           <div className="flex-1" />
           <button type="button" data-testid="practice-matters-import-btn"
                   className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Upload size={14} /> Import</button>
-          <GreenButton onClick={() => nav("/practice/matters/new")} testId="practice-matters-new-btn"><Plus size={14} /> New</GreenButton>
+          <Can feature="Matters" action="create"><GreenButton onClick={() => nav("/practice/matters/new")} testId="practice-matters-new-btn"><Plus size={14} /> New</GreenButton></Can>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-matters-filters">
           <span>Assigned To</span><UserFilter testId="practice-matters-assigned-filter" />

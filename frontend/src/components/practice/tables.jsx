@@ -4,6 +4,7 @@ import { money, billableMoney, Avatar, ListToolbar, ListHead, ListFooter, HoverP
 import { fromISO } from "@/components/practice/DateTimePicker";
 import { timer, showRail } from "@/components/practice/timerStore";
 import { GenerateInvoiceModal } from "@/components/practice/GenerateInvoiceModal";
+import { usePracticePerms } from "@/components/practice/perms";
 
 const link = "text-[#1E88E5] hover:underline";
 const titleLink = "font-semibold text-[#1E88E5] hover:underline text-[15px]";
@@ -13,6 +14,7 @@ const CONTACT_COLS = ["Name", "Status", "Trust", "Operating", "Invoices Due", "B
 
 export function ContactsTable({ rows, nav }) {
   const [q, setQ] = useState("");
+  const { can } = usePracticePerms();
   const shown = rows.filter(r => (r.display_name + " " + (r.company_name || "")).toLowerCase().includes(q.toLowerCase()));
   return (
     <div data-testid="practice-contacts-table">
@@ -26,8 +28,8 @@ export function ContactsTable({ rows, nav }) {
               <td className="px-2 py-4 relative">
                 <button type="button" onClick={() => nav(`/practice/contacts/${r.id}`)} className={titleLink} data-testid={`practice-contact-link-${r.id}`}>{r.display_name}</button>
                 <HoverPill testId={`practice-contact-actions-${r.id}`}>
-                  <button type="button" onClick={() => nav(`/practice/contacts/${r.id}`)} className={act} data-testid={`practice-contact-row-edit-${r.id}`}>Edit</button>
-                  <button type="button" onClick={() => nav(`/practice/matters/new?contact=${r.id}`)} className={act} data-testid={`practice-contact-row-new-matter-${r.id}`}>New Matter</button>
+                  {can("Contacts", "edit") && <button type="button" onClick={() => nav(`/practice/contacts/${r.id}`)} className={act} data-testid={`practice-contact-row-edit-${r.id}`}>Edit</button>}
+                  {can("Matters", "create") && <button type="button" onClick={() => nav(`/practice/matters/new?contact=${r.id}`)} className={act} data-testid={`practice-contact-row-new-matter-${r.id}`}>New Matter</button>}
                   <span>Send Message</span><span>Mailsync</span>
                 </HoverPill>
               </td>
@@ -51,6 +53,7 @@ const MATTER_COLS = ["Matter", "Contact", "Matter Rate", "Trust", "Operating", "
 
 export function MattersTable({ rows, nav, onTrackTime }) {
   const [q, setQ] = useState("");
+  const { can } = usePracticePerms();
   const shown = rows.filter(r => (r.name + " " + r.contact_name).toLowerCase().includes(q.toLowerCase()));
   return (
     <div data-testid="practice-matters-table">
@@ -64,9 +67,9 @@ export function MattersTable({ rows, nav, onTrackTime }) {
               <td className="px-2 py-4 relative">
                 <button type="button" onClick={() => nav(`/practice/matters/${r.id}`)} className={titleLink} data-testid={`practice-matter-link-${r.id}`}>{r.name}</button>
                 <HoverPill testId={`practice-matter-actions-${r.id}`}>
-                  <button type="button" onClick={() => nav(`/practice/matters/${r.id}/edit`)} className={act} data-testid={`practice-matter-row-edit-${r.id}`}>Edit</button>
-                  <button type="button" onClick={() => onTrackTime?.(r)} className={act} data-testid={`practice-matter-row-track-time-${r.id}`}>Track Time</button>
-                  <button type="button" onClick={() => { timer.start({ contact_id: r.contact_id, matter_id: r.id }); showRail(); }} className={act} data-testid={`practice-matter-row-start-timer-${r.id}`}>Start Timer</button>
+                  {can("Matters", "edit") && <button type="button" onClick={() => nav(`/practice/matters/${r.id}/edit`)} className={act} data-testid={`practice-matter-row-edit-${r.id}`}>Edit</button>}
+                  {can("Time Entries", "create") && <button type="button" onClick={() => onTrackTime?.(r)} className={act} data-testid={`practice-matter-row-track-time-${r.id}`}>Track Time</button>}
+                  {can("Time Entries", "create") && <button type="button" onClick={() => { timer.start({ contact_id: r.contact_id, matter_id: r.id }); showRail(); }} className={act} data-testid={`practice-matter-row-start-timer-${r.id}`}>Start Timer</button>}
                   {["Add Expense", "Invoice", "Enter Payment", "Mailsync"].map(a => <span key={a}>{a}</span>)}
                 </HoverPill>
               </td>
@@ -95,6 +98,8 @@ const mdy = (iso) => { const d = fromISO(iso); return `${d.getMonth() + 1}/${d.g
 export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ }) {
   const [localQ, setLocalQ] = useState("");
   const [invoiceFor, setInvoiceFor] = useState(null);
+  const { can } = usePracticePerms();
+  const te = (a) => can("Time Entries", a);
   const query = q ?? localQ, setQuery = setQ ?? setLocalQ;
   const shown = rows.filter(r => `${r.contact_name} ${r.matter_name} ${r.item} ${r.description}`.toLowerCase().includes(query.toLowerCase()));
   const sumH = shown.reduce((a, r) => a + (r.hours || 0), 0);
@@ -112,12 +117,12 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
                 <button type="button" onClick={() => nav(`/practice/time-entries/${r.id}`)} className="inline-flex items-center gap-1.5 font-semibold text-[#1E88E5] text-[15px] hover:underline" data-testid={`practice-te-link-${r.id}`}><Play size={13} className="fill-[#1E88E5]" />{r.item || "Time"}</button>
                 <div className="text-xs text-slate-500 whitespace-pre-line line-clamp-2">{r.description}</div>
                 <HoverPill testId={`practice-te-actions-${r.id}`}>
-                  <button type="button" onClick={() => onEdit(r)} className={act} data-testid={`practice-te-edit-${r.id}`}>Edit</button>
-                  {r.billing_status === "Billable" && <button type="button" onClick={() => setInvoiceFor(r.contact_id)} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-invoice-${r.id}`}>Invoice</button>}
-                  {r.billing_status !== "Billed" && <button type="button" onClick={() => onStatus(r, "Billed")} className="text-[#43A047] hover:underline" data-testid={`practice-te-billed-${r.id}`}>Billed</button>}
-                  {r.billing_status !== "Billable" && <button type="button" onClick={() => onStatus(r, "Billable")} className={act} data-testid={`practice-te-billable-${r.id}`}>Billable</button>}
-                  {r.billing_status !== "Not Billable" && <button type="button" onClick={() => onStatus(r, "Not Billable")} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-notbillable-${r.id}`}>Not Billable</button>}
-                  <button type="button" onClick={() => onClone(r)} className={act} data-testid={`practice-te-clone-${r.id}`}>Clone</button>
+                  {te("edit") && <button type="button" onClick={() => onEdit(r)} className={act} data-testid={`practice-te-edit-${r.id}`}>Edit</button>}
+                  {r.billing_status === "Billable" && can("Invoices", "create") && <button type="button" onClick={() => setInvoiceFor(r.contact_id)} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-invoice-${r.id}`}>Invoice</button>}
+                  {te("edit") && r.billing_status !== "Billed" && <button type="button" onClick={() => onStatus(r, "Billed")} className="text-[#43A047] hover:underline" data-testid={`practice-te-billed-${r.id}`}>Billed</button>}
+                  {te("edit") && r.billing_status !== "Billable" && <button type="button" onClick={() => onStatus(r, "Billable")} className={act} data-testid={`practice-te-billable-${r.id}`}>Billable</button>}
+                  {te("edit") && r.billing_status !== "Not Billable" && <button type="button" onClick={() => onStatus(r, "Not Billable")} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-notbillable-${r.id}`}>Not Billable</button>}
+                  {te("create") && <button type="button" onClick={() => onClone(r)} className={act} data-testid={`practice-te-clone-${r.id}`}>Clone</button>}
                 </HoverPill>
               </td>
               <td className="px-2 py-5">

@@ -7,6 +7,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerStore";
 import { TimerPanel } from "@/components/practice/TimerPanel";
+import { usePracticePerms, featureForPath, resetPracticePerms } from "@/components/practice/perms";
 
 function TopTimerButton() {
   const { active, running, seconds } = usePracticeTimer();
@@ -53,6 +54,7 @@ const PRODUCTS = [
 ];
 
 function ProfileMenu({ user }) {
+  const { me } = usePracticePerms();
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const nav = useNavigate();
@@ -81,7 +83,7 @@ function ProfileMenu({ user }) {
         <div data-testid="practice-profile-menu"
              className="absolute right-0 top-full mt-2 w-56 rounded-md border border-slate-200 bg-white shadow-xl py-1 z-50 text-slate-800">
           <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-widest text-slate-400 font-semibold">Product</div>
-          {PRODUCTS.map(p => {
+          {PRODUCTS.filter(p => p.key === "practice" || me?.is_owner !== false).map(p => {
             const Icon = p.icon;
             const active = p.key === "practice";
             return (
@@ -101,7 +103,7 @@ function ProfileMenu({ user }) {
           <button type="button" className={item} data-testid="practice-menu-subscription" onClick={() => setOpen(false)}>
             <CreditCard size={15} className="text-slate-500" /> Subscription
           </button>
-          <button type="button" className={item} data-testid="practice-menu-signout" onClick={logout}>
+          <button type="button" className={item} data-testid="practice-menu-signout" onClick={() => { resetPracticePerms(); logout(); }}>
             <LogOut size={15} className="text-slate-500" /> Sign Out
           </button>
         </div>
@@ -136,6 +138,7 @@ function NavMenu({ label, items, testId, className }) {
 }
 
 export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
+  const { can } = usePracticePerms();
   const nav = useNavigate();
   const { pathname } = useLocation();
   return (
@@ -164,7 +167,14 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
         <input placeholder="Search" data-testid="practice-search-input"
                className="h-8 w-52 rounded-full bg-white pl-8 pr-3 text-sm text-slate-700 outline-none" />
       </label>
-      {NAV.map(n => {
+      {NAV.filter(n => {
+        const to = typeof n !== "string" ? n.to : null;
+        if (!to) return true;
+        if (n.items) return n.items.some(i => i.to && featureForPath(i.to) && can(featureForPath(i.to), "view"));
+        const f = featureForPath(to);
+        return !f || can(f, "view");
+      }).map(n0 => {
+        const n = n0.items ? { ...n0, items: n0.items.filter(i => !i.to || !featureForPath(i.to) || can(featureForPath(i.to), "view")) } : n0;
         const label = typeof n === "string" ? n : n.label;
         const menu = typeof n !== "string" && n.menu;
         const to = typeof n !== "string" ? n.to : null;

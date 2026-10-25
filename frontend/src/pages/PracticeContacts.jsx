@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Users, User, Upload, Plus, ChevronDown, Tag, Columns3, Sparkles } from "lucide-react";
 import { ContactsTable } from "@/components/practice/tables";
+import { Can } from "@/components/practice/perms";
 import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { GreenButton } from "@/components/practice/forms";
@@ -71,7 +72,7 @@ export default function PracticeContacts() {
                   className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
             <Upload size={14} /> Import
           </button>
-          <GreenButton onClick={() => nav("/practice/contacts/new")} testId="practice-contacts-new-btn"><Plus size={14} /> New</GreenButton>
+          <Can feature="Contacts" action="create"><GreenButton onClick={() => nav("/practice/contacts/new")} testId="practice-contacts-new-btn"><Plus size={14} /> New</GreenButton></Can>
         </div>
         <Filters status={status} setStatus={setStatus} />
         {rows && rows.length > 0 && (

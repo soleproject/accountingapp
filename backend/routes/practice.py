@@ -5,7 +5,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 import uuid
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from db import db
 from auth import require_role, hash_password
@@ -14,11 +14,66 @@ router = APIRouter(prefix="/api/practice")
 _role_guard = require_role("superadmin", "practice")
 
 
-async def _guard(user: dict = Depends(_role_guard)) -> dict:
-    # Invited staff share the firm owner's Practice data.
-    if user.get("practice_owner_id"):
-        return {**user, "id": user["practice_owner_id"], "staff_user_id": user["id"]}
-    return user
+# path prefix -> permission feature
+_FEATURE_BY_PATH = [
+    ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
+    ("/events", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
+    ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
+    ("/payments", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
+    ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
+]
+_ACTION_BY_METHOD = {"GET": "view", "POST": "create", "PUT": "edit", "PATCH": "edit", "DELETE": "delete"}
+
+
+def _feature_for(path: str):
+    rel = path.split("/api/practice", 1)[-1]
+    for prefix, feat in _FEATURE_BY_PATH:
+        if rel == prefix or rel.startswith(prefix + "/") or rel.startswith(prefix + "?"):
+            return feat
+    return None
+
+
+def _action_for(method: str, path: str) -> str:
+    if method == "POST" and (path.endswith("/clone") or path.endswith("/generate") or path.endswith("/payments") or path.endswith("/checks")):
+        return "create"
+    if method == "POST" and (path.endswith("/save") or path.endswith("/print") or path.endswith("/resend-invite") or path.endswith("/activity")):
+        return "edit" if not path.endswith("/activity") else "create"
+    return _ACTION_BY_METHOD.get(method, "view")
+
+
+def can(perms: dict, feature: str, action: str) -> bool:
+    if perms is None:
+        return True
+    f = perms.get(feature) or {}
+    if action == "view":
+        return bool(f.get("view") or f.get("view_all"))
+    if action == "edit":
+        return bool(f.get("edit") or f.get("edit_all"))
+    return bool(f.get(action))
+
+
+async def _staff_perms(account_id: str, owner_id: str):
+    pu = await db.practice_users.find_one({"owner_id": owner_id, "account_id": account_id}, {"_id": 0, "role_id": 1, "active": 1})
+    if not pu or pu.get("active") is False:
+        return {}, None
+    role = await db.practice_roles.find_one({"id": pu.get("role_id")}, {"_id": 0, "permissions": 1, "name": 1})
+    return (role or {}).get("permissions", {}), (role or {}).get("name")
+
+
+async def _guard(request: Request, user: dict = Depends(_role_guard)) -> dict:
+    # Invited staff share the firm owner's Practice data and are limited by their role.
+    if not user.get("practice_owner_id"):
+        return {**user, "permissions": None, "role_name": "Admin", "is_owner": True}
+    perms, role_name = await _staff_perms(user["id"], user["practice_owner_id"])
+    feature = _feature_for(request.url.path)
+    if feature and not can(perms, feature, _action_for(request.method, request.url.path)):
+        raise HTTPException(403, f"Your role does not allow this action on {feature}.")
+    return {**user, "id": user["practice_owner_id"], "staff_user_id": user["id"], "permissions": perms, "role_name": role_name or "", "is_owner": False}
+
+
+@router.get("/me")
+async def practice_me(user: dict = Depends(_guard)):
+    return {"name": user.get("name"), "email": user.get("email"), "role_name": user.get("role_name"), "is_owner": user.get("is_owner"), "permissions": user.get("permissions")}
 
 
 class PracticeProfile(BaseModel):
@@ -1237,3 +1292,15 @@ async def create_bank_account(inp: BankAccountIn, user: dict = Depends(_guard)):
     await db.practice_bank_accounts.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@router.put("/users/{puser_id}")
+async def update_user(puser_id: str, body: dict, user: dict = Depends(_guard)):
+    allowed = {k: v for k, v in body.items() if k in ("first_name", "middle_name", "last_name", "hourly_rate", "round_time_entries", "time_zone", "role_id", "job_title", "notes", "address", "mobile", "home", "work", "fax", "active")}
+    if "role_id" in allowed and not await db.practice_roles.find_one({"id": allowed["role_id"], "owner_id": user["id"]}):
+        raise HTTPException(400, "Select a role.")
+    r = await db.practice_users.update_one({"id": puser_id, "owner_id": user["id"]}, {"$set": allowed})
+    if not r.matched_count:
+        raise HTTPException(404, "User not found")
+    doc = await db.practice_users.find_one({"id": puser_id}, {"_id": 0})
+    return (await _users_out(user["id"], [doc]))[0]

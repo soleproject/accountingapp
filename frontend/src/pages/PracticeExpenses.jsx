@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { sel, UserFilter, PillFilter, TagsFilter, ListToolbar, ListHead, ListFooter, EmptyIllustration, HoverPill } from "@/components/practice/listParts";
 import { NewExpenseModal } from "@/components/practice/NewExpenseModal";
+import { Can } from "@/components/practice/perms";
 import { GenerateInvoiceModal } from "@/components/practice/GenerateInvoiceModal";
 import { fromISO } from "@/components/practice/DateTimePicker";
 
@@ -51,7 +52,7 @@ export default function PracticeExpenses() {
           <h1 className="text-3xl font-bold text-slate-800">Expenses</h1>
           <div className="flex-1" />
           <button type="button" onClick={() => nav("/practice/expenses/multiple")} className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" data-testid="practice-exp-multiple-page-btn"><Plus size={14} /> Multiple Expenses</button>
-          <button type="button" onClick={() => setModal(true)} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-exp-new-btn"><Plus size={14} /> New Expense</button>
+          <Can feature="Expenses" action="create"><button type="button" onClick={() => setModal(true)} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-exp-new-btn"><Plus size={14} /> New Expense</button></Can>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-exp-filters">
           <span>Billed By</span><UserFilter testId="practice-exp-billed-by-filter" />
