@@ -3,6 +3,7 @@ import { Play } from "lucide-react";
 import { money, billableMoney, Avatar, ListToolbar, ListHead, ListFooter, HoverPill } from "@/components/practice/listParts";
 import { fromISO } from "@/components/practice/DateTimePicker";
 import { timer, showRail } from "@/components/practice/timerStore";
+import { GenerateInvoiceModal } from "@/components/practice/GenerateInvoiceModal";
 
 const link = "text-[#1E88E5] hover:underline";
 const titleLink = "font-semibold text-[#1E88E5] hover:underline text-[15px]";
@@ -93,6 +94,7 @@ const mdy = (iso) => { const d = fromISO(iso); return `${d.getMonth() + 1}/${d.g
 
 export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ }) {
   const [localQ, setLocalQ] = useState("");
+  const [invoiceFor, setInvoiceFor] = useState(null);
   const query = q ?? localQ, setQuery = setQ ?? setLocalQ;
   const shown = rows.filter(r => `${r.contact_name} ${r.matter_name} ${r.item} ${r.description}`.toLowerCase().includes(query.toLowerCase()));
   const sumH = shown.reduce((a, r) => a + (r.hours || 0), 0);
@@ -111,7 +113,7 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
                 <div className="text-xs text-slate-500 whitespace-pre-line line-clamp-2">{r.description}</div>
                 <HoverPill testId={`practice-te-actions-${r.id}`}>
                   <button type="button" onClick={() => onEdit(r)} className={act} data-testid={`practice-te-edit-${r.id}`}>Edit</button>
-                  {r.billing_status === "Billable" && <button type="button" className={act} data-testid={`practice-te-invoice-${r.id}`}>Invoice</button>}
+                  {r.billing_status === "Billable" && <button type="button" onClick={() => setInvoiceFor(r.contact_id)} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-invoice-${r.id}`}>Invoice</button>}
                   {r.billing_status !== "Billed" && <button type="button" onClick={() => onStatus(r, "Billed")} className="text-[#43A047] hover:underline" data-testid={`practice-te-billed-${r.id}`}>Billed</button>}
                   {r.billing_status !== "Billable" && <button type="button" onClick={() => onStatus(r, "Billable")} className={act} data-testid={`practice-te-billable-${r.id}`}>Billable</button>}
                   {r.billing_status !== "Not Billable" && <button type="button" onClick={() => onStatus(r, "Not Billable")} className="text-[#1E88E5] hover:underline" data-testid={`practice-te-notbillable-${r.id}`}>Not Billable</button>}
@@ -139,6 +141,7 @@ export function TimeEntriesTable({ rows, nav, onEdit, onStatus, onClone, q, setQ
         </tfoot>
       </table>
       <ListFooter count={shown.length} />
+      {invoiceFor && <GenerateInvoiceModal contactId={invoiceFor} onClose={() => setInvoiceFor(null)} />}
     </div>
   );
 }

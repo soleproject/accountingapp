@@ -588,3 +588,75 @@ async def post_activity(body: dict, user: dict = Depends(_guard)):
     await db.practice_notes.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+# ---------- Invoices ----------
+class PracticeInvoiceGenerateIn(BaseModel):
+    contact_id: str
+    matter_ids: list[str]
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+    add_time_entries: bool = True
+    add_expenses: bool = True
+    add_flat_fees: bool = True
+    tax1_id: str = ""
+    tax2_id: str = ""
+    tax_expenses: bool = False
+
+
+@router.get("/invoices/preview")
+async def invoice_preview(contact_id: str, user: dict = Depends(_guard)):
+    contact = await db.practice_contacts.find_one({"id": contact_id, "owner_id": user["id"]}, {"_id": 0})
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    sums = await _billable_sums(user["id"], "matter_id")
+    matters = await db.practice_matters.find({"owner_id": user["id"], "contact_id": contact_id}, {"_id": 0, "id": 1, "name": 1}).sort("created_at", -1).to_list(500)
+    return {"contact": {"id": contact_id, "display_name": _display_name(contact)},
+            "matters": [{"id": m["id"], "name": m["name"], "billable": sums.get(m["id"], 0)} for m in matters]}
+
+
+@router.post("/invoices/generate")
+async def invoice_generate(inp: PracticeInvoiceGenerateIn, user: dict = Depends(_guard)):
+    if not inp.matter_ids:
+        raise HTTPException(400, "Select at least one matter.")
+    q = {"owner_id": user["id"], "contact_id": inp.contact_id, "matter_id": {"$in": inp.matter_ids}}
+    if inp.date_from:
+        q.setdefault("date", {})["$gte"] = inp.date_from
+    if inp.date_to:
+        q.setdefault("date", {})["$lte"] = inp.date_to
+    entries = []
+    if inp.add_time_entries:
+        async for te in db.practice_time_entries.find(q, {"_id": 0}).sort("date", 1):
+            if _te_status(te) == "Billable":
+                entries.append(te)
+    now = datetime.now(timezone.utc)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "status": "Draft", "number": None,
+           "contact_id": inp.contact_id, "matter_ids": inp.matter_ids, "template": "Default Invoice Template", "submit_for_approval": False,
+           "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
+           "time_entries": [{"id": te["id"], "item": te.get("item") or "Time", "description": te.get("description", ""), "date": te["date"],
+                             "billed_by": te.get("billed_by", ""), "hours": te.get("hours", 0), "rate": te.get("hourly_rate", 0), "sub": te.get("total", 0)} for te in entries],
+           "expenses": [], "flat_fees": [], "tax1_id": inp.tax1_id, "tax2_id": inp.tax2_id, "tax_expenses": inp.tax_expenses,
+           "created_at": now.isoformat(), "updated_at": now.isoformat()}
+    await db.practice_invoices.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.get("/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_invoices.find_one({"id": invoice_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Invoice not found")
+    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
+    matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
+    return {**doc, "contact_name": _display_name(contact) if contact else "", "matters": matters}
+
+
+@router.put("/invoices/{invoice_id}")
+async def update_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)):
+    allowed = {k: v for k, v in body.items() if k in ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number")}
+    allowed["updated_at"] = datetime.now(timezone.utc).isoformat()
+    r = await db.practice_invoices.update_one({"id": invoice_id, "owner_id": user["id"]}, {"$set": allowed})
+    if not r.matched_count:
+        raise HTTPException(404, "Invoice not found")
+    return await get_invoice(invoice_id, user)
