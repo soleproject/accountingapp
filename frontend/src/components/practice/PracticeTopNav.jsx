@@ -6,18 +6,35 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { usePracticeTimer, timer, fmtClock } from "@/components/practice/timerStore";
+import { TimerPanel } from "@/components/practice/TimerPanel";
 
-function TopTimerButton({ railHidden, onShowRail }) {
+function TopTimerButton() {
   const { active, running, seconds } = usePracticeTimer();
-  const onClick = () => { if (!active) timer.start(); else if (railHidden) onShowRail(); };
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target) && !e.target.closest("[data-timer-overlay]")) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const onClick = () => { if (!active) timer.start(); else setOpen(v => !v); };
   return (
-    <button type="button" onClick={onClick} data-testid="practice-start-timer-btn" data-running={running}
-            className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors tabular-nums">
-      <span className="h-4 w-4 rounded-full bg-white grid place-items-center">
-        {active && !running ? <Pause size={9} className="text-[#43A047] fill-[#43A047]" /> : <Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" />}
-      </span>
-      {active ? <span data-testid="practice-top-timer-clock">{fmtClock(seconds)}</span> : "Start Timer"}
-    </button>
+    <div ref={ref} className="relative">
+      <button type="button" onClick={onClick} data-testid="practice-start-timer-btn" data-running={running}
+              className="h-7 pl-2 pr-3 rounded-full bg-[#43A047] text-xs font-bold flex items-center gap-1.5 hover:bg-[#4CAF50] transition-colors tabular-nums">
+        <span className="h-4 w-4 rounded-full bg-white grid place-items-center">
+          {active && !running ? <Pause size={9} className="text-[#43A047] fill-[#43A047]" /> : <Play size={9} className="text-[#43A047] fill-[#43A047] ml-px" />}
+        </span>
+        {active ? <span data-testid="practice-top-timer-clock">{fmtClock(seconds)}</span> : "Start Timer"}
+      </button>
+      {open && active && (
+        <div data-testid="practice-top-timer-popover" data-timer-overlay
+             className="absolute left-0 top-full mt-2 w-[280px] rounded border border-slate-200 bg-white p-4 shadow-xl z-50 text-slate-800">
+          <TimerPanel idPrefix="practice-top-timer" onDone={() => setOpen(false)} />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -107,7 +124,7 @@ export const PracticeTopNav = ({ user, railHidden = false, onShowRail }) => {
               className="h-7 px-3 rounded-full bg-[#29B6F6] text-xs font-bold hover:bg-[#4FC3F7] transition-colors">
         + New
       </button>
-      <TopTimerButton onShowRail={onShowRail} railHidden={railHidden} />
+      <TopTimerButton />
       <div className="flex-1" />
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-messages-btn"><MessagesSquare size={19} /></button>
       <button type="button" className="p-1.5 hover:bg-white/15 rounded" data-testid="practice-notifications-btn"><Bell size={19} /></button>
