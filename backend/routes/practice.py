@@ -259,13 +259,14 @@ async def _with_contact(doc: dict, user: dict) -> dict:
 @router.get("/matters")
 async def list_matters(status: str = "Open", contact_id: Optional[str] = None, user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
-    if status != "All":
+    if status not in ("All", "Billable"):
         q["status"] = status
     if contact_id:
         q["contact_id"] = contact_id
     docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     sums = (await _money(user["id"]))["matters"]
-    return [{**(await _with_contact(d, user)), **sums.get(d["id"], _ZERO)} for d in docs]
+    out = [{**(await _with_contact(d, user)), **sums.get(d["id"], _ZERO)} for d in docs]
+    return [o for o in out if o["billable"] > 0] if status == "Billable" else out
 
 
 @router.get("/matters/counts")

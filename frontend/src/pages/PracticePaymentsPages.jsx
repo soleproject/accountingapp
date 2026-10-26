@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Banknote, Landmark, Printer, ChevronDown, Search, Check, Plus, X, Wrench, Columns3, Download, FileSpreadsheet, FileText, Settings, Pencil, Save, SearchX, CreditCard } from "lucide-react";
 import { api } from "@/lib/api";
@@ -139,10 +139,13 @@ const PAY_COLS = ["Name", "Bank Account", "Contact", "Matter", "Email", "Company
 
 export function PracticePayments() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const [rows] = useLedger();
   const [q, setQ] = useState("");
+  const [account, setAccount] = useState(params.get("account") || "");
+  const [method, setMethod] = useState("Any method");
   const [newPay, setNewPay] = useState(false);
-  const all = rows || [];
+  const all = (rows || []).filter(r => !account || r.account === account).filter(r => method === "Any method" || r.method === method);
   const shown = all.filter(r => `${r.ref} ${r.contact_name} ${r.matter_name} ${r.notes}`.toLowerCase().includes(q.toLowerCase()));
   const paid = all.filter(r => r.account !== "Trust Account").reduce((a, r) => a + r.amount, 0);
   const trust = all.filter(r => r.account === "Trust Account").reduce((a, r) => a + r.amount, 0);
@@ -158,8 +161,8 @@ export function PracticePayments() {
         </div>
         {newPay && <NewPaymentModal onClose={() => setNewPay(false)} />}
         <div className="space-y-2 text-sm text-slate-700" data-testid="practice-payments-filters">
-          <div className="flex items-center gap-2"><span>Bank Account</span><select className={`${sel} w-56`} defaultValue=""><option value="">Select Bank Account...</option><option>Operating Account</option><option>Trust Account</option></select></div>
-          <div className="flex flex-wrap items-center gap-2"><span>Payment Method</span><select className={`${sel} w-56`} defaultValue="Any method"><option>Any method</option><option>Cash</option><option>Check</option><option>Credit / Debit Card</option></select><span>Assigned To</span><select className={`${sel} w-24`} defaultValue="Contact"><option>Contact</option><option>Matter</option></select><UserFilter testId="practice-payments-user" /><TagsFilter testId="practice-payments-tags" /><span>Date Range</span><PillFilter testId="practice-payments-range">All Time</PillFilter></div>
+          <div className="flex items-center gap-2"><span>Bank Account</span><select className={`${sel} w-56`} value={account} onChange={e => setAccount(e.target.value)} data-testid="practice-payments-account-filter"><option value="">Select Bank Account...</option><option>Operating Account</option><option>Trust Account</option></select></div>
+          <div className="flex flex-wrap items-center gap-2"><span>Payment Method</span><select className={`${sel} w-56`} value={method} onChange={e => setMethod(e.target.value)} data-testid="practice-payments-method-filter"><option>Any method</option><option>Cash</option><option>Check</option><option>Credit / Debit Card</option><option>Bank Transfer</option><option>Other</option></select><span>Assigned To</span><select className={`${sel} w-24`} defaultValue="Contact"><option>Contact</option><option>Matter</option></select><UserFilter testId="practice-payments-user" /><TagsFilter testId="practice-payments-tags" /><span>Date Range</span><PillFilter testId="practice-payments-range">All Time</PillFilter></div>
         </div>
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-6">
           <Stat label="# of Transactions" value={all.length} testId="practice-payments-count" /><Stat label="Paid" value={usd(paid)} sub="USD" testId="practice-payments-paid" /><Stat label="Trust" value={usd(trust)} sub="USD" testId="practice-payments-trust" /><Stat label="Unapplied" value="$0.00" sub="USD" testId="practice-payments-unapplied" />

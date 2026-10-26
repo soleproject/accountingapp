@@ -1304,3 +1304,6 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Quick Create "Add Expense" opens New Expense modal (toast → Go to Expenses). "New Invoice" (dashboard, Invoices +New, contact Invoices tab) → `/practice/invoices/create` tile page: One Invoice (green) / Multiple Invoices (placeholder) / Payment Plan (→ settings) + More Options (Trust Request / Recurring placeholders).
 - One Invoice → `POST /api/practice/invoices/blank` (optional contact/matter) → New Invoice editor in blank mode: Contact picker + Matter select, 3 placeholder time-entry rows, "+ Time Entry ▾" (Add unbilled time entries / New time entry). Save requires a contact.
 - Home dashboard tiles now real firm totals via `GET /api/practice/financials`; matter detail tiles use per-matter financials.
+
+## 2026-06 — Clickable stat tiles
+- Trust → /practice/payments?account=Trust Account; Paid → ?account=Operating Account (Payments page Bank Account + Payment Method filters now work and read ?account); Due → /practice/invoices; Billable → /practice/matters?status=Billable (new "Billable" status option = matters with unbilled amounts). Hover tooltips on each tile.

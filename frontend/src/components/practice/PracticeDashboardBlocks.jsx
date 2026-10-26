@@ -11,33 +11,40 @@ import {
 } from "lucide-react";
 
 const TILES = [
-  { label: "Trust", bg: "#1E88E5", icon: Scale },
-  { label: "Paid", bg: "#43A047", icon: Wallet },
-  { label: "Due", bg: "#E53935", icon: BadgeDollarSign },
-  { label: "Billable", bg: "#FFA726", icon: Receipt },
+  { label: "Trust", bg: "#1E88E5", icon: Scale, to: "/practice/payments?account=Trust%20Account", tip: "This is the amount of money in your trust account right now." },
+  { label: "Paid", bg: "#43A047", icon: Wallet, to: "/practice/payments?account=Operating%20Account", tip: "This is the total amount paid to your operating account minus any credit card debts during the selected date range." },
+  { label: "Due", bg: "#E53935", icon: BadgeDollarSign, to: "/practice/invoices", tip: "This is the total balance due on all outstanding invoices." },
+  { label: "Billable", bg: "#FFA726", icon: Receipt, to: "/practice/matters?status=Billable", tip: "This is the total amount of unbilled time, expenses and flat fees ready to be invoiced." },
 ];
 
 const tileFmt = (v) => `$${Number(v) < 0 ? "-" : ""}${Math.abs(Number(v || 0)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-export const PracticeStatTiles = ({ values }) => (
+export const PracticeStatTiles = ({ values }) => {
+  const nav = useNavigate();
+  return (
   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6" data-testid="practice-stat-tiles">
     {TILES.map(t => {
       const Icon = t.icon;
       const k = t.label.toLowerCase();
       const v = values ? (k === "due" ? -(values.due || 0) : values[k] || 0) : 0;
       return (
-        <div key={t.label} data-testid={`practice-tile-${k}`}
-             className="rounded-md text-white px-5 py-3.5 flex items-center gap-4 shadow-sm"
+        <button type="button" key={t.label} data-testid={`practice-tile-${k}`} onClick={() => nav(t.to)}
+             className="group relative hover:z-40 rounded-md text-white px-5 py-3.5 flex items-center gap-4 shadow-sm text-left hover:brightness-110 transition"
              style={{ backgroundColor: t.bg }}>
           <Icon size={30} strokeWidth={1.6} className="opacity-90" />
           <div>
             <div className="text-[11px] uppercase tracking-wider font-semibold opacity-90">{t.label}</div>
             <div className="text-lg font-bold leading-tight" data-testid={`practice-tile-${k}-value`}>{tileFmt(v)} <span className="text-xs font-semibold">USD</span></div>
           </div>
-        </div>
+          <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 hidden w-72 -translate-x-1/2 rounded border border-slate-200 bg-white text-left shadow-xl group-hover:block" data-testid={`practice-tile-${k}-tip`}>
+            <span className="block border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-800">{t.label}</span>
+            <span className="block px-3 py-2 text-sm leading-snug text-slate-700">{t.tip}</span>
+          </span>
+        </button>
       );
     })}
   </div>
-);
+  );
+};
 
 const QUICK = [
   ["New Contact", UserPlus, "/practice/contacts/new", "Add a new person or company to your contacts."], ["New Matter", Briefcase, "/practice/matters/new", "Open a new case or matter for a contact."],
