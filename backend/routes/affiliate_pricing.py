@@ -125,11 +125,14 @@ async def _send_invite(doc: dict, affiliate: dict, firm: dict | None) -> None:
         small(f"This link is for {doc['email']}. Questions? Reply to this email and {aff_name} will follow up."),
         brand=firm_name,
     )
-    await dispatch(kind="affiliate_custom_price_invite", to=doc["email"],
-                   subject=f"{aff_name} set up your {firm_name} {TIER_LABEL} plan — {monthly}/mo",
-                   html=html, initiating_user_id=affiliate["id"],
-                   related={"priced_client_id": doc["id"], "firm_slug": slug},
-                   firm_name_override=firm_name)
+    res = await dispatch(kind="affiliate_custom_price_invite", to=doc["email"],
+                         subject=f"{aff_name} set up your {firm_name} {TIER_LABEL} plan — {monthly}/mo",
+                         html=html, initiating_user_id=affiliate["id"],
+                         related={"priced_client_id": doc["id"], "firm_slug": slug},
+                         firm_name_override=firm_name)
+    if res.get("status") != "sent":
+        raise HTTPException(502, f"Invite email could not be sent: {res.get('error') or res.get('status')}")
+    return {"link": link, "resend_id": res.get("resend_id")}
 
 
 # ---------------------------------------------------------------- endpoints
@@ -182,11 +185,15 @@ async def create_priced_client(inp: PricedClientIn, user: dict = Depends(get_cur
                                    "status": "contacted", "source": "custom_pricing", "activities": [], "created_at": now, "last_seen_at": now})
     from routes.auth import _resolve_firm_for_user
     firm = await _resolve_firm_for_user(user)
+    email_status, email_error = "sent", None
     try:
         await _send_invite(doc, user, firm)
-    except Exception:  # noqa: BLE001
+    except HTTPException as e:
+        email_status, email_error = "failed", str(e.detail)
+    except Exception as e:  # noqa: BLE001
         logger.exception("custom-price invite email failed for %s", email)
-    return {"ok": True, "client": _public(doc)}
+        email_status, email_error = "failed", str(e)
+    return {"ok": True, "client": _public(doc), "email_status": email_status, "email_error": email_error}
 
 
 @router.post("/affiliate/custom-pricing/clients/{pid}/resend")

@@ -1307,3 +1307,10 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-06 — Clickable stat tiles
 - Trust → /practice/payments?account=Trust Account; Paid → ?account=Operating Account (Payments page Bank Account + Payment Method filters now work and read ?account); Due → /practice/invoices; Billable → /practice/matters?status=Billable (new "Billable" status option = matters with unbilled amounts). Hover tooltips on each tile.
+
+
+## 2026-10-26 — SmartTally Refer & earn: priced-client invite fix
+- Root cause: `affiliate_custom_price_invite` was never registered in `email_dispatcher.DEFAULT_PREFS`, so `dispatch()` logged 'Unknown email kind' and returned failed; `create_priced_client` swallowed it and the UI toasted 'Invite sent'. Production never emailed invites.
+- Fix: kind registered; `_send_invite` raises 502 on non-sent; create returns `email_status`/`email_error` and UI toasts the real outcome; resend now surfaces errors.
+- Verified in preview: resend to michael+stally@bigsaas.ai → communications row status=sent with Resend id.
+- Preview test accounts: see test_credentials.md (SmartTally section). Page: /share?tab=clients.

@@ -76,6 +76,7 @@ DEFAULT_PREFS = {
     "affiliate_drip":           True,   # Loop B activation
     "client_message":           True,   # client → pro "Ask my accountant"
     "client_message_reply":     True,   # pro reply → client
+    "affiliate_custom_price_invite": True,  # SmartTally priced-client signup invite
 }
 
 
