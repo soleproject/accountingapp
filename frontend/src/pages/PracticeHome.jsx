@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, LayoutDashboard } from "lucide-react";
+import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { PracticeStatTiles, PracticeQuickCreate, PracticeGetStarted } from "@/components/practice/PracticeDashboardBlocks";
 import { PracticeRecentActivity } from "@/components/practice/PracticeRightRail";
@@ -10,6 +12,8 @@ function monthRange() {
 }
 
 export default function PracticeHome() {
+  const [fin, setFin] = useState(null);
+  useEffect(() => { api.get("/practice/financials").then(r => setFin(r.data)).catch(() => {}); }, []);
   return (
     <PracticeShell withRail>
       <div className="space-y-5" data-testid="practice-home">
@@ -24,7 +28,7 @@ export default function PracticeHome() {
             {monthRange()} <ChevronDown size={12} />
           </button>
         </div>
-        <PracticeStatTiles />
+        <PracticeStatTiles values={fin} />
         <PracticeQuickCreate />
         <PracticeGetStarted />
         <PracticeRecentActivity />

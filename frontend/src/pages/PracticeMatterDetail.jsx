@@ -98,7 +98,7 @@ export default function PracticeMatterDetail() {
             <button type="button" data-testid="practice-matter-new-btn"
                     className="inline-flex items-center gap-1 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]"><Plus size={14} /> New <ChevronDown size={12} /></button>
           </div>
-          <PracticeStatTiles />
+          <PracticeStatTiles values={m.financials} />
           <div className="flex flex-wrap border-b border-slate-200" data-testid="practice-matter-tabs">
             {TABS.map(t => {
               const n = { Activities: m.counts?.activities, "Time Entries": m.counts?.time }[t];

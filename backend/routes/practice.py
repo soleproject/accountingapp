@@ -17,7 +17,7 @@ _role_guard = require_role("superadmin", "practice")
 # path prefix -> permission feature
 _FEATURE_BY_PATH = [
     ("/expenses/categories", "Expenses"), ("/contacts", "Contacts"), ("/matters", "Matters"), ("/tasks", "Activities (Tasks, Events & Calls)"),
-    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
+    ("/events", "Activities (Tasks, Events & Calls)"), ("/activities", "Activities (Tasks, Events & Calls)"), ("/notes", "Activities (Tasks, Events & Calls)"), ("/calls", "Activities (Tasks, Events & Calls)"), ("/workflows", "Activities (Tasks, Events & Calls)"), ("/time-entries", "Time Entries"), ("/expenses", "Expenses"), ("/invoices", "Invoices"),
     ("/items", "Items"), ("/taxes", "Sales Taxes"), ("/roles/features", None), ("/roles", "Roles"), ("/users", "Users & User Groups"),
     ("/payments", "Contact Payments"), ("/retainers", "Contact Payments"), ("/checks", "Firm Payments"), ("/bank-accounts", "Bank Accounts"), ("/ledger", "Bank Accounts"),
     ("/activity", "Recent Activity"), ("/profile", "Settings & Billing"),
@@ -259,13 +259,14 @@ async def _with_contact(doc: dict, user: dict) -> dict:
 @router.get("/matters")
 async def list_matters(status: str = "Open", contact_id: Optional[str] = None, user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
-    if status != "All":
+    if status not in ("All", "Billable"):
         q["status"] = status
     if contact_id:
         q["contact_id"] = contact_id
     docs = await db.practice_matters.find(q, {"_id": 0}).sort("created_at", -1).to_list(500)
     sums = (await _money(user["id"]))["matters"]
-    return [{**(await _with_contact(d, user)), **sums.get(d["id"], _ZERO)} for d in docs]
+    out = [{**(await _with_contact(d, user)), **sums.get(d["id"], _ZERO)} for d in docs]
+    return [o for o in out if o["billable"] > 0] if status == "Billable" else out
 
 
 @router.get("/matters/counts")
@@ -302,7 +303,14 @@ async def get_matter(matter_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_matters.find_one({"id": matter_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Matter not found")
-    return {**(await _with_contact(doc, user)), "counts": await _counts(user["id"], matter_id=matter_id)}
+    return {**(await _with_contact(doc, user)), "counts": await _counts(user["id"], matter_id=matter_id),
+            "financials": (await _money(user["id"]))["matters"].get(matter_id, _ZERO)}
+
+
+@router.get("/financials")
+async def firm_financials(user: dict = Depends(_guard)):
+    sums = (await _money(user["id"]))["contacts"].values()
+    return {k: round(sum(s[k] for s in sums), 2) for k in _ZERO}
 
 
 @router.put("/matters/{matter_id}")
@@ -353,9 +361,226 @@ async def reminder_defaults(user: dict = Depends(_guard)):
     return (doc or {}).get("default_reminders") or []
 
 
+class PracticeNoteIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    subject: str
+    private: bool = False
+    description: str = ""
+    due_date: str
+    due_time: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    assigned_users: list[str] = Field(default_factory=list)
+
+
+class PracticeCallIn(PracticeNoteIn):
+    call_type: str = "Inbound"
+    duration: str = ""
+    assigned_contacts: str = ""
+
+
+async def _save_activity(inp, kind: str, user: dict, item_id: Optional[str] = None):
+    if not inp.subject.strip():
+        raise HTTPException(400, "Subject is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    data = {**inp.model_dump(), "all_day": False, "assigned_users": inp.assigned_users or [user.get("name", "")]}
+    if item_id:
+        r = await db.practice_tasks.update_one({"id": item_id, "owner_id": user["id"], "kind": kind}, {"$set": {**data, "updated_at": now}})
+        if not r.matched_count:
+            raise HTTPException(404, "Not found")
+        return await db.practice_tasks.find_one({"id": item_id}, {"_id": 0})
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **data, "kind": kind, "created_at": now, "updated_at": now}
+    await db.practice_tasks.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.post("/notes")
+async def create_note(inp: PracticeNoteIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "note", user)
+
+
+@router.put("/notes/{item_id}")
+async def update_note(item_id: str, inp: PracticeNoteIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "note", user, item_id)
+
+
+@router.post("/calls")
+async def create_call(inp: PracticeCallIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "call", user)
+
+
+@router.put("/calls/{item_id}")
+async def update_call(item_id: str, inp: PracticeCallIn, user: dict = Depends(_guard)):
+    return await _save_activity(inp, "call", user, item_id)
+
+
+class PracticeWorkflowIn(BaseModel):
+    name: str
+    description: str = ""
+    permissions: str = "Share this workflow with all users"
+    events: list[dict] = Field(default_factory=list)
+    tasks: list[dict] = Field(default_factory=list)
+
+
+_INTAKE_TASKS = [
+    ("Send Intake Form", "Click the white 'New' button on the top-left of PracticePanther and select 'Intake Form' to send the intake form to the lead.", "Lead Created"),
+    ("Review the Intake Form", "Read the intake form under the Files tab within the Contact. Review the answers and decide whether to take the case.", "Send Intake Form"),
+    ("Generate Letter of Engagement", "If you are interested in converting the lead into a client, automatically generate an engagement letter from a template.", "Review the Intake Form"),
+    ("Send Letter of Engagement", "Send the letter of engagement you generated to the client through the client portal or email for e-signature.", "Generate Letter of Engagement"),
+    ("Request Retainer", "Send a retainer request to the client and process the payment ASAP.", "Send Letter of Engagement"),
+    ("Create Matter", "Click the white 'New' button on the top-left of PracticePanther, and create a matter for this client.", "Request Retainer"),
+    ("Get to Work!", "Now comes the fun part! Track all of your time entries, flat fees and expenses against this matter.", "Create Matter"),
+]
+
+
+async def _ensure_example_workflow(user: dict):
+    if await db.practice_workflows.count_documents({"owner_id": user["id"]}):
+        return
+    ev_id = str(uuid.uuid4())
+    ids = {"Lead Created": ev_id}
+    tasks = []
+    for subj, desc, anchor in _INTAKE_TASKS:
+        tid = str(uuid.uuid4())
+        tasks.append({"id": tid, "subject": subj, "description": desc, "due_mode": "Automatically", "due_n": 1, "due_unit": "Business Days",
+                      "due_dir": "After", "due_field": "Due Date", "due_anchor": ids[anchor], "priority": "Medium", "private": False, "assigned_users": [], "tags": []})
+        ids[subj] = tid
+    await db.practice_workflows.insert_one({"id": str(uuid.uuid4()), "owner_id": user["id"], "name": "Client Intake Workflow", "description": "", "permissions": "Share this workflow with all users",
+        "events": [{"id": ev_id, "subject": "Lead Created in Practice", "description": "This is the kickoff event for this workflow. All task due dates will be based on this event's date.", "private": False, "assigned_users": [], "tags": []}],
+        "tasks": tasks, "created_by": user.get("name", ""), "created_at": datetime.now(timezone.utc).isoformat(), "updated_at": datetime.now(timezone.utc).isoformat()})
+
+
+@router.get("/workflows")
+async def list_workflows(user: dict = Depends(_guard)):
+    await _ensure_example_workflow(user)
+    return await db.practice_workflows.find({"owner_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(500)
+
+
+@router.get("/workflows/{wf_id}")
+async def get_workflow(wf_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Workflow not found")
+    return doc
+
+
+def _wf_items(items: list[dict]) -> list[dict]:
+    return [{**i, "id": i.get("id") or str(uuid.uuid4())} for i in items if (i.get("subject") or "").strip()]
+
+
+@router.post("/workflows")
+async def create_workflow(inp: PracticeWorkflowIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Workflow name is required.")
+    now = datetime.now(timezone.utc).isoformat()
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], **inp.model_dump(), "events": _wf_items(inp.events), "tasks": _wf_items(inp.tasks),
+           "created_by": user.get("name", ""), "created_at": now, "updated_at": now}
+    await db.practice_workflows.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/workflows/{wf_id}")
+async def update_workflow(wf_id: str, inp: PracticeWorkflowIn, user: dict = Depends(_guard)):
+    if not inp.name.strip():
+        raise HTTPException(400, "Workflow name is required.")
+    data = {**inp.model_dump(), "events": _wf_items(inp.events), "tasks": _wf_items(inp.tasks), "updated_at": datetime.now(timezone.utc).isoformat()}
+    r = await db.practice_workflows.update_one({"id": wf_id, "owner_id": user["id"]}, {"$set": data})
+    if not r.matched_count:
+        raise HTTPException(404, "Workflow not found")
+    return await db.practice_workflows.find_one({"id": wf_id}, {"_id": 0})
+
+
+@router.delete("/workflows/{wf_id}")
+async def delete_workflow(wf_id: str, user: dict = Depends(_guard)):
+    r = await db.practice_workflows.delete_one({"id": wf_id, "owner_id": user["id"]})
+    if not r.deleted_count:
+        raise HTTPException(404, "Workflow not found")
+    return {"ok": True}
+
+
+@router.post("/workflows/{wf_id}/clone")
+async def clone_workflow(wf_id: str, user: dict = Depends(_guard)):
+    doc = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Workflow not found")
+    now = datetime.now(timezone.utc).isoformat()
+    remap = {}
+    for coll in ("events", "tasks"):
+        for i in doc[coll]:
+            remap[i["id"]] = str(uuid.uuid4())
+    for coll in ("events", "tasks"):
+        doc[coll] = [{**i, "id": remap[i["id"]], **({"due_anchor": remap.get(i.get("due_anchor"), i.get("due_anchor"))} if coll == "tasks" else {})} for i in doc[coll]]
+    doc.update({"id": str(uuid.uuid4()), "name": f"{doc['name']} (Copy)", "created_by": user.get("name", ""), "created_at": now, "updated_at": now})
+    await db.practice_workflows.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+class PracticeWorkflowApplyIn(BaseModel):
+    contact_id: Optional[str] = None
+    matter_id: Optional[str] = None
+    event_dates: dict = Field(default_factory=dict)
+    assigned_users: list[str] = Field(default_factory=list)
+
+
+def _shift(date_s: str, n: int, unit: str, direction: str) -> str:
+    d = datetime.strptime(date_s, "%Y-%m-%d").date()
+    sign = -1 if direction == "Before" else 1
+    if unit == "Business Days":
+        left = abs(n)
+        while left > 0:
+            d += timedelta(days=sign)
+            if d.weekday() < 5:
+                left -= 1
+        return d.isoformat()
+    if unit == "Weeks":
+        return (d + timedelta(weeks=sign * n)).isoformat()
+    if unit == "Months":
+        m = d.month - 1 + sign * n
+        y, m = d.year + m // 12, m % 12 + 1
+        last = (datetime(y + (m == 12), (m % 12) + 1, 1).date() - timedelta(days=1)).day
+        return d.replace(year=y, month=m, day=min(d.day, last)).isoformat()
+    return (d + timedelta(days=sign * n)).isoformat()
+
+
+@router.post("/workflows/{wf_id}/apply")
+async def apply_workflow(wf_id: str, inp: PracticeWorkflowApplyIn, user: dict = Depends(_guard)):
+    wf = await db.practice_workflows.find_one({"id": wf_id, "owner_id": user["id"]}, {"_id": 0})
+    if not wf:
+        raise HTTPException(404, "Workflow not found")
+    now = datetime.now(timezone.utc).isoformat()
+    today = datetime.now().strftime("%Y-%m-%d")
+    users = inp.assigned_users or [user.get("name", "")]
+    anchors: dict = {}
+    docs = []
+    base = {"owner_id": user["id"], "contact_id": inp.contact_id, "matter_id": inp.matter_id, "created_at": now, "updated_at": now, "workflow_id": wf_id, "workflow_name": wf["name"]}
+    for ev in wf.get("events", []):
+        ed = inp.event_dates.get(ev["id"]) or {}
+        start = ed.get("date") or today
+        anchors[ev["id"]] = start
+        docs.append({**base, "id": str(uuid.uuid4()), "kind": "event", "subject": ev["subject"], "description": ev.get("description", ""),
+                     "start_date": start, "start_time": ed.get("start_time") or "10:00", "end_date": ed.get("end_date") or start, "end_time": ed.get("end_time") or "11:00",
+                     "all_day": bool(ed.get("all_day", False)), "color": ev.get("color") or "#1E88E5", "priority": ev.get("priority", "Medium"), "private": ev.get("private", False),
+                     "reminders": ev.get("reminders", []), "tags": ev.get("tags", []), "assigned_users": ev.get("assigned_users") or users, "email_assignees": ev.get("email_assignees", False), "location": "", "repeat": "Never", "assigned_contacts": ""})
+    first = next(iter(anchors.values()), today)
+    for t in wf.get("tasks", []):
+        due = first
+        if t.get("due_mode") == "Automatically":
+            anchor = anchors.get(t.get("due_anchor"), first)
+            due = _shift(anchor, int(t.get("due_n") or 0), t.get("due_unit", "Business Days"), t.get("due_dir", "After"))
+        anchors[t["id"]] = due
+        docs.append({**base, "id": str(uuid.uuid4()), "kind": "task", "subject": t["subject"], "description": t.get("description", ""), "due_date": due, "due_time": None, "all_day": True,
+                     "status": "Not Completed", "priority": t.get("priority", "Medium"), "private": t.get("private", False), "repeat": "Never",
+                     "reminders": t.get("reminders", []), "save_reminders": False, "tags": t.get("tags", []), "assigned_users": t.get("assigned_users") or users, "assigned_contacts": "", "email_assignees": t.get("email_assignees", False)})
+    if docs:
+        await db.practice_tasks.insert_many(docs)
+    return {"created": len(docs), "events": sum(d["kind"] == "event" for d in docs), "tasks": sum(d["kind"] == "task" for d in docs)}
+
+
 @router.get("/tasks")
 async def list_tasks(start: Optional[str] = None, end: Optional[str] = None, user: dict = Depends(_guard)):
-    q = {"owner_id": user["id"]}
+    q = {"owner_id": user["id"], "kind": {"$nin": ["note", "call"]}}
     if start and end:
         q["due_date"] = {"$gte": start, "$lte": end}
     docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", 1), ("due_time", 1)]).to_list(2000)
@@ -487,23 +712,31 @@ async def _counts(user_id: str, **match) -> dict:
 
 
 @router.get("/activities")
-async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[str] = None, user: dict = Depends(_guard)):
+async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[str] = None, kind: Optional[str] = None, user: dict = Depends(_guard)):
     q = {"owner_id": user["id"]}
     if contact_id:
         q["contact_id"] = contact_id
     if matter_id:
         q["matter_id"] = matter_id
+    if kind:
+        q["kind"] = kind if kind != "task" else {"$in": ["task", None]}
     docs = await db.practice_tasks.find(q, {"_id": 0}).sort([("due_date", -1), ("start_date", -1), ("created_at", -1)]).to_list(2000)
     mids = {d["matter_id"] for d in docs if d.get("matter_id")}
+    cids = {d["contact_id"] for d in docs if d.get("contact_id")}
     matters = {m["id"]: m["name"] async for m in db.practice_matters.find({"id": {"$in": list(mids)}}, {"_id": 0, "id": 1, "name": 1})}
+    contacts = {c["id"]: _display_name(c) async for c in db.practice_contacts.find({"id": {"$in": list(cids)}}, {"_id": 0})}
     now = datetime.now()
     today, tnow = now.strftime("%Y-%m-%d"), now.strftime("%H:%M")
     out = []
     for d in docs:
-        if d.get("kind") == "event":
+        k = d.get("kind") or "task"
+        if k == "event":
             ended = (d.get("end_date") or d.get("start_date"), d.get("end_time") or "23:59") < (today, tnow)
             status = "Completed" if ended else "Scheduled"
             when = {"start_date": d.get("start_date"), "start_time": d.get("start_time"), "end_date": d.get("end_date"), "end_time": d.get("end_time")}
+        elif k in ("note", "call"):
+            status = None
+            when = {}
         else:
             if d.get("status") == "Completed":
                 status = "Completed"
@@ -512,7 +745,7 @@ async def list_activities(contact_id: Optional[str] = None, matter_id: Optional[
             else:
                 status = d.get("status") or "Not Completed"
             when = {"due_date": d.get("due_date"), "due_time": d.get("due_time")}
-        out.append({**d, "status": status, "matter_name": matters.get(d.get("matter_id"), ""), "assigned_users": d.get("assigned_users") or [user.get("name", "")], **when})
+        out.append({**d, "kind": k, "status": status, "matter_name": matters.get(d.get("matter_id"), ""), "contact_name": contacts.get(d.get("contact_id"), ""), "assigned_users": d.get("assigned_users") or [user.get("name", "")], **when})
     out.sort(key=lambda r: (r.get("due_date") or r.get("start_date") or "", r.get("due_time") or r.get("start_time") or ""), reverse=True)
     return out
 
@@ -816,7 +1049,7 @@ def _inv_totals(doc: dict) -> dict:
 
 
 async def _inv_out(doc: dict, user: dict) -> dict:
-    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
+    contact = await db.practice_contacts.find_one({"id": doc.get("contact_id") or "__none__"}, {"_id": 0})
     matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
     prof = await db.practice_profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
     firm = {"name": user.get("company_name") or user.get("firm_name") or user.get("name", ""), "email": prof.get("email") or user.get("email", ""), "phone": prof.get("office_phone", "")}
@@ -852,6 +1085,8 @@ async def save_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)
     if not doc:
         raise HTTPException(404, "Invoice not found")
     allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
+    if not (allowed.get("contact_id") or doc.get("contact_id")):
+        raise HTTPException(400, "Select a contact.")
     number = doc.get("number") or allowed.get("number")
     if not number:
         last = await db.practice_invoices.find({"owner_id": user["id"], "number": {"$ne": None}}, {"_id": 0, "number": 1}).sort("number", -1).to_list(1)
@@ -877,8 +1112,27 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
     return {"ok": True}
 
 
-INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids",
+INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids", "contact_id",
                   "notes", "terms", "pay_operating", "pay_trust", "send_reminders", "add_unpaid", "add_interest")
+
+
+class PracticeInvoiceBlankIn(BaseModel):
+    contact_id: str = ""
+    matter_id: str = ""
+
+
+@router.post("/invoices/blank")
+async def invoice_blank(inp: PracticeInvoiceBlankIn, user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "status": "Draft", "number": None, "blank": True,
+           "contact_id": inp.contact_id, "matter_ids": [inp.matter_id] if inp.matter_id else [], "template": "Default Invoice Template", "submit_for_approval": False,
+           "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
+           "time_entries": [], "expenses": [], "flat_fees": [], "tax1_id": "", "tax2_id": "", "tax_expenses": False, "paid": 0.0,
+           "notes": "", "terms": "", "pay_operating": True, "pay_trust": False, "send_reminders": True, "add_unpaid": False, "add_interest": False,
+           "created_at": now.isoformat(), "updated_at": now.isoformat()}
+    await db.practice_invoices.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
 
 @router.put("/invoices/{invoice_id}")

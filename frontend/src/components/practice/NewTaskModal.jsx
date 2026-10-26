@@ -56,7 +56,7 @@ export function UserPicker({ selected, options, onChange }) {
           </span>
         ))}
         <input value={q} onChange={e => { setQ(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onBlur={() => setTimeout(() => setOpen(false), 150)}
-               className="flex-1 min-w-[60px] outline-none text-sm bg-transparent" data-testid="practice-task-users-input" />
+               className="flex-1 min-w-[60px] outline-none text-sm bg-transparent placeholder:text-slate-400" placeholder={selected.length ? "" : "Select Users..."} data-testid="practice-task-users-input" />
         {q && <button type="button" onClick={() => setQ("")} className="text-slate-500"><X size={12} /></button>}
       </div>
       {open && (

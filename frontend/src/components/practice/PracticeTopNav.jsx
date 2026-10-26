@@ -44,7 +44,8 @@ const NAV = [
   { label: "Billing", menu: true, to: "/practice/invoices", items: [{ label: "Invoices", to: "/practice/invoices" }, { label: "Expenses", to: "/practice/expenses" }, { label: "Flat Fees" }, { label: "Items & Categories" }] },
   { label: "Payments", menu: true, to: "/practice/payments", items: [{ label: "Payment History", to: "/practice/payments" }, { label: "Payment Plans", to: "/practice/settings?section=accept-online-payments" },
     { label: "Banks & Credit Cards", header: true }, { label: "Manage Accounts", to: "/practice/payments/accounts", sub: true }, { label: "Account Reconciliation", to: "/practice/payments/reconciliation", sub: true }, { label: "Print Checks", to: "/practice/payments/print-checks", sub: true }, { label: "Deposit Slips", sub: true }] },
-  { label: "Activities", menu: true }, { label: "Documents", menu: true },
+  { label: "Activities", menu: true, to: "/practice/activities", items: [{ label: "All Activities", to: "/practice/activities" }, { label: "Tasks", to: "/practice/activities?kind=task" }, { label: "Events", to: "/practice/activities?kind=event" }, { label: "Calls", to: "/practice/activities?kind=call" }, { label: "Emails" }, { label: "Notes", to: "/practice/activities?kind=note" }, { label: "Text Messages" }, { label: "Workflows", to: "/practice/workflows" }] },
+  { label: "Documents", menu: true },
   "Reports",
 ];
 

@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, ChevronDown, ChevronRight, Mail, Workflow } from "lucide-react";
+import { Plus, ChevronRight, ChevronDown, Mail, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
-import { sel, UserFilter, PillFilter, TagsFilter } from "@/components/practice/listParts";
+import { sel, UserFilter, PillFilter, TagsFilter, DateRangeFilter } from "@/components/practice/listParts";
 import { MattersTable, TimeEntriesTable, ActivitiesTable } from "@/components/practice/tables";
-import { InvoicesTable } from "@/pages/PracticeInvoices";
+import { InvoicesTable, InvoiceStatusSelect, invoiceStatusMatch } from "@/pages/PracticeInvoices";
+import { filterActivities } from "@/pages/PracticeActivities";
 import { PaymentsTable, ActionsMenu } from "@/pages/PracticePaymentsPages";
 import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
-import { NewTaskModal } from "@/components/practice/NewTaskModal";
-import { NewEventModal } from "@/components/practice/NewEventModal";
+import { NewActivityMenu, ActivityModal } from "@/components/practice/ActivityModal";
+import { ApplyWorkflowModal } from "@/components/practice/ApplyWorkflowModal";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 import { Can } from "@/components/practice/perms";
 
@@ -54,36 +55,32 @@ export function MattersTab({ contactId }) {
 export function ActivitiesTab({ contactId }) {
   const nav = useNavigate();
   const [rows, setRows] = useState(null);
-  const [menu, setMenu] = useState(false);
   const [modal, setModal] = useState(null);
+  const [kind, setKind] = useState("");
+  const [status, setStatus] = useState("Any");
+  const [assigned, setAssigned] = useState("");
+  const [range, setRange] = useState({ preset: "All Time" });
   const load = () => api.get("/practice/activities", { params: { contact_id: contactId } }).then(r => setRows(r.data)).catch(() => setRows([]));
   useEffect(() => { load(); }, [contactId]); // eslint-disable-line react-hooks/exhaustive-deps
   const done = () => { setModal(null); load(); };
+  const users = [...new Set((rows || []).flatMap(r => r.assigned_users || []))].sort();
+  const shown = filterActivities((rows || []).filter(r => !kind || r.kind === kind), { status, assigned, range });
   return (
     <div className="space-y-4" data-testid="practice-contact-activities">
       <Bar>
-        <div className="relative">
-          <Can feature="Activities (Tasks, Events & Calls)" action="create"><button type="button" onClick={() => setMenu(v => !v)} className={green} data-testid="practice-ca-new"><Plus size={14} /> New <ChevronDown size={12} /></button></Can>
-          {menu && <>
-            <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-            <div className="absolute left-0 top-full z-30 mt-1 w-40 rounded border border-slate-200 bg-white py-1 shadow-xl text-sm" data-testid="practice-ca-new-menu">
-              {[["Task", "task"], ["Event", "event"]].map(([l, k]) => <button key={k} type="button" onClick={() => { setMenu(false); setModal(k); }} className="w-full px-3 py-1.5 text-left hover:bg-slate-50" data-testid={`practice-ca-new-${k}`}>New {l}</button>)}
-            </div>
-          </>}
-        </div>
-        <button type="button" className={white}><Mail size={14} /> MailSync</button><button type="button" className={white}><Workflow size={14} /> Apply Workflow</button>
+        <NewActivityMenu onPick={setModal} />
+        <button type="button" className={white}><Mail size={14} /> MailSync</button>
+        <Can feature="Activities (Tasks, Events & Calls)" action="create"><button type="button" onClick={() => setModal("apply")} className={white} data-testid="practice-ca-apply-workflow"><Workflow size={14} /> Apply Workflow</button></Can>
       </Bar>
       <Filters>
-        <select className={`${sel} w-36 font-semibold`} defaultValue="All Activities"><option>All Activities</option><option>Tasks</option><option>Events</option></select>
-        <span>Status</span><select className={`${sel} w-28`} defaultValue="Any"><option>Any</option><option>Completed</option><option>Overdue</option></select>
-        <span>Assigned To</span><UserFilter testId="practice-ca-assigned" /><span>Created By</span><UserFilter testId="practice-ca-created-by" /><TagsFilter testId="practice-ca-tags" /><span>Date Range</span><PillFilter testId="practice-ca-range">All Time</PillFilter>
+        <select className={`${sel} w-36 font-semibold`} value={kind} onChange={e => setKind(e.target.value)} data-testid="practice-ca-kind"><option value="">All Activities</option><option value="task">Tasks</option><option value="event">Events</option><option value="note">Notes</option><option value="call">Calls</option></select>
+        <span>Status</span><select className={`${sel} w-32`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-ca-status"><option>Any</option><option>Completed</option><option>Overdue</option><option>Not Completed</option><option>In Progress</option><option>Scheduled</option></select>
+        <span>Assigned To</span><UserFilter testId="practice-ca-assigned" value={assigned} onChange={setAssigned} options={users} /><span>Created By</span><UserFilter testId="practice-ca-created-by" /><TagsFilter testId="practice-ca-tags" /><span>Date Range</span><DateRangeFilter value={range} onChange={setRange} testId="practice-ca-range" />
       </Filters>
-      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={rows || []} nav={nav} onOpen={(r) => setModal(r)} /></Grid>
+      <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No activities yet."><ActivitiesTable rows={shown} nav={nav} onOpen={setModal} onLogTime={(r) => setModal({ logTime: r })} /></Grid>
       <RecentActivity />
-      {modal === "task" && <NewTaskModal defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
-      {modal === "event" && <NewEventModal defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
-      {modal && typeof modal === "object" && modal.kind === "event" && <NewEventModal event={modal} onClose={() => setModal(null)} onSaved={done} />}
-      {modal && typeof modal === "object" && modal.kind !== "event" && <NewTaskModal task={modal} onClose={() => setModal(null)} onSaved={done} />}
+      {modal === "apply" ? <ApplyWorkflowModal contactId={contactId} onClose={() => setModal(null)} onApplied={done} />
+        : <ActivityModal modal={modal} defaults={{ contact_id: contactId }} onClose={() => setModal(null)} onSaved={done} />}
     </div>
   );
 }
@@ -94,13 +91,13 @@ export function InvoicesTab({ contactId }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Any");
   useEffect(() => { api.get("/practice/invoices", { params: { contact_id: contactId } }).then(r => setRows(r.data.rows)).catch(() => setRows([])); }, [contactId]);
-  const shown = (rows || []).filter(r => status === "Any" || r.status === status).filter(r => `I-${r.number} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = (rows || []).filter(r => invoiceStatusMatch(r, status)).filter(r => `I-${r.number} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="space-y-4" data-testid="practice-contact-invoices">
-      <Bar><Can feature="Invoices" action="create"><button type="button" onClick={() => nav(`/practice/invoices/new?contact=${contactId}`)} className={green} data-testid="practice-ci-new"><Plus size={14} /> New Invoice</button></Can></Bar>
+      <Bar><Can feature="Invoices" action="create"><button type="button" onClick={() => nav(`/practice/invoices/create?contact=${contactId}`)} className={green} data-testid="practice-ci-new"><Plus size={14} /> New Invoice</button></Can></Bar>
       <Filters>
         <select className={`${sel} w-32 font-semibold`} defaultValue="All Invoices"><option>All Invoices</option></select><PillFilter testId="practice-ci-bill-date">Bill Date</PillFilter><PillFilter testId="practice-ci-range">All Time</PillFilter>
-        <span>Status</span><select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-ci-status"><option>Any</option><option>Saved</option><option>Sent</option><option>Paid</option></select>
+        <span>Status</span><InvoiceStatusSelect value={status} onChange={setStatus} testId="practice-ci-status" />
       </Filters>
       <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No invoices yet."><InvoicesTable rows={shown} nav={nav} q={q} setQ={setQ} hideContact /></Grid>
       <RecentActivity />

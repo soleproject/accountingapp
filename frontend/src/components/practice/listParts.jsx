@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { User, ChevronDown, Tag, Search, Settings, FileSpreadsheet, FileText, MoreVertical, ArrowUp, Sparkles } from "lucide-react";
 
 export const sel = "h-8 rounded border border-slate-300 bg-white px-2 text-sm text-slate-700 outline-none";
@@ -30,12 +31,57 @@ export const Avatar = ({ name }) => name ? (
   <span className="inline-grid h-8 w-8 place-items-center rounded-full border-2 border-[#1E88E5] text-xs font-bold text-slate-800" title={name}>{initials(name)}</span>
 ) : null;
 
-export const UserFilter = ({ testId }) => (
+export const UserFilter = ({ testId, value = "", onChange, options = [] }) => (
   <div className={`${sel} w-44 flex items-center gap-2`} data-testid={testId}>
     <span className="h-5 w-5 rounded-full bg-slate-300 grid place-items-center"><User size={12} className="text-white fill-white" /></span>
-    <select className="flex-1 bg-transparent outline-none text-sm"><option>Any User</option></select>
+    <select className="flex-1 bg-transparent outline-none text-sm" value={value} onChange={e => onChange?.(e.target.value)} data-testid={testId && `${testId}-select`}>
+      <option value="">Any User</option>{options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
   </div>
 );
+
+const iso = (d) => d.toISOString().slice(0, 10);
+export const RANGE_PRESETS = ["All Time", "Today", "Yesterday", "This Week", "This Month", "Last 30 Days", "Last 90 Days", "This Year", "Custom"];
+export const rangeBounds = (r) => {
+  if (!r || r.preset === "All Time") return null;
+  const now = new Date(); const t = iso(now);
+  const ago = (n) => iso(new Date(now.getTime() - n * 86400000));
+  switch (r.preset) {
+    case "Today": return [t, t];
+    case "Yesterday": return [ago(1), ago(1)];
+    case "This Week": { const s = new Date(now); s.setDate(now.getDate() - now.getDay()); return [iso(s), t]; }
+    case "This Month": return [t.slice(0, 8) + "01", t];
+    case "Last 30 Days": return [ago(30), t];
+    case "Last 90 Days": return [ago(90), t];
+    case "This Year": return [t.slice(0, 4) + "-01-01", t];
+    case "Custom": return [r.from || "0000-01-01", r.to || "9999-12-31"];
+    default: return null;
+  }
+};
+export const inRange = (dateStr, r) => { const b = rangeBounds(r); return !b || (!!dateStr && dateStr >= b[0] && dateStr <= b[1]); };
+
+export const DateRangeFilter = ({ value = { preset: "All Time" }, onChange, testId }) => {
+  const [open, setOpen] = useState(false);
+  const label = value.preset === "Custom" && (value.from || value.to) ? `${value.from || "…"} – ${value.to || "…"}` : value.preset;
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setOpen(v => !v)} className={`${sel} rounded-full inline-flex items-center gap-1`} data-testid={testId}>{label} <ChevronDown size={12} /></button>
+      {open && <>
+        <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+        <div className="absolute left-0 top-full z-30 mt-1 w-56 rounded border border-slate-200 bg-white py-1 shadow-xl text-sm" data-testid={`${testId}-menu`}>
+          {RANGE_PRESETS.map(p => <button key={p} type="button" onClick={() => { onChange({ ...value, preset: p }); if (p !== "Custom") setOpen(false); }} className={`w-full px-3 py-1.5 text-left hover:bg-slate-50 ${value.preset === p ? "font-semibold text-[#1E88E5]" : "text-slate-700"}`} data-testid={`${testId}-${p.toLowerCase().replace(/\s+/g, "-")}`}>{p}</button>)}
+          {value.preset === "Custom" && (
+            <div className="px-3 py-2 space-y-1.5 border-t border-slate-100">
+              <input type="date" className={`${sel} w-full`} value={value.from || ""} onChange={e => onChange({ ...value, from: e.target.value })} data-testid={`${testId}-from`} />
+              <input type="date" className={`${sel} w-full`} value={value.to || ""} onChange={e => onChange({ ...value, to: e.target.value })} data-testid={`${testId}-to`} />
+              <button type="button" onClick={() => setOpen(false)} className="w-full rounded bg-[#1E88E5] py-1 text-xs font-semibold text-white" data-testid={`${testId}-apply`}>Apply</button>
+            </div>
+          )}
+        </div>
+      </>}
+    </div>
+  );
+};
 
 export const PillFilter = ({ children, testId, icon }) => (
   <button type="button" className={`${sel} rounded-full inline-flex items-center gap-1`} data-testid={testId}>{icon}{children} <ChevronDown size={12} /></button>

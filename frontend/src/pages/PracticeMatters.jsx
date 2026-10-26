@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Briefcase, Upload, Plus } from "lucide-react";
 import { api } from "@/lib/api";
@@ -12,7 +12,8 @@ import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 export default function PracticeMatters() {
   const nav = useNavigate();
-  const [status, setStatus] = useState("Open");
+  const [params] = useSearchParams();
+  const [status, setStatus] = useState(params.get("status") || "Open");
   const [rows, setRows] = useState(null);
   const [counts, setCounts] = useState(null);
   const [track, setTrack] = useState(null);
@@ -40,7 +41,7 @@ export default function PracticeMatters() {
           <span>Originated By</span><UserFilter testId="practice-matters-originated-filter" />
           <span>Status</span>
           <select className={`${sel} w-32`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-matters-status-filter">
-            <option>Open</option><option>Closed</option><option>Pending</option><option>All</option>
+            <option>Open</option><option>Closed</option><option>Pending</option><option>Billable</option><option>All</option>
           </select>
           <TagsFilter testId="practice-matters-tags-filter" />
           <PillFilter testId="practice-matters-created-filter">Create…</PillFilter>

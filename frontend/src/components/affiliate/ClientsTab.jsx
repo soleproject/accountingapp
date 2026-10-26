@@ -77,8 +77,9 @@ function AddClientForm({ floor, eligibility, onClose, onDone }) {
     if (cents < eligibility.floor_cents) { toast.error(`Price must be at least $${floor}/mo`); return; }
     setBusy(true);
     try {
-      await api.post("/affiliate/custom-pricing/clients", { name, email, monthly_cents: cents, cadence, trial });
-      toast.success(`Invite sent to ${email}`);
+      const { data } = await api.post("/affiliate/custom-pricing/clients", { name, email, monthly_cents: cents, cadence, trial });
+      if (data?.email_status === "sent") toast.success(`Invite sent to ${email}`);
+      else toast.error(`Client added, but the invite email failed: ${data?.email_error || "unknown error"}. Use the resend button to try again.`);
       onDone();
     } catch (err) { toast.error(err?.response?.data?.detail || "Couldn't add client"); }
     finally { setBusy(false); }

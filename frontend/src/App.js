@@ -184,6 +184,10 @@ import PracticeMatters from "@/pages/PracticeMatters";
 import PracticeNewMatter from "@/pages/PracticeNewMatter";
 import PracticeMatterDetail from "@/pages/PracticeMatterDetail";
 import PracticeCalendar from "@/pages/PracticeCalendar";
+import PracticeActivities from "@/pages/PracticeActivities";
+import PracticeWorkflows from "@/pages/PracticeWorkflows";
+import PracticeWorkflowEdit from "@/pages/PracticeWorkflowEdit";
+import PracticeInvoiceCreate from "@/pages/PracticeInvoiceCreate";
 import PracticeTimeEntries from "@/pages/PracticeTimeEntries";
 import PracticeUser from "@/pages/PracticeUser";
 import PracticeNewInvoice from "@/pages/PracticeNewInvoice";
@@ -278,6 +282,10 @@ function App() {
             <Route path="/practice/matters/:id" element={<Protected><PracticeAccess><PracticeMatterDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/matters/:id/edit" element={<Protected><PracticeAccess><PracticeNewMatter /></PracticeAccess></Protected>} />
             <Route path="/practice/calendar" element={<Protected><PracticeAccess><PracticeCalendar /></PracticeAccess></Protected>} />
+            <Route path="/practice/activities" element={<Protected><PracticeAccess><PracticeActivities /></PracticeAccess></Protected>} />
+            <Route path="/practice/workflows" element={<Protected><PracticeAccess><PracticeWorkflows /></PracticeAccess></Protected>} />
+            <Route path="/practice/workflows/new" element={<Protected><PracticeAccess><PracticeWorkflowEdit /></PracticeAccess></Protected>} />
+            <Route path="/practice/workflows/:id/edit" element={<Protected><PracticeAccess><PracticeWorkflowEdit /></PracticeAccess></Protected>} />
             <Route path="/practice/time-entries" element={<Protected><PracticeAccess><PracticeTimeEntries /></PracticeAccess></Protected>} />
             <Route path="/practice/time-entries/:id" element={<Protected><PracticeAccess><PracticeTimeEntryDetail /></PracticeAccess></Protected>} />
             <Route path="/practice/users/new" element={<Protected><PracticeAccess><PracticeNewUser /></PracticeAccess></Protected>} />
@@ -285,6 +293,7 @@ function App() {
             <Route path="/practice/roles/new" element={<Protected><PracticeAccess><PracticeRoleForm /></PracticeAccess></Protected>} />
             <Route path="/practice/roles/:id" element={<Protected><PracticeAccess><PracticeRoleForm /></PracticeAccess></Protected>} />
             <Route path="/practice/invoices" element={<Protected><PracticeAccess><PracticeInvoices /></PracticeAccess></Protected>} />
+            <Route path="/practice/invoices/create" element={<Protected><PracticeAccess><PracticeInvoiceCreate /></PracticeAccess></Protected>} />
             <Route path="/practice/expenses" element={<Protected><PracticeAccess><PracticeExpenses /></PracticeAccess></Protected>} />
             <Route path="/practice/expenses/multiple" element={<Protected><PracticeAccess><PracticeMultipleExpenses /></PracticeAccess></Protected>} />
             <Route path="/practice/payments" element={<Protected><PracticeAccess><PracticePayments /></PracticeAccess></Protected>} />

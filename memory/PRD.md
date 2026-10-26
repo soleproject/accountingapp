@@ -1278,3 +1278,39 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Tab counts for Matters, Activities, Invoices, Payments, Time, Expenses.
 - New `components/practice/ContactTabs.jsx`: MattersTab (New Matter, filters, MattersTable w/ Trust/Operating/Billable pills), ActivitiesTab (New ▾ Task/Event prefilled with contact, click row to edit; COMPLETED/OVERDUE pills; `GET /activities?contact_id=`), InvoicesTab (New Invoice, status filter, PAID green pill, `InvoicesTable` extracted from PracticeInvoices), PaymentsTab (Actions ▾ → Contact Payment prefilled; `PaymentsTable`/`ActionsMenu` exported from PracticePaymentsPages; `GET /ledger?contact_id=`), TimeTab (New Time Entry prefilled, status filter, TimeEntriesTable hideContact; `GET /time-entries/all?contact_id=`). Each tab ends with a RECENT ACTIVITY collapsible.
 - Placeholder tabs still: Notes, Messages, Expenses, Flat Fees, Relationships, Intakes, Files.
+
+## 2026-06 — Activities page + Notes & Calls
+- Top nav "Activities" dropdown: All Activities, Tasks, Events, Calls, Notes (→ /practice/activities?kind=), Emails / Text Messages / Workflows placeholders.
+- `/practice/activities` (`PracticeActivities.jsx`): Import/Workflows placeholders, +New ▾ (Task/Event/Note/Call), kind + status filters, All/Completed/Incomplete/Overdue cards, ActivitiesTable with Contact column and hover pill (Edit, Log Time → time entry modal prefilled; Log Flat Fee / Time Logged placeholders). Click row → edit modal for its kind.
+- New Note / New Call modals (`NewNoteCallModals.jsx`) incl. call timer → duration, Save / Save and add time entry. Backend `POST/PUT /api/practice/notes|calls` store in practice_tasks with kind note/call; `/tasks` (calendar/agenda) excludes them; `/activities?kind=` filter + contact_name.
+- Shared `ActivityModal.jsx` (NewActivityMenu + ActivityModal) also powers the contact Activities tab.
+
+## 2026-06 — Activities working filters
+- Status, Assigned To (options from rows' assigned users) and Date Range (presets + Custom from/to) now filter the Activities page list AND the All/Completed/Incomplete/Overdue cards; same filters (plus kind) work on the contact Activities tab. Shared `UserFilter`(value/onChange/options), `DateRangeFilter`, `inRange` in listParts.jsx; `filterActivities` exported from PracticeActivities.jsx.
+
+## 2026-06 — Workflows
+- Activities ▾ → Workflows and the Workflows button on Activities open `/practice/workflows` (`PracticeWorkflows.jsx`): Created By filter, search, Name/Permissions/Created Date/Created By grid, hover pill Edit/Delete/Clone, +New Workflow. Example "Client Intake Workflow" (1 event, 7 chained tasks) auto-seeded per owner.
+- `/practice/workflows/new` & `/:id/edit` (`PracticeWorkflowEdit.jsx`): Workflow (name/description/permissions), Workflow Events (n) and Workflow Tasks (n) cards with New Event/New Task pills; task Due Date "No due date." or Automatically → n · unit · After/Before · Due/Start Date · anchor (earlier event/task). More Options expands Reminders (Add a Reminder), Color (events), Priority, Assigned To (user picker), Tags, Email Assignees. Save / Save & Add New / Cancel.
+- Backend: `GET/POST /api/practice/workflows`, `GET/PUT/DELETE /workflows/{id}`, `POST /workflows/{id}/clone` (practice_workflows). Feature: Activities. Applying a workflow to a contact/matter is NOT built yet.
+
+## 2026-06 — Apply Workflow
+- `ApplyWorkflowModal.jsx` (contact Activities tab "Apply Workflow" + Activities page button): pick workflow, Linked To (contact prefilled, matter), per-event date/time, preview of tasks + due rules → `POST /api/practice/workflows/{id}/apply`.
+- Backend creates real events/tasks in practice_tasks (tagged workflow_id/workflow_name) with due dates chained from anchors (Business Days skip weekends; Calendar Days/Weeks/Months; Before/After). Verified: Sun kickoff → 7 tasks on consecutive business days.
+
+## 2026-06 — Dashboard Quick Create squares
+- New Event / New Task / New Note / New Call / Track Time squares open their modals from the dashboard (hover tooltips added). After save: single top-right toast "Item saved successfully." for 5s with a "Go to Calendar / Activities / Time Entry" action button. Remaining squares (Send Message, Add Expense, New Intake, New Invoice, New Payment, New Flat Fee) still placeholders.
+
+## 2026-06 — Dashboard Add Expense / New Invoice + blank invoices
+- Quick Create "Add Expense" opens New Expense modal (toast → Go to Expenses). "New Invoice" (dashboard, Invoices +New, contact Invoices tab) → `/practice/invoices/create` tile page: One Invoice (green) / Multiple Invoices (placeholder) / Payment Plan (→ settings) + More Options (Trust Request / Recurring placeholders).
+- One Invoice → `POST /api/practice/invoices/blank` (optional contact/matter) → New Invoice editor in blank mode: Contact picker + Matter select, 3 placeholder time-entry rows, "+ Time Entry ▾" (Add unbilled time entries / New time entry). Save requires a contact.
+- Home dashboard tiles now real firm totals via `GET /api/practice/financials`; matter detail tiles use per-matter financials.
+
+## 2026-06 — Clickable stat tiles
+- Trust → /practice/payments?account=Trust Account; Paid → ?account=Operating Account (Payments page Bank Account + Payment Method filters now work and read ?account); Due → /practice/invoices; Billable → /practice/matters?status=Billable (new "Billable" status option = matters with unbilled amounts). Hover tooltips on each tile.
+
+
+## 2026-10-26 — SmartTally Refer & earn: priced-client invite fix
+- Root cause: `affiliate_custom_price_invite` was never registered in `email_dispatcher.DEFAULT_PREFS`, so `dispatch()` logged 'Unknown email kind' and returned failed; `create_priced_client` swallowed it and the UI toasted 'Invite sent'. Production never emailed invites.
+- Fix: kind registered; `_send_invite` raises 502 on non-sent; create returns `email_status`/`email_error` and UI toasts the real outcome; resend now surfaces errors.
+- Verified in preview: resend to michael+stally@bigsaas.ai → communications row status=sent with Resend id.
+- Preview test accounts: see test_credentials.md (SmartTally section). Page: /share?tab=clients.

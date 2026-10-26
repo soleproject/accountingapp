@@ -19,6 +19,17 @@ const StatCard = ({ label, value, testId }) => (
   </div>
 );
 
+export const INVOICE_STATUSES = ["Any", "Saved", "Pending", "Approved", "Sent", "Viewed", "Paid", "Due", "Overdue"];
+export const invoiceStatusMatch = (r, status) => {
+  if (status === "Any") return true;
+  if (status === "Due") return r.balance > 0;
+  if (status === "Overdue") return r.balance > 0 && (r.due_date || "") < new Date().toISOString().slice(0, 10);
+  return r.status === status;
+};
+export const InvoiceStatusSelect = ({ value, onChange, testId }) => (
+  <select className={`${sel} w-32`} value={value} onChange={e => onChange(e.target.value)} data-testid={testId}>{INVOICE_STATUSES.map(s => <option key={s}>{s}</option>)}</select>
+);
+
 export function InvoicesTable({ rows, nav, q, setQ, hideContact }) {
   const sumT = rows.reduce((a, r) => a + r.total, 0), sumB = rows.reduce((a, r) => a + r.balance, 0);
   return (
@@ -65,7 +76,7 @@ export default function PracticeInvoices() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Any");
   useEffect(() => { api.get("/practice/invoices").then(r => setData(r.data)).catch(() => { setData({ rows: [], all: 0, due: 0, overdue: 0 }); toast.error("Could not load invoices"); }); }, []);
-  const rows = (data?.rows || []).filter(r => status === "Any" || r.status === status)
+  const rows = (data?.rows || []).filter(r => invoiceStatusMatch(r, status))
     .filter(r => `I-${r.number} ${r.contact_name} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
@@ -76,7 +87,7 @@ export default function PracticeInvoices() {
           <h1 className="text-3xl font-bold text-slate-800">Invoices</h1>
           <div className="flex-1" />
           <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" data-testid="practice-invoices-manage-tax"><Settings2 size={14} /> Manage Sales Tax</button>
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-invoices-new-btn"><Plus size={14} /> New <ChevronDown size={12} /></button>
+          <button type="button" onClick={() => nav("/practice/invoices/create")} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-invoices-new-btn"><Plus size={14} /> New <ChevronDown size={12} /></button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-invoices-filters">
           <select className={`${sel} w-32`} defaultValue="All Invoices" data-testid="practice-invoices-type-filter"><option>All Invoices</option></select>
@@ -86,7 +97,7 @@ export default function PracticeInvoices() {
           <PillFilter testId="practice-invoices-bill-date">Bill Date</PillFilter>
           <PillFilter testId="practice-invoices-range">All Time</PillFilter>
           <span>Status</span>
-          <select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-invoices-status-filter"><option>Any</option><option>Saved</option><option>Sent</option><option>Paid</option></select>
+          <InvoiceStatusSelect value={status} onChange={setStatus} testId="practice-invoices-status-filter" />
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
           <StatCard label="All" value={data?.all} testId="practice-invoices-card-all" />

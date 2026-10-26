@@ -7,8 +7,8 @@ const TOOLS = [
   ["insertOrderedList", ListOrdered], ["insertUnorderedList", List], null, ["code", Code],
 ];
 
-export const RichNotes = ({ value, onChange, testId = "practice-rich-notes", placeholder = "Add Notes...", minHeight = 200 }) => {
-  const [open, setOpen] = useState(!!value);
+export const RichNotes = ({ value, onChange, testId = "practice-rich-notes", placeholder = "Add Notes...", minHeight = 200, alwaysOpen = false }) => {
+  const [open, setOpen] = useState(alwaysOpen || !!value);
   const ref = useRef(null);
 
   useEffect(() => { if (value && !open) setOpen(true); }, [value, open]);
