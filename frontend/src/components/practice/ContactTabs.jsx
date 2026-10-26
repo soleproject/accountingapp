@@ -5,7 +5,7 @@ import { Plus, ChevronRight, ChevronDown, Mail, Workflow } from "lucide-react";
 import { api } from "@/lib/api";
 import { sel, UserFilter, PillFilter, TagsFilter, DateRangeFilter } from "@/components/practice/listParts";
 import { MattersTable, TimeEntriesTable, ActivitiesTable } from "@/components/practice/tables";
-import { InvoicesTable } from "@/pages/PracticeInvoices";
+import { InvoicesTable, InvoiceStatusSelect, invoiceStatusMatch } from "@/pages/PracticeInvoices";
 import { filterActivities } from "@/pages/PracticeActivities";
 import { PaymentsTable, ActionsMenu } from "@/pages/PracticePaymentsPages";
 import { NewPaymentModal } from "@/components/practice/NewPaymentModal";
@@ -91,13 +91,13 @@ export function InvoicesTab({ contactId }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Any");
   useEffect(() => { api.get("/practice/invoices", { params: { contact_id: contactId } }).then(r => setRows(r.data.rows)).catch(() => setRows([])); }, [contactId]);
-  const shown = (rows || []).filter(r => status === "Any" || r.status === status).filter(r => `I-${r.number} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
+  const shown = (rows || []).filter(r => invoiceStatusMatch(r, status)).filter(r => `I-${r.number} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="space-y-4" data-testid="practice-contact-invoices">
       <Bar><Can feature="Invoices" action="create"><button type="button" onClick={() => nav(`/practice/invoices/create?contact=${contactId}`)} className={green} data-testid="practice-ci-new"><Plus size={14} /> New Invoice</button></Can></Bar>
       <Filters>
         <select className={`${sel} w-32 font-semibold`} defaultValue="All Invoices"><option>All Invoices</option></select><PillFilter testId="practice-ci-bill-date">Bill Date</PillFilter><PillFilter testId="practice-ci-range">All Time</PillFilter>
-        <span>Status</span><select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-ci-status"><option>Any</option><option>Saved</option><option>Sent</option><option>Paid</option></select>
+        <span>Status</span><InvoiceStatusSelect value={status} onChange={setStatus} testId="practice-ci-status" />
       </Filters>
       <Grid loading={rows === null} isEmpty={rows?.length === 0} empty="No invoices yet."><InvoicesTable rows={shown} nav={nav} q={q} setQ={setQ} hideContact /></Grid>
       <RecentActivity />
