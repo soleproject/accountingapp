@@ -534,7 +534,11 @@ export default function PricingPlans() {
 }
 
 function customPlan(cp) {
-  const base = PLANS.find((p) => p.stripeProduct === (cp.tier || "advanced")) || PLANS[PLANS.length - 1];
+  const tier = cp.tier || "advanced";
+  const idx = PLANS.findIndex((p) => p.stripeProduct === tier);
+  const base = idx >= 0 ? PLANS[idx] : PLANS[PLANS.length - 1];
+  const chain = PLANS.slice(0, (idx >= 0 ? idx : PLANS.length - 1) + 1);
+  const features = chain.flatMap((p) => p.features.filter((f) => !f.isSection));
   return {
     ...base,
     id: "custom",
@@ -545,6 +549,7 @@ function customPlan(cp) {
     highlight: true,
     trialDays: cp.trial ? cp.trial_days : 0,
     custom: true,
+    features: [{ h: "Everything included", isSection: true }, ...features],
   };
 }
 
