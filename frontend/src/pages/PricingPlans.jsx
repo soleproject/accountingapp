@@ -497,20 +497,13 @@ export default function PricingPlans() {
             reasonable desktop viewport. AI Bookkeeper card scales up
             2% at ≥lg so the eye lands there first. */}
         {customPricing ? (
-          <div className="max-w-md mx-auto" data-testid="pricing-custom-grid">
-            {[customPlan(customPricing)].map((p) => (
-              <PlanCard
-                key={p.id}
-                plan={p}
-                cadence={cadence}
-                showDetail={showDetail}
-                loading={loadingPlanId === p.id}
-                anyLoading={loadingPlanId !== null}
-                onSelect={startCheckout}
-                returning={returning}
-              />
-            ))}
-          </div>
+          <CustomPlanLayout
+            plan={customPlan(customPricing)}
+            cadence={cadence}
+            showDetail={showDetail}
+            loading={loadingPlanId === "custom"}
+            onSelect={startCheckout}
+          />
         ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 lg:gap-5 items-stretch">
           {PLANS.map((p) => (
@@ -533,8 +526,23 @@ export default function PricingPlans() {
   );
 }
 
+const CUSTOM_GROUP_LABELS = {
+  core: "Accounting",
+  assistant: "AI Assistant",
+  bookkeeper: "Books on Autopilot",
+  advanced: "Advanced Tools",
+};
+
 function customPlan(cp) {
-  const base = PLANS.find((p) => p.stripeProduct === (cp.tier || "advanced")) || PLANS[PLANS.length - 1];
+  const tier = cp.tier || "advanced";
+  const idx = PLANS.findIndex((p) => p.stripeProduct === tier);
+  const base = idx >= 0 ? PLANS[idx] : PLANS[PLANS.length - 1];
+  const chain = PLANS.slice(0, (idx >= 0 ? idx : PLANS.length - 1) + 1);
+  const groups = chain.map((p) => ({
+    id: p.id,
+    label: CUSTOM_GROUP_LABELS[p.id] || p.name,
+    items: p.features.filter((f) => !f.isSection),
+  }));
   return {
     ...base,
     id: "custom",
@@ -545,7 +553,81 @@ function customPlan(cp) {
     highlight: true,
     trialDays: cp.trial ? cp.trial_days : 0,
     custom: true,
+    groups,
+    features: groups.flatMap((g) => g.items),
   };
+}
+
+function CustomPlanLayout({ plan, cadence, showDetail, loading, onSelect }) {
+  const headlinePrice = cadence === "annual" ? plan.annual / 12 : plan.monthly;
+  const hasTrial = !!plan.trialDays;
+  return (
+    <div className="space-y-6" data-testid="pricing-custom-grid">
+      <div className="relative rounded-3xl bg-slate-900 text-white border border-emerald-400/40 shadow-lg shadow-emerald-900/30" data-testid="pricing-card-custom">
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
+          <div className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[10px] font-bold uppercase tracking-widest px-3 py-1 shadow-lg">
+            <Star size={10} fill="currentColor" /> Your plan
+          </div>
+        </div>
+        <div className="p-6 sm:p-8 flex flex-col md:flex-row md:items-center gap-6 md:gap-10">
+          <div className="flex-1">
+            <div className="text-xl font-bold">{plan.name}</div>
+            <div className="text-[13px] mt-1 text-emerald-100/80">{plan.tagline}</div>
+            {hasTrial && (
+              <div className="mt-4 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-emerald-400/15 text-emerald-200 border border-emerald-400/30" data-testid="pricing-trial-custom">
+                <Star size={9} fill="currentColor" /> {plan.trialDays}-day free trial
+              </div>
+            )}
+            <div className="mt-4 text-[11px] uppercase tracking-widest font-semibold text-emerald-100/70" data-testid="pricing-seat-copy-custom">
+              {plan.seatCopy}
+            </div>
+          </div>
+          <div className="md:text-right md:min-w-[280px]">
+            <div className="flex items-end gap-1.5 md:justify-end">
+              <span className="text-4xl sm:text-5xl font-extrabold tracking-tight tabular-nums">{money(headlinePrice)}</span>
+              <span className="pb-1.5 text-sm font-medium text-emerald-100/70">/mo</span>
+            </div>
+            <div className="mt-1 text-[11px] text-emerald-100/60">
+              {cadence === "annual" ? <>Billed <b>{money(plan.annual)}</b>/year · 2 months free</> : <>Billed monthly · switch to annual anytime</>}
+            </div>
+            <button
+              type="button"
+              onClick={() => onSelect(plan)}
+              disabled={loading}
+              className="mt-4 w-full md:w-auto inline-flex items-center justify-center gap-2 rounded-full px-8 py-3 text-sm font-bold shadow-md transition-transform hover:shadow-lg hover:scale-[1.01] disabled:opacity-60 disabled:cursor-not-allowed bg-gradient-to-r from-emerald-500 to-teal-500 text-white"
+              data-testid="pricing-select-custom"
+            >
+              {loading ? <><Loader2 size={14} className="animate-spin" /> Redirecting to Stripe…</>
+                : hasTrial ? <>Start {plan.trialDays}-day free trial <ArrowRight size={14} /></>
+                : <>Get started <ArrowRight size={14} /></>}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-center text-[11px] uppercase tracking-widest font-bold text-emerald-700">Everything included</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 items-stretch">
+        {plan.groups.map((g) => (
+          <div key={g.id} className="rounded-3xl bg-white border border-slate-200 shadow-sm p-6" data-testid={`pricing-custom-group-${g.id}`}>
+            <div className="text-sm font-bold text-slate-900 mb-4">{g.label}</div>
+            <ul className="space-y-3">
+              {g.items.map((f, i) => (
+                <li key={i} className="flex items-start gap-2.5">
+                  <div className="mt-0.5 shrink-0 w-4 h-4 rounded-full inline-flex items-center justify-center bg-emerald-100 text-emerald-600">
+                    <Check size={11} strokeWidth={3} />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-semibold text-slate-800">{f.h}</div>
+                    {f.b && showDetail && <div className="text-[11px] leading-relaxed mt-0.5 text-slate-500">{f.b}</div>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 
