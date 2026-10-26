@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { ActivityModal } from "@/components/practice/ActivityModal";
 import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
+import { NewExpenseModal } from "@/components/practice/NewExpenseModal";
 import {
   Scale, Wallet, BadgeDollarSign, Receipt, UserPlus, Briefcase, CalendarDays,
   ClipboardList, FileText, Phone, MessageSquare, Clock, FileSignature,
@@ -43,14 +44,15 @@ const QUICK = [
   ["New Event", CalendarDays, "event", "Create events, meetings, or deadlines. Add reminders by Email, Popup, or SMS."],
   ["New Task", ClipboardList, "task", "Create a new task for yourself, another team member, or even your clients."],
   ["New Note", FileText, "note", "Add a note about any contact or matter."], ["New Call", Phone, "call", "Log the details of an inbound or outbound call."],
-  ["Send Message", MessageSquare], ["Track Time", Clock, "time", "Track your time against a contact and matter."], ["Add Expense", Wallet],
-  ["New Intake", FileSignature], ["New Invoice", FileInput], ["New Payment", CreditCard],
+  ["Send Message", MessageSquare], ["Track Time", Clock, "time", "Track your time against a contact and matter."], ["Add Expense", Wallet, "expense", "Add a hard or soft cost expense to a matter."],
+  ["New Intake", FileSignature], ["New Invoice", FileInput, "/practice/invoices/create", "Create an invoice for a contact or matter."], ["New Payment", CreditCard],
   ["New Flat Fee", Receipt],
 ];
 const GO = {
   event: (d) => ({ label: "Go to Calendar", to: "/practice/calendar" }), task: (d) => ({ label: "Go to Calendar", to: "/practice/calendar" }),
   note: (d) => ({ label: "Go to Activities", to: "/practice/activities?kind=note" }), call: (d) => ({ label: "Go to Activities", to: "/practice/activities?kind=call" }),
   time: (d) => ({ label: "Go to Time Entry", to: `/practice/time-entries/${d.id}` }),
+  expense: (d) => ({ label: "Go to Expenses", to: "/practice/expenses" }),
 };
 
 export const PracticeQuickCreate = () => {
@@ -77,6 +79,7 @@ export const PracticeQuickCreate = () => {
       ))}
     </div>
     {modal === "time" ? <NewTimeEntryModal onClose={() => setModal(null)} onSaved={saved("time")} />
+      : modal === "expense" ? <NewExpenseModal onClose={() => setModal(null)} onSaved={saved("expense")} />
       : <ActivityModal modal={modal} onClose={() => setModal(null)} onSaved={modal ? saved(modal) : undefined} />}
   </section>
   );

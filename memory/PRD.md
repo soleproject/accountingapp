@@ -1299,3 +1299,8 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 
 ## 2026-06 — Dashboard Quick Create squares
 - New Event / New Task / New Note / New Call / Track Time squares open their modals from the dashboard (hover tooltips added). After save: single top-right toast "Item saved successfully." for 5s with a "Go to Calendar / Activities / Time Entry" action button. Remaining squares (Send Message, Add Expense, New Intake, New Invoice, New Payment, New Flat Fee) still placeholders.
+
+## 2026-06 — Dashboard Add Expense / New Invoice + blank invoices
+- Quick Create "Add Expense" opens New Expense modal (toast → Go to Expenses). "New Invoice" (dashboard, Invoices +New, contact Invoices tab) → `/practice/invoices/create` tile page: One Invoice (green) / Multiple Invoices (placeholder) / Payment Plan (→ settings) + More Options (Trust Request / Recurring placeholders).
+- One Invoice → `POST /api/practice/invoices/blank` (optional contact/matter) → New Invoice editor in blank mode: Contact picker + Matter select, 3 placeholder time-entry rows, "+ Time Entry ▾" (Add unbilled time entries / New time entry). Save requires a contact.
+- Home dashboard tiles now real firm totals via `GET /api/practice/financials`; matter detail tiles use per-matter financials.

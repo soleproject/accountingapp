@@ -302,7 +302,14 @@ async def get_matter(matter_id: str, user: dict = Depends(_guard)):
     doc = await db.practice_matters.find_one({"id": matter_id, "owner_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Matter not found")
-    return {**(await _with_contact(doc, user)), "counts": await _counts(user["id"], matter_id=matter_id)}
+    return {**(await _with_contact(doc, user)), "counts": await _counts(user["id"], matter_id=matter_id),
+            "financials": (await _money(user["id"]))["matters"].get(matter_id, _ZERO)}
+
+
+@router.get("/financials")
+async def firm_financials(user: dict = Depends(_guard)):
+    sums = (await _money(user["id"]))["contacts"].values()
+    return {k: round(sum(s[k] for s in sums), 2) for k in _ZERO}
 
 
 @router.put("/matters/{matter_id}")
@@ -1041,7 +1048,7 @@ def _inv_totals(doc: dict) -> dict:
 
 
 async def _inv_out(doc: dict, user: dict) -> dict:
-    contact = await db.practice_contacts.find_one({"id": doc["contact_id"]}, {"_id": 0})
+    contact = await db.practice_contacts.find_one({"id": doc.get("contact_id") or "__none__"}, {"_id": 0})
     matters = await db.practice_matters.find({"id": {"$in": doc["matter_ids"]}}, {"_id": 0, "id": 1, "name": 1}).to_list(50)
     prof = await db.practice_profiles.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
     firm = {"name": user.get("company_name") or user.get("firm_name") or user.get("name", ""), "email": prof.get("email") or user.get("email", ""), "phone": prof.get("office_phone", "")}
@@ -1077,6 +1084,8 @@ async def save_invoice(invoice_id: str, body: dict, user: dict = Depends(_guard)
     if not doc:
         raise HTTPException(404, "Invoice not found")
     allowed = {k: v for k, v in body.items() if k in INVOICE_FIELDS}
+    if not (allowed.get("contact_id") or doc.get("contact_id")):
+        raise HTTPException(400, "Select a contact.")
     number = doc.get("number") or allowed.get("number")
     if not number:
         last = await db.practice_invoices.find({"owner_id": user["id"], "number": {"$ne": None}}, {"_id": 0, "number": 1}).sort("number", -1).to_list(1)
@@ -1102,8 +1111,27 @@ async def delete_invoice(invoice_id: str, user: dict = Depends(_guard)):
     return {"ok": True}
 
 
-INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids",
+INVOICE_FIELDS = ("template", "submit_for_approval", "date", "due_date", "discount", "time_entries", "expenses", "flat_fees", "number", "matter_ids", "contact_id",
                   "notes", "terms", "pay_operating", "pay_trust", "send_reminders", "add_unpaid", "add_interest")
+
+
+class PracticeInvoiceBlankIn(BaseModel):
+    contact_id: str = ""
+    matter_id: str = ""
+
+
+@router.post("/invoices/blank")
+async def invoice_blank(inp: PracticeInvoiceBlankIn, user: dict = Depends(_guard)):
+    now = datetime.now(timezone.utc)
+    doc = {"id": str(uuid.uuid4()), "owner_id": user["id"], "status": "Draft", "number": None, "blank": True,
+           "contact_id": inp.contact_id, "matter_ids": [inp.matter_id] if inp.matter_id else [], "template": "Default Invoice Template", "submit_for_approval": False,
+           "date": now.date().isoformat(), "due_date": (now + timedelta(days=29)).date().isoformat(), "discount": 0.0,
+           "time_entries": [], "expenses": [], "flat_fees": [], "tax1_id": "", "tax2_id": "", "tax_expenses": False, "paid": 0.0,
+           "notes": "", "terms": "", "pay_operating": True, "pay_trust": False, "send_reminders": True, "add_unpaid": False, "add_interest": False,
+           "created_at": now.isoformat(), "updated_at": now.isoformat()}
+    await db.practice_invoices.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
 
 
 @router.put("/invoices/{invoice_id}")

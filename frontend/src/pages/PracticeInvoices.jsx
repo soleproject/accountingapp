@@ -76,7 +76,7 @@ export default function PracticeInvoices() {
           <h1 className="text-3xl font-bold text-slate-800">Invoices</h1>
           <div className="flex-1" />
           <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50" data-testid="practice-invoices-manage-tax"><Settings2 size={14} /> Manage Sales Tax</button>
-          <button type="button" className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-invoices-new-btn"><Plus size={14} /> New <ChevronDown size={12} /></button>
+          <button type="button" onClick={() => nav("/practice/invoices/create")} className="inline-flex items-center gap-1.5 rounded-full bg-[#43A047] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#388E3C]" data-testid="practice-invoices-new-btn"><Plus size={14} /> New <ChevronDown size={12} /></button>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700" data-testid="practice-invoices-filters">
           <select className={`${sel} w-32`} defaultValue="All Invoices" data-testid="practice-invoices-type-filter"><option>All Invoices</option></select>

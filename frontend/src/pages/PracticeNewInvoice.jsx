@@ -7,6 +7,8 @@ import { api } from "@/lib/api";
 import { PracticeShell } from "@/components/practice/PracticeShell";
 import { Toggle, GreenButton } from "@/components/practice/forms";
 import { fromISO } from "@/components/practice/DateTimePicker";
+import { ContactPicker } from "@/components/practice/ContactPicker";
+import { NewTimeEntryModal } from "@/components/practice/NewTimeEntryModal";
 
 const inp = "w-full h-10 rounded border border-slate-300 bg-white px-3 text-[15px] text-slate-700 outline-none focus:border-[#1E88E5] placeholder:text-slate-400";
 const usd = (n) => `$${Number(n || 0).toFixed(2)}`;
@@ -43,18 +45,36 @@ export default function PracticeNewInvoice() {
   const isEdit = useLocation().pathname.endsWith("/edit");
   const [inv, setInv] = useState(null);
   const [matters, setMatters] = useState([]);
-  useEffect(() => { if (inv?.contact_id) api.get("/practice/matters", { params: { status: "All", contact_id: inv.contact_id } }).then(r => setMatters(r.data)).catch(() => {}); }, [inv?.contact_id]);
+  const [contacts, setContacts] = useState([]);
+  const [teMenu, setTeMenu] = useState(false);
+  const [newTe, setNewTe] = useState(false);
+  const blank = !!inv?.blank && !isEdit;
+  useEffect(() => { if (blank) api.get("/practice/contacts", { params: { status: "All" } }).then(r => setContacts(r.data)).catch(() => {}); }, [blank]);
+  useEffect(() => { if (inv?.contact_id) api.get("/practice/matters", { params: { status: "All", contact_id: inv.contact_id } }).then(r => setMatters(r.data)).catch(() => {}); else setMatters([]); }, [inv?.contact_id]);
   useEffect(() => { api.get(`/practice/invoices/${id}`).then(r => setInv(r.data)).catch(() => { toast.error("Invoice not found"); nav("/practice/time-entries"); }); }, [id, nav]);
   const patch = async (data) => {
     setInv(p => { const n = { ...p, ...data }; const sub = [...n.time_entries, ...(n.expenses || []), ...(n.flat_fees || [])].reduce((a, t) => a + (t.sub || 0), 0); n.total = +(sub * (1 - (n.discount || 0) / 100)).toFixed(2); n.balance = +(n.total - (n.paid || 0)).toFixed(2); return n; });
     try { await api.put(`/practice/invoices/${id}`, data); } catch { toast.error("Could not save"); }
   };
   const removeEntry = (eid) => patch({ time_entries: inv.time_entries.filter(t => t.id !== eid) });
+  const teRow = (te) => ({ id: te.id, item: te.item || "Time", description: te.description || "", date: te.date, billed_by: te.billed_by || "", hours: te.hours || 0, rate: te.hourly_rate || te.rate || 0, sub: te.total || 0 });
+  const addUnbilled = async () => {
+    setTeMenu(false);
+    if (!inv.contact_id) return toast.error("Select a contact first.");
+    try {
+      const r = await api.get("/practice/time-entries/all", { params: { contact_id: inv.contact_id, ...(inv.matter_ids[0] ? { matter_id: inv.matter_ids[0] } : {}) } });
+      const have = new Set(inv.time_entries.map(t => t.id));
+      const add = r.data.filter(t => t.billing_status === "Billable" && !have.has(t.id)).map(teRow);
+      if (!add.length) return toast.info("No unbilled time entries found.");
+      patch({ time_entries: [...inv.time_entries, ...add] }); toast.success(`${add.length} time entr${add.length === 1 ? "y" : "ies"} added.`);
+    } catch { toast.error("Could not load time entries"); }
+  };
   const [saving, setSaving] = useState(false);
   const save = async () => {
+    if (!inv.contact_id) return toast.error("Select a contact.");
     setSaving(true);
     try { const r = await api.post(`/practice/invoices/${id}/save`, inv); toast.success("Invoice saved."); nav(`/practice/invoices/${r.data.id}`); }
-    catch { toast.error("Could not save invoice"); } finally { setSaving(false); }
+    catch (e) { toast.error(e?.response?.data?.detail || "Could not save invoice"); } finally { setSaving(false); }
   };
 
   return (
@@ -70,12 +90,13 @@ export default function PracticeNewInvoice() {
               <div data-testid="practice-inv-linked">
                 <H>Linked To</H>
                 <div className="grid grid-cols-[230px_1fr] gap-y-3 mt-2">
-                  {isEdit ? <>
+                  {isEdit || blank ? <>
                     <Label required>Contact</Label>
-                    <div className="relative"><select value={inv.contact_id} readOnly className={`${inp} appearance-none`} data-testid="practice-inv-contact"><option value={inv.contact_id}>{inv.contact_name}</option></select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
+                    {blank ? <div className="relative" data-testid="practice-inv-contact-picker"><ContactPicker value={inv.contact_id} onChange={(cid) => { const c = contacts.find(x => x.id === cid); setInv(p => ({ ...p, contact_name: c?.display_name || "" })); patch({ contact_id: cid, matter_ids: [], matters: [] }); }} contacts={contacts} onCreated={(c) => setContacts(l => [c, ...l])} testId="practice-inv-contact" /></div>
+                      : <div className="relative"><select value={inv.contact_id} readOnly className={`${inp} appearance-none`} data-testid="practice-inv-contact"><option value={inv.contact_id}>{inv.contact_name}</option></select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>}
                     <Label help>Matter</Label>
                     <div className="relative"><select value={inv.matter_ids[0] || ""} onChange={e => patch({ matter_ids: e.target.value ? [e.target.value] : [], matters: matters.filter(m => m.id === e.target.value) })} className={`${inp} appearance-none`} data-testid="practice-inv-matter-select">
-                      <option value="">None</option>{matters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
+                      <option value="">{blank ? "Select Matter..." : "None"}</option>{matters.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown size={14} className="absolute right-3 top-3 text-slate-500 pointer-events-none" /></div>
                   </> : <>
                     <Label>Contact</Label><div className="pt-2.5"><button type="button" onClick={() => nav(`/practice/contacts/${inv.contact_id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid="practice-inv-contact">{inv.contact_name}</button></div>
                     <Label>Matter</Label><div className="pt-2.5 space-x-2">{inv.matters.map(m => <button key={m.id} type="button" onClick={() => nav(`/practice/matters/${m.id}`)} className="text-[15px] font-semibold text-[#1E88E5] hover:underline" data-testid={`practice-inv-matter-${m.id}`}>{m.name}</button>)}</div>
@@ -115,10 +136,24 @@ export default function PracticeNewInvoice() {
                       <td className="px-3 py-5" /><td className="px-3 py-5" />
                     </tr>
                   ))}
-                  {inv.time_entries.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-sm text-slate-500">No rows</td></tr>}
+                  {inv.time_entries.length === 0 && (blank ? [0, 1, 2].map(i => (
+                    <tr key={i} className={`text-[15px] text-slate-700 ${i % 2 ? "" : "bg-slate-50"}`} data-testid={`practice-inv-te-placeholder-${i}`}>
+                      <td className="px-3 py-5 whitespace-nowrap"><span className="inline-flex items-center gap-2 text-slate-400"><GripVertical size={14} /><Trash2 size={13} /></span></td>
+                      <td colSpan={4} /><td className="px-3 py-5 text-right">0</td><td className="px-3 py-5 text-right">$0.00</td><td className="px-3 py-5 text-right">$0.00</td><td /><td />
+                    </tr>
+                  )) : <tr><td colSpan={10} className="py-8 text-center text-sm text-slate-500">No rows</td></tr>)}
                 </tbody>
               </table>
-              <button type="button" className="mt-4 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-inv-add-time-entry">+ Time Entry <ChevronDown size={12} /></button>
+              <div className="relative inline-block">
+                <button type="button" onClick={() => setTeMenu(v => !v)} className="mt-4 inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-inv-add-time-entry">+ Time Entry <ChevronDown size={12} /></button>
+                {teMenu && <>
+                  <div className="fixed inset-0 z-20" onClick={() => setTeMenu(false)} />
+                  <div className="absolute left-0 top-full z-30 mt-1 w-60 rounded border border-slate-200 bg-white py-1 shadow-xl text-sm" data-testid="practice-inv-te-menu">
+                    <button type="button" onClick={addUnbilled} className="w-full px-3 py-1.5 text-left hover:bg-slate-50" data-testid="practice-inv-te-add-unbilled">Add unbilled time entries</button>
+                    <button type="button" onClick={() => { setTeMenu(false); setNewTe(true); }} className="w-full px-3 py-1.5 text-left hover:bg-slate-50" data-testid="practice-inv-te-new">New time entry</button>
+                  </div>
+                </>}
+              </div>
             </div>
 
             <LineTable title="Expenses" cols={["Expenses", "Description", "Date", "Billed By", "Qty", "Price", "Sub", "Tax", "Tax"]} testId="practice-inv-expenses" addLabel="+ Expense"
@@ -175,6 +210,7 @@ export default function PracticeNewInvoice() {
             <button type="button" className="inline-flex items-center gap-1.5 rounded-full border border-slate-300 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50" data-testid="practice-inv-preview-email-btn"><Mail size={14} /> Preview email to client</button>
           </div>
         )}
+        {newTe && <NewTimeEntryModal task={{ contact_id: inv?.contact_id || "", matter_id: inv?.matter_ids?.[0] || "" }} onClose={() => setNewTe(false)} onSaved={(te) => { setNewTe(false); if (te?.id) patch({ time_entries: [...inv.time_entries, teRow(te)] }); }} />}
       </div>
     </PracticeShell>
   );

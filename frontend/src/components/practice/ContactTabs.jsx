@@ -94,7 +94,7 @@ export function InvoicesTab({ contactId }) {
   const shown = (rows || []).filter(r => status === "Any" || r.status === status).filter(r => `I-${r.number} ${r.matters.map(m => m.name).join(" ")}`.toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="space-y-4" data-testid="practice-contact-invoices">
-      <Bar><Can feature="Invoices" action="create"><button type="button" onClick={() => nav(`/practice/invoices/new?contact=${contactId}`)} className={green} data-testid="practice-ci-new"><Plus size={14} /> New Invoice</button></Can></Bar>
+      <Bar><Can feature="Invoices" action="create"><button type="button" onClick={() => nav(`/practice/invoices/create?contact=${contactId}`)} className={green} data-testid="practice-ci-new"><Plus size={14} /> New Invoice</button></Can></Bar>
       <Filters>
         <select className={`${sel} w-32 font-semibold`} defaultValue="All Invoices"><option>All Invoices</option></select><PillFilter testId="practice-ci-bill-date">Bill Date</PillFilter><PillFilter testId="practice-ci-range">All Time</PillFilter>
         <span>Status</span><select className={`${sel} w-28`} value={status} onChange={e => setStatus(e.target.value)} data-testid="practice-ci-status"><option>Any</option><option>Saved</option><option>Sent</option><option>Paid</option></select>
