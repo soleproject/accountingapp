@@ -8,6 +8,7 @@ import { Download, Loader2, ArrowRightCircle, ChevronLeft, ChevronDown, ChevronR
 import { ManualTxnModal } from "@/pages/Transactions";
 import { RecordPaymentDialog } from "@/pages/SalesTax";
 import ReclassifyPicker from "@/components/ReclassifyPicker";
+import CategorySideRepairDialog from "@/components/CategorySideRepairDialog";
 import QboReconciliationPanel from "@/components/QboReconciliationPanel";
 import ReportDateRangePicker from "@/components/ReportDateRangePicker";
 import { toast } from "sonner";
@@ -27,6 +28,7 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
   const account = data.account || {};
   const [selected, setSelected] = useState(() => new Set(rows.map(r => r.id)));
   const [moving, setMoving] = useState(false);
+  const [repairOpen, setRepairOpen] = useState(false);
   const [applying, setApplying] = useState(false);
   const [accounts, setAccounts] = useState([]);
   const [contacts, setContacts] = useState([]);
@@ -122,16 +124,31 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
     setSelected(prev => prev.size === rows.length ? new Set() : new Set(rows.map(t => t.id)));
   };
 
+  const isBankLike = (a) => {
+    const tags = [a?.subtype, a?.detail_type].map(x => String(x || "").toLowerCase());
+    return tags.some(t => ["cash_and_bank", "credit_card", "bank", "checking", "savings"].includes(t)) || !!a?.plaid_account_id;
+  };
+
   const doMove = async (targetId) => {
     if (selected.size === 0 || !targetId) return;
     setApplying(true);
     try {
-      await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
-        transaction_ids: Array.from(selected),
-        category_account_id: targetId,
-      });
       const to = accounts.find(a => a.id === targetId);
-      toast.success(`Moved ${selected.size} transaction${selected.size === 1 ? "" : "s"} to ${to?.name || "account"}`);
+      const ids = Array.from(selected);
+      if (isBankLike(to)) {
+        const { data: res } = await api.post(`/companies/${currentId}/transactions/bulk-rehome`, {
+          transaction_ids: ids,
+          bank_account_id: targetId,
+        });
+        toast.success(`Moved ${res.updated} transaction${res.updated === 1 ? "" : "s"} onto ${to?.name || "account"}`
+          + (res.recategorized ? ` · ${res.recategorized} sent back to review for a category` : ""));
+      } else {
+        await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+          transaction_ids: ids,
+          category_account_id: targetId,
+        });
+        toast.success(`Moved ${selected.size} transaction${selected.size === 1 ? "" : "s"} to ${to?.name || "account"}`);
+      }
       setMoving(false);
       onReload?.();
     } catch (e) {
@@ -269,6 +286,31 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
         </div>
       </div>
 
+      {data.account_is_bank_like && data.category_side_count > 0 && (
+        <div data-testid="acctdetail-category-side-warning" className="mb-4 flex items-start gap-2 px-3 py-2.5 rounded-md border border-amber-300 bg-amber-50 text-xs text-amber-900">
+          <Info size={14} className="mt-0.5 shrink-0" />
+          <div className="flex-1">
+            <b>{data.category_side_count} transaction{data.category_side_count === 1 ? "" : "s"}</b> {data.category_side_count === 1 ? "is" : "are"} categorized <i>to</i> this account instead of living on it, so the running balance moves the wrong way on those rows.
+            Usually from an earlier "Move to another account". Only payments made <i>from another account</i> should be categorized to a card.
+          </div>
+          <button
+            data-testid="acctdetail-category-side-fix"
+            onClick={() => setRepairOpen(true)}
+            className="shrink-0 text-xs font-medium px-2.5 py-1 rounded border border-amber-400 bg-white text-amber-900 hover:bg-amber-100"
+          >
+            Review &amp; fix
+          </button>
+        </div>
+      )}
+      {repairOpen && (
+        <CategorySideRepairDialog
+          companyId={currentId}
+          account={account}
+          fmtMoney={fmtMoney}
+          onClose={() => setRepairOpen(false)}
+          onDone={() => { setRepairOpen(false); onReload?.(); }}
+        />
+      )}
       <div className="mb-4 flex items-center gap-2 flex-wrap px-3 py-2 bg-slate-50 rounded-md border border-slate-200">
         <button
           data-testid="acctdetail-move-selected"

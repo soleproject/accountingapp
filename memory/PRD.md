@@ -1320,3 +1320,18 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Errors are client-safe: `AIReviewUnavailable` message or generic 'retry or use Veryfi OCR'; provider detail only in logs (`statements.py::_run_ai_import`).
 - Verified: synthetic 1-page Mercury PDF → bank/period/balances + 5 rows extracted, recon ties.
 - Still on dead OPENAI_API_KEY: `client_review_engine.py` (3 call sites) and `llm_client.py` default provider=openai. Migrate or rotate key.
+
+## 2026-11-06 — All LLM traffic moved to Emergent Universal Key
+- `llm_client.py`: when EMERGENT_LLM_KEY is set, stream_message/send_message go through emergentintegrations (provider/model preserved; history supported on stream). Direct OpenAI/Anthropic SDK paths kept only as fallback for non-Emergent hosts.
+- `client_review_engine.py`: 3 vision functions use `_vision_json` (gpt-4o via Universal Key); usage logged via `_record_vision_usage`.
+- Typo model `claude-haiku-4-5-20250929` → `claude-haiku-4-5-20251001`; ai_usage prices added for claude-sonnet-4-6 / claude-haiku-4-5.
+- OPENAI_API_KEY no longer used anywhere (reviewv2 already preferred EMERGENT key). Tested: iteration_110 — 7/7 endpoints, usage rows recorded, no provider errors.
+- Pre-existing (not fixed): insights chat has no multi-turn memory; 'last month' date rule missing in insights prompt; voice parse/plan log feature='ai-unknown'; resolve-category shares 'ai-review' label.
+
+## 2026-11-06 — Account Detail: inverted running balance on credit cards (category-side rows)
+- Cause: `reports.compute_account_detail._row_delta` flips sign for rows whose `category_account_id` is the account (correct for payments *from* another account) — but "Move all to another account" on Account Detail called `bulk-reclassify`, which *categorizes* rows to the card instead of re-homing them, so whole blocks of charges/payments ran inverted and footer totals disagreed.
+- Fix 1 (code): `POST /companies/{cid}/transactions/bulk-rehome` sets `bank_account_id` (+name/code); target must be bank/cash/credit-card (`is_bank_like_account`: subtype/detail_type in cash_and_bank/credit_card/bank/checking/savings or plaid_account_id). ReportView `doMove` picks rehome vs reclassify by target type. Rows whose category was the target itself → Uncategorized (6999/4999) + needs_review.
+- Fix 2 (repair): `GET /companies/{cid}/accounts/{aid}/category-side-rows` (dry run, grouped by current bank_account_id, flags missing/real-bank sources) and `POST .../rehome-category-side` {source_bank_account_ids}. Undo snapshot via bulk_undo on both.
+- Fix 3 (guard): report returns `category_side_count` + `account_is_bank_like`; ReportView shows amber banner + `CategorySideRepairDialog` (components/CategorySideRepairDialog.jsx).
+- Verified in preview on 'Michael C 4 AI Import, LLC' Mercury card (360 txns): reproduced -7,085.89 inversion, repair → balance -4,364.16 == sum, banner clears.
+- For Michelle (C2C Connect, Mercury ···8828, 996 txns): after publish open Account Detail → Review & fix → check groups → apply; then AI-categorize the rows sent to review.

@@ -43,7 +43,9 @@ LLM_PRICES_USD_PER_1M_TOKENS: dict[str, dict[str, float]] = {
     "gpt-5-mini":      {"input": 0.25, "output": 2.00},
     # Anthropic
     "claude-sonnet-4-5-20250929": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-4-6":          {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001":  {"input": 1.00, "output": 5.00},
+    "claude-haiku-4-5":           {"input": 1.00, "output": 5.00},
 }
 
 # Flat-rate services — cost per unit in USD.

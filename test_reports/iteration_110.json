@@ -1,0 +1,39 @@
+{
+  "summary": "E2E check of the move to the Emergent Universal Key (llm_client -> emergentintegrations). All AI endpoints I exercised over HTTP returned real LLM output with no 401 or 500: insights chat stream (2 turns), reviewv2 ai-propose, ai/resolve-category, voice parse (gpt-5-mini), voice plan (claude-haiku-4-5-20251001), admin usage, and the statements imports list as pro. Each call wrote an ai_usage_events row with provider openai or anthropic, non-zero tokens and non-zero cost. I scanned 1786 backend.err.log lines from the test window: none matched 'Invalid model name', invalid_api_key, ChatError, Traceback or 'no price for model'. The frontend Insights chat streamed an answer with no error toast. I ran it as pro@axiom.ai because client@axiom.ai no longer has access to a Skyward company (see data note). Two problems with how the features behave: insights chat keeps no history across turns, and gpt-4o-mini resolved 'last month' to Oct 2023.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/companies/{cid}/ai/insights/ask/stream (and /ask)", "issue": "No multi-turn memory. event_gen calls chat.send_message() with a fresh LlmChat each request, and nothing loads prior turns from insights_chat_log for the session_id. The follow-up 'And the month before that?' (same session_id) got a generic reply with chart_id=null. The universal history support in llm_client is only used by stream_message(history=...), which this endpoint never calls."},
+      {"endpoint": "POST /api/companies/{cid}/ai/insights/ask/stream", "issue": "For 'What were my biggest expenses last month?', gpt-4o-mini returned chart_params for 2023-10-01..2023-10-31 (empty chart, total 0), even though the system prompt says 'Today is 2026-11-06'. The prompt's date rules cover 'this month', 'last quarter' and 'YTD' but not 'last month'. Also, _SYSTEM is built at import time, so the 'Today is' date goes stale on servers that stay up past midnight."},
+      {"endpoint": "POST /api/voice/actions/parse, /api/voice/actions/plan", "issue": "Usage rows are recorded with feature='ai-unknown' because the LlmChat in voice_actions._run_parser and voice_plan._run_planner gets no feature or company label. /parse returns intent 'unknown' for 'create an invoice...' because invoices are not in SUPPORTED_INTENTS. That is by design, not an LLM failure. /plan returned a structured task."},
+      {"endpoint": "POST /api/companies/{cid}/ai/resolve-category", "issue": "ai_category_resolver logs usage as feature='ai-review' (gpt-4o), the same label as the statement AI Review import. Per-feature cost reports mix the two."},
+      {"endpoint": "background jobs (company 23053de6 '132 LLC')", "issue": "In about 90 seconds after the backend restart (21:35:03 to 21:36:33 UTC), 210 resolve-contact calls and 69 ai-categorize calls (gpt-4o-mini) fired for this one company. My tests did not trigger them. Total cost was about $0.075, so no cost problem, but this looks like a boot-time sweep that makes one LLM call per row. Worth confirming it is intended now that it bills the Universal Key."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "client@axiom.ai login -> Ask about my data", "issue": "Blocked by a data or credentials mismatch, not a code bug. client@axiom.ai now has only 'Bright Beans Coffee Co.' (1829a9eb, owner) and 'Michael Co 2, LLC'. No company named Skyward exists in the DB. Bright Beans shows the 'Activate your subscription' paywall modal over the page, so the Insights panel can't be opened. Verified the same panel as pro@axiom.ai instead (Michael Co 3b LLC): the answer streamed and there was no toast.", "affected_selectors": ["[data-testid='sidebar-insights-chat-btn']", "[data-testid='insights-chat-panel']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_universal_key_llm_endpoints.py", "/app/test_reports/pytest/pytest_universal_key.xml"],
+  "action_items": [
+    "Insights chat: load the last N {question, answer} pairs from insights_chat_log for the session_id and send them as history, e.g. via stream_message(history=...) or a send path that accepts history. Otherwise follow-up questions lose context.",
+    "Insights prompt: add a rule mapping 'last month' to the previous calendar month, and build the 'Today is' line per request (call _today() inside _system_prompt()) instead of at import time.",
+    "Pass feature= and company_id= to the LlmChat in voice_actions._run_parser and voice_plan._run_planner (currently logged as 'ai-unknown'). Give ai_category_resolver its own feature label instead of 'ai-review'.",
+    "Update /app/memory/test_credentials.md: client@axiom.ai no longer owns a 'Skyward Sparks, LLC' company. It owns Bright Beans Coffee Co., which is paywalled in the UI.",
+    "Optional: check the boot-time burst of about 280 resolve-contact and ai-categorize calls for company 23053de6 right after the backend restart."
+  ],
+  "critical_code_review_comments": [
+    "llm_client._universal_chat sets both system_message and initial_messages (which already contain the system message). emergentintegrations uses initial_messages when it is given, so this works, but system_message is redundant.",
+    "_send_universal ignores history, so send_message cannot do multi-turn. Callers that need history must use stream_message.",
+    "insights_ask_stream sends any LLM exception text to the client (str(e)) through an SSE error event. Consider client-safe wording, as was already done in statements._run_ai_import."
+  ],
+  "updated_files": ["/app/backend/tests/test_universal_key_llm_endpoints.py"],
+  "success_rate": {"backend": "100% (7/7 HTTP tests pass; insights multi-turn passes on status but the follow-up answer has no context)", "frontend": "100% (Insights chat via pro@axiom.ai; the client@axiom.ai path is blocked by the paywalled company)"},
+  "seed_data_creation": "None. Read-only and AI-proposal endpoints only: reviewv2 ai-propose and resolve-category write nothing to the ledger. voice parse wrote one voice_parse_cache entry; no invoices or tasks were committed. 2 insights_chat_log rows plus 1 from the UI.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Universal Key LLM routing works end to end. The Skyward company id used in tests is actually 1829a9eb (Bright Beans Coffee Co.): the client user has no Skyward company. Use pro@axiom.ai for UI AI checks. Admin usage endpoint: GET /api/admin/usage?range=7d|30d|90d|month|all. Regression file: tests/test_universal_key_llm_endpoints.py. Each run makes about 6 LLM calls."
+}

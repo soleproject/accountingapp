@@ -3216,8 +3216,13 @@ async def compute_account_detail(company_id: str, account_id: str,
     # Merge txn rows + JE rows, sort oldest → newest so the running balance
     # accumulates in ledger order.
     all_rows: list[dict] = []
+    category_side_count = 0
+    _tags = {str(account.get(k) or "").lower() for k in ("subtype", "detail_type")}
+    _bank_like = bool(_tags & {"cash_and_bank", "credit_card"}) or bool(account.get("plaid_account_id"))
     for t in filtered:
         delta, disp_amt, matched_split = _row_delta(t)
+        if _bank_like and matched_split is None and t.get("bank_account_id") not in acct_id_set and t.get("account_id") not in acct_id_set:
+            category_side_count += 1
         row = {
             "id": t.get("id"),
             "date": t.get("date"),
@@ -3294,6 +3299,8 @@ async def compute_account_detail(company_id: str, account_id: str,
         "count": len(rows),
         "sum_amount": round(sum(r.get("amount") or 0.0 for r in rows), 2),
         "balance": round(running, 2),
+        "category_side_count": category_side_count,
+        "account_is_bank_like": _bank_like,
         "period_start": start,
         "period_end": end,
         "report_style": resolve_report_style(company),

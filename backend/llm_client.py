@@ -3,7 +3,9 @@
 provider selected by env var so the same code runs on Emergent OR any
 other host (Railway, Fly, self-hosted, etc.).
 
-Selection is done via `LLM_PROVIDER` — one of:
+If `EMERGENT_LLM_KEY` is set every call goes through the Emergent
+Universal Key (emergentintegrations) with the caller's provider/model
+unchanged. Otherwise selection is done via `LLM_PROVIDER` — one of:
     openai      — default. Requires OPENAI_API_KEY. Model set via
                   `LLM_MODEL` (e.g. gpt-4o-mini, gpt-4o).
     anthropic   — Requires ANTHROPIC_API_KEY. Model set via `LLM_MODEL`
@@ -80,6 +82,20 @@ def _anthropic():
         from anthropic import AsyncAnthropic
         _anthropic_client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     return _anthropic_client
+
+
+def _universal_key() -> str:
+    return os.environ.get("EMERGENT_LLM_KEY") or ""
+
+
+def _history_messages(system: str, history: list | None) -> list[dict]:
+    messages = [{"role": "system", "content": system}]
+    for m in (history or []):
+        role = m.get("role")
+        content = m.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -162,6 +178,10 @@ class LlmChat:
         # conversations keep state (e.g. AI Fixed Asset flow remembering
         # $350k / May 15 / $100k down across follow-up messages).
         await self._preflight_cap_check()
+        if _universal_key():
+            async for ev in self._stream_universal(msg.text, history):
+                yield ev
+            return
         provider = self._resolve_provider()
         if provider == "anthropic":
             async for ev in self._stream_anthropic(msg.text, history):
@@ -169,6 +189,45 @@ class LlmChat:
         else:
             async for ev in self._stream_openai(msg.text, history):
                 yield ev
+
+    # ------------------------------------------------------------------
+    # Universal Key (emergentintegrations) — used whenever EMERGENT_LLM_KEY
+    # is set; honours the caller's provider/model unchanged.
+    # ------------------------------------------------------------------
+    def _universal_chat(self, history: list | None):
+        from emergentintegrations.llm.chat import LlmChat as _ELlmChat
+        return _ELlmChat(
+            api_key=_universal_key(), session_id=self.session_id or "stateless",
+            system_message=self.system,
+            initial_messages=_history_messages(self.system, history),
+        ).with_model(self.provider, self.model)
+
+    async def _stream_universal(self, text: str, history: list | None = None):
+        from emergentintegrations.llm.chat import (
+            UserMessage as _EUserMessage, TextDelta as _ETextDelta, StreamDone as _EStreamDone)
+        chat = self._universal_chat(history)
+        usage = None
+        async for ev in chat.stream_message(_EUserMessage(text=text)):
+            if isinstance(ev, _ETextDelta):
+                if ev.content:
+                    yield TextDelta(content=ev.content)
+            elif isinstance(ev, _EStreamDone):
+                usage = ev.usage
+                break
+        await self._record_usage(self.provider,
+                                 int(getattr(usage, "input_tokens", 0) or 0),
+                                 int(getattr(usage, "output_tokens", 0) or 0))
+        yield StreamDone()
+
+    async def _send_universal(self, text: str) -> str:
+        from emergentintegrations.llm.chat import UserMessage as _EUserMessage
+        chat = self._universal_chat(None)
+        resp = await chat.send_message_with_tools(_EUserMessage(text=text))
+        usage = resp.usage
+        await self._record_usage(self.provider,
+                                 int(getattr(usage, "input_tokens", 0) or 0),
+                                 int(getattr(usage, "output_tokens", 0) or 0))
+        return resp.content or ""
 
     async def _stream_openai(self, text: str, history: list | None = None):
         client = _openai()
@@ -236,6 +295,8 @@ class LlmChat:
     # ------------------------------------------------------------------
     async def send_message(self, msg: UserMessage) -> str:
         await self._preflight_cap_check()
+        if _universal_key():
+            return await self._send_universal(msg.text)
         provider = self._resolve_provider()
         if provider == "anthropic":
             client = _anthropic()
