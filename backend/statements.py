@@ -2038,8 +2038,9 @@ async def _run_ai_import(cid, import_id, file_bytes, filename, content_type, acc
             file_bytes, filename, content_type, account_kind_hint, _progress)
     except Exception as e:  # noqa: BLE001
         logging.getLogger(__name__).exception("ai_review import failed cid=%s import=%s", cid, import_id)
+        msg = str(e) if isinstance(e, statement_ai_engine.AIReviewUnavailable) else "AI Review could not process this statement — retry or import with Veryfi OCR"
         await db.statement_imports.update_one(
-            {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {e}", "updated_at": now_iso()}})
+            {"id": import_id}, {"$set": {"status": "failed", "error": f"AI Review: {msg}", "updated_at": now_iso()}})
         return
     review = doc["ai_review"]
     page_texts = review.pop("page_texts", None)

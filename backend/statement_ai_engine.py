@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import date, datetime
 
 logger = logging.getLogger("axiom.statement_ai")
@@ -106,27 +107,48 @@ def _content_for(pages: list[dict], intro: str, mode: str = "raw") -> list[dict]
 
 
 # ---------------------------------------------------------------- llm
+class AIReviewUnavailable(RuntimeError):
+    """Client-safe failure; the provider detail is logged, not shown."""
+
+
 def _client():
-    from openai import AsyncOpenAI
-    key = os.environ.get("OPENAI_API_KEY") or ""
+    key = os.environ.get("EMERGENT_LLM_KEY") or ""
     if not key:
-        raise RuntimeError("OPENAI_API_KEY is not configured")
-    return AsyncOpenAI(api_key=key)
+        raise AIReviewUnavailable("AI Review is not configured on this server")
+    return key
 
 
 class _Truncated(Exception):
     pass
 
 
-async def _ask_json(client, system: str, content: list[dict], *, max_tokens: int = 4096) -> dict:
-    resp = await client.chat.completions.create(
-        model=MODEL, temperature=0, max_tokens=max_tokens,
-        response_format={"type": "json_object"},
-        messages=[{"role": "system", "content": system}, {"role": "user", "content": content}],
-    )
-    if resp.choices[0].finish_reason == "length":
+def _split_content(content: list[dict]) -> tuple[str, list]:
+    from emergentintegrations.llm.chat import ImageContent
+    texts, images = [], []
+    for part in content:
+        if part["type"] == "text":
+            texts.append(part["text"])
+        else:
+            images.append(ImageContent(image_base64=part["image_url"]["url"].split(",", 1)[1]))
+    if images:
+        texts.append(f"{len(images)} page image(s) are attached in the order labelled above.")
+    return "\n\n".join(texts), images
+
+
+async def _ask_json(api_key: str, system: str, content: list[dict], *, max_tokens: int = 4096) -> dict:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ChatError
+    text, images = _split_content(content)
+    chat = (LlmChat(api_key=api_key, session_id=f"stmt-{uuid.uuid4()}", system_message=system)
+            .with_model("openai", MODEL)
+            .with_params(temperature=0, max_tokens=max_tokens, response_format={"type": "json_object"}))
+    try:
+        resp = await chat.send_message_with_tools(UserMessage(text=text, file_contents=images))
+    except ChatError as e:
+        logger.error("statement_ai: provider call failed: %s", e)
+        raise AIReviewUnavailable("AI Review is temporarily unavailable — retry in a few minutes or import with Veryfi OCR") from e
+    if resp.finish_reason == "length":
         raise _Truncated()
-    raw = (resp.choices[0].message.content or "{}").strip()
+    raw = (resp.content or "{}").strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:

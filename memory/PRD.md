@@ -1314,3 +1314,9 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Fix: kind registered; `_send_invite` raises 502 on non-sent; create returns `email_status`/`email_error` and UI toasts the real outcome; resend now surfaces errors.
 - Verified in preview: resend to michael+stally@bigsaas.ai → communications row status=sent with Resend id.
 - Preview test accounts: see test_credentials.md (SmartTally section). Page: /share?tab=clients.
+
+## 2026-10-26 — AI Review statement import moved to Universal Key
+- Prod failure: OpenAI 401 invalid_api_key (OPENAI_API_KEY dead, also 401 from preview). `statement_ai_engine.py` now uses emergentintegrations LlmChat (openai/gpt-4o unchanged, temperature 0, json_object, max_tokens) via EMERGENT_LLM_KEY; finish_reason=length still triggers chunk split.
+- Errors are client-safe: `AIReviewUnavailable` message or generic 'retry or use Veryfi OCR'; provider detail only in logs (`statements.py::_run_ai_import`).
+- Verified: synthetic 1-page Mercury PDF → bank/period/balances + 5 rows extracted, recon ties.
+- Still on dead OPENAI_API_KEY: `client_review_engine.py` (3 call sites) and `llm_client.py` default provider=openai. Migrate or rotate key.
