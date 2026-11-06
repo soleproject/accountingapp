@@ -1335,3 +1335,4 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Fix 3 (guard): report returns `category_side_count` + `account_is_bank_like`; ReportView shows amber banner + `CategorySideRepairDialog` (components/CategorySideRepairDialog.jsx).
 - Verified in preview on 'Michael C 4 AI Import, LLC' Mercury card (360 txns): reproduced -7,085.89 inversion, repair → balance -4,364.16 == sum, banner clears.
 - For Michelle (C2C Connect, Mercury ···8828, 996 txns): after publish open Account Detail → Review & fix → check groups → apply; then AI-categorize the rows sent to review.
+- Root cause of the ghost account: `POST /accounts/{src}/merge-into` only rewrote `category_account_id`/splits/JE lines and never `bank_account_id`/`account_id`, so merging two bank/card accounts left bank-side rows pointing at a deleted account. Fixed (moved.bank_side_transactions). Verified via API in preview.

@@ -356,6 +356,23 @@ async def merge_accounts(
     )
     moved["transactions"] = r.modified_count
 
+    # 2b. Transactions that LIVE on the source (bank/card side). Without
+    # this, merging two bank/card accounts leaves rows pointing at a
+    # deleted account and the target's running balance runs inverted.
+    r = await db.transactions.update_many(
+        {"company_id": cid, "bank_account_id": source_id},
+        {"$set": {"bank_account_id": inp.target_account_id,
+                  "bank_account_name": tgt.get("name"),
+                  "bank_account_code": tgt.get("code"),
+                  "updated_at": now_iso()}},
+    )
+    moved["bank_side_transactions"] = r.modified_count
+    r = await db.transactions.update_many(
+        {"company_id": cid, "account_id": source_id},
+        {"$set": {"account_id": inp.target_account_id, "updated_at": now_iso()}},
+    )
+    moved["bank_side_transactions"] += r.modified_count
+
     # 3. Split lines inside transactions.
     r = await db.transactions.update_many(
         {"company_id": cid, "splits.category_account_id": source_id},
