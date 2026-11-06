@@ -1320,3 +1320,10 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Errors are client-safe: `AIReviewUnavailable` message or generic 'retry or use Veryfi OCR'; provider detail only in logs (`statements.py::_run_ai_import`).
 - Verified: synthetic 1-page Mercury PDF → bank/period/balances + 5 rows extracted, recon ties.
 - Still on dead OPENAI_API_KEY: `client_review_engine.py` (3 call sites) and `llm_client.py` default provider=openai. Migrate or rotate key.
+
+## 2026-11-06 — All LLM traffic moved to Emergent Universal Key
+- `llm_client.py`: when EMERGENT_LLM_KEY is set, stream_message/send_message go through emergentintegrations (provider/model preserved; history supported on stream). Direct OpenAI/Anthropic SDK paths kept only as fallback for non-Emergent hosts.
+- `client_review_engine.py`: 3 vision functions use `_vision_json` (gpt-4o via Universal Key); usage logged via `_record_vision_usage`.
+- Typo model `claude-haiku-4-5-20250929` → `claude-haiku-4-5-20251001`; ai_usage prices added for claude-sonnet-4-6 / claude-haiku-4-5.
+- OPENAI_API_KEY no longer used anywhere (reviewv2 already preferred EMERGENT key). Tested: iteration_110 — 7/7 endpoints, usage rows recorded, no provider errors.
+- Pre-existing (not fixed): insights chat has no multi-turn memory; 'last month' date rule missing in insights prompt; voice parse/plan log feature='ai-unknown'; resolve-category shares 'ai-review' label.
