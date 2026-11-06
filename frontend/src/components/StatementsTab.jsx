@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { Upload, Loader2, FileText, Trash2, ChevronRight, CheckCircle2, RotateCw, X } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { Gate } from "@/components/Entitlements";
+import ImportAccountConfirm from "@/components/ImportAccountConfirm";
 
 /**
  * Bank-statement import tab (Veryfi).
@@ -118,6 +119,14 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
           : x));
         toast.success(`${file.name} → AI Review started. It posts automatically when the totals tie; otherwise it waits for your approval.`, { duration: 8000 });
         _startSplitPoll(r.data.import_id);
+        loadImports();
+        return;
+      }
+      if (r.data?.status === "needs_account") {
+        setUploading(u => u.map(x => x.tempId === id
+          ? { ...x, file: null, status: "needs_account", importId: r.data.import_id }
+          : x));
+        toast.warning(`${file.name}: read OK — confirm which account it belongs to in the imports list below.`, { duration: 10000 });
         loadImports();
         return;
       }
@@ -280,10 +289,12 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
           clearInterval(iv);
           if (parent.method === "ai_review") {
             setUploading(u => u.map(x => x.importId === parentImportId
-              ? { ...x, status: parent.status === "failed" ? "failed" : parent.status === "needs_review" ? "needs_review" : "completed", error: parent.error || null,
+              ? { ...x, status: parent.status === "failed" ? "failed" : (parent.status === "needs_review" || parent.status === "needs_account") ? parent.status : "completed", error: parent.error || null,
                   transactionCount: parent.transaction_count, accountName: parent.account_name }
               : x));
-            if (parent.status === "needs_review") {
+            if (parent.status === "needs_account") {
+              toast.warning(`${parent.filename}: read OK — confirm which account it belongs to in the imports list.`, { duration: 10000 });
+            } else if (parent.status === "needs_review") {
               toast.warning(`${parent.filename}: AI totals don't tie to the statement summary — review before posting.`, { duration: 10000 });
             } else if (parent.status === "completed") {
               toast.success(`${parent.filename} → ${parent.transaction_count} txns posted (AI Review, totals tie ✓)`, { duration: 8000 });
@@ -357,7 +368,7 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
   };
 
   const activeUploads   = uploading.filter(x => x.status === "processing" || x.status === "queued" || x.status === "splitting" || x.status === "ai_processing");
-  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed" || x.status === "needs_review");
+  const finishedUploads = uploading.filter(x => x.status === "completed" || x.status === "failed" || x.status === "needs_review" || x.status === "needs_account");
 
   return (
     <div className="space-y-4" data-testid="statements-tab">
@@ -506,6 +517,8 @@ export default function StatementsTab({ companyId, bare = false, defaultAccountI
       <ImportsTable
         loading={loading}
         rows={imports}
+        companyId={companyId}
+        onReload={loadImports}
         onOpen={(id) => navigate(`/connections/imports/${id}`)}
         onDelete={onDeleteImport}
         onReprocess={reprocessImport}
@@ -665,6 +678,11 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
             <Loader2 size={12} className="animate-spin" /> AI Review in progress…
           </span>
         )}
+        {entry.status === "needs_account" && (
+          <span className="text-xs text-amber-800 font-semibold" data-testid="stmt-upload-needs-account">
+            Read OK · confirm account below ↓
+          </span>
+        )}
         {entry.status === "splitting" && (
           <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
             <Loader2 size={12} className="animate-spin" /> splitting (multi-statement)
@@ -726,7 +744,7 @@ function UploadRow({ entry, onOpen, onRetry, onDismiss }) {
   );
 }
 
-function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
+function ImportsTable({ loading, rows, companyId, onReload, onOpen, onDelete, onReprocess }) {
   // Queue-wide progress across every import ever done — echoes the
   // session counter above, but reflects the persistent backend state
   // so a CPA who leaves and returns still sees "12 of 15 completed".
@@ -783,7 +801,8 @@ function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
             </td></tr>
           )}
           {!loading && rows.map(r => (
-            <tr key={r.id}
+            <React.Fragment key={r.id}>
+            <tr
                 className={
                   "border-t border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer " +
                   (r.parent_import_id ? "bg-slate-50/40" : "")
@@ -857,6 +876,14 @@ function ImportsTable({ loading, rows, onOpen, onDelete, onReprocess }) {
                 <ChevronRight size={14} className="inline-block ml-2 text-slate-300" />
               </td>
             </tr>
+            {r.status === "needs_account" && (
+              <tr className="border-t border-slate-100">
+                <td colSpan={8} className="p-0">
+                  <ImportAccountConfirm companyId={companyId} row={r} onDone={onReload} />
+                </td>
+              </tr>
+            )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
@@ -872,11 +899,12 @@ function StatusPill({ status }) {
     partial:    "bg-yellow-100 text-yellow-800",
     failed:     "bg-red-100 text-red-800",
     needs_review: "bg-rose-100 text-rose-800",
+    needs_account: "bg-amber-100 text-amber-900",
     rejected:   "bg-slate-200 text-slate-600",
   };
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${map[status] ?? "bg-slate-100 text-slate-700"}`}>
-      {status === "needs_review" ? "needs review" : (status ?? "—")}
+      {status === "needs_review" ? "needs review" : status === "needs_account" ? "confirm account" : (status ?? "—")}
     </span>
   );
 }

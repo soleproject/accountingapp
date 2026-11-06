@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company";
 import { ChevronLeft, Loader2 } from "lucide-react";
 import { AiReviewPanel, AiRowsTable, HeldImportPanel, DuplicateWarning } from "@/components/AiReviewPanel";
+import ImportAccountConfirm from "@/components/ImportAccountConfirm";
 
 /**
  * Statement import detail — shows the extracted transactions from one
@@ -98,11 +99,16 @@ export default function StatementImportDetail() {
               : doc.status === "needs_review"
                 ? "bg-rose-100 text-rose-800"
                 : "bg-amber-100 text-amber-800")}>
-          {doc.status === "needs_review" ? "needs review" : doc.status}
+          {doc.status === "needs_review" ? "needs review" : doc.status === "needs_account" ? "confirm account" : doc.status}
           {doc.method === "ai_review" && doc.status === "processing" && doc.ai_stage ? ` · ${doc.ai_stage}` : ""}
         </span>
       </div>
 
+      {doc.status === "needs_account" && (
+        <div className="mb-4 -mx-4">
+          <ImportAccountConfirm companyId={currentId} row={doc} onDone={() => setReloadKey(k => k + 1)} />
+        </div>
+      )}
       {doc.method === "ai_review" && doc.ai_review && (
         <AiReviewPanel doc={doc} companyId={currentId} onChanged={() => setReloadKey(k => k + 1)} />
       )}
