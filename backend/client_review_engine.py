@@ -394,6 +394,44 @@ __all__ = ["run_turn", "analyze_receipt_for_split",
 
 # ---------------------------------------------------------------------------
 # Receipt vision analysis for split-transaction items (item_type=8)
+
+# ---------------------------------------------------------------------------
+# Vision + JSON via Universal Key (gpt-4o)
+# ---------------------------------------------------------------------------
+class _VisionResp:
+    __slots__ = ("raw", "finish", "usage")
+
+    def __init__(self, raw: str, finish: str, usage):
+        self.raw, self.finish, self.usage = raw, finish, usage
+
+
+async def _vision_json(system: str, text: str, data_url: str, *, max_tokens: int) -> _VisionResp:
+    import uuid as _uuid
+    from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+    key = os.environ.get("EMERGENT_LLM_KEY") or ""
+    if not key:
+        raise RuntimeError("EMERGENT_LLM_KEY is not configured")
+    b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
+    chat = (LlmChat(api_key=key, session_id=f"cre-{_uuid.uuid4()}", system_message=system)
+            .with_model("openai", "gpt-4o")
+            .with_params(max_tokens=max_tokens, response_format={"type": "json_object"}))
+    resp = await chat.send_message_with_tools(
+        UserMessage(text=text, file_contents=[ImageContent(image_base64=b64)]))
+    return _VisionResp((resp.content or "").strip(), resp.finish_reason, resp.usage)
+
+
+async def _record_vision_usage(feature: str, usage) -> None:
+    try:
+        from ai_usage import record_llm
+        if usage:
+            await record_llm(feature=feature, provider="openai", model="gpt-4o",
+                             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+                             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+                             company_id=None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # ---------------------------------------------------------------------------
 #
 # The client uploads a Costco / Home Depot / Amazon receipt on a
@@ -460,8 +498,7 @@ async def analyze_receipt_for_split(
     """
     if not attachment_data_url:
         return None
-    api_key = os.environ.get("OPENAI_API_KEY") or ""
-    if not api_key:
+    if not os.environ.get("EMERGENT_LLM_KEY"):
         return None
 
     coa_hint = ""
@@ -488,23 +525,8 @@ async def analyze_receipt_for_split(
     )
 
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": _SPLIT_VISION_SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": context_hint},
-                    {"type": "image_url",
-                     "image_url": {"url": attachment_data_url, "detail": "high"}},
-                ]},
-            ],
-            max_tokens=4096,
-            response_format={"type": "json_object"},
-        )
-        raw = (resp.choices[0].message.content or "").strip()
-        finish = resp.choices[0].finish_reason
+        resp = await _vision_json(_SPLIT_VISION_SYSTEM_PROMPT, context_hint, attachment_data_url, max_tokens=4096)
+        raw, finish = resp.raw, resp.finish
     except Exception:  # noqa: BLE001
         logger.exception("split receipt vision analysis failed")
         return None
@@ -514,26 +536,15 @@ async def analyze_receipt_for_split(
     # per-line breakout) so we still surface *something* to the client.
     if finish == "length":
         try:
-            resp2 = await client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content":
-                        "Read the receipt. Return ONLY a JSON object of "
-                        "this shape (no line_items — just the summary):\n"
-                        "{\"narrative\": \"<1-2 sentences>\","
-                        " \"suggested_splits\": [{\"account_name\":\"…\","
-                        "\"amount\": <n>,\"percent\": <n>}, ...],"
-                        " \"totals\":{\"business\":<n>,\"personal\":<n>,\"grand_total\":<n>}}"},
-                    {"role": "user", "content": [
-                        {"type": "text", "text": context_hint},
-                        {"type": "image_url",
-                         "image_url": {"url": attachment_data_url, "detail": "high"}},
-                    ]},
-                ],
-                max_tokens=1200,
-                response_format={"type": "json_object"},
-            )
-            raw = (resp2.choices[0].message.content or "").strip()
+            resp2 = await _vision_json(
+                "Read the receipt. Return ONLY a JSON object of "
+                "this shape (no line_items — just the summary):\n"
+                "{\"narrative\": \"<1-2 sentences>\","
+                " \"suggested_splits\": [{\"account_name\":\"…\","
+                "\"amount\": <n>,\"percent\": <n>}, ...],"
+                " \"totals\":{\"business\":<n>,\"personal\":<n>,\"grand_total\":<n>}}",
+                context_hint, attachment_data_url, max_tokens=1200)
+            raw = resp2.raw
         except Exception:  # noqa: BLE001
             logger.exception("split receipt vision retry failed")
 
@@ -548,19 +559,7 @@ async def analyze_receipt_for_split(
         return None
     if not isinstance(parsed, dict):
         return None
-    # Log-usage best-effort so this call shows up in the AI usage table.
-    try:
-        from ai_usage import record_llm
-        usage = getattr(resp, "usage", None)
-        if usage:
-            await record_llm(
-                feature="split_receipt_vision", provider="openai", model="gpt-4o",
-                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
-                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
-                company_id=None,
-            )
-    except Exception:  # noqa: BLE001
-        pass
+    await _record_vision_usage("split_receipt_vision", resp.usage)
     return parsed
 
 
@@ -681,8 +680,7 @@ async def analyze_liability_statement_for_split(
     """
     if not attachment_data_url:
         return None
-    api_key = os.environ.get("OPENAI_API_KEY") or ""
-    if not api_key:
+    if not os.environ.get("EMERGENT_LLM_KEY"):
         return None
 
     coa_hint = ""
@@ -709,22 +707,8 @@ async def analyze_liability_statement_for_split(
     )
 
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": _LIABILITY_VISION_SYSTEM_PROMPT},
-                {"role": "user", "content": [
-                    {"type": "text", "text": context_hint},
-                    {"type": "image_url",
-                     "image_url": {"url": attachment_data_url, "detail": "high"}},
-                ]},
-            ],
-            max_tokens=2048,
-            response_format={"type": "json_object"},
-        )
-        raw = (resp.choices[0].message.content or "").strip()
+        resp = await _vision_json(_LIABILITY_VISION_SYSTEM_PROMPT, context_hint, attachment_data_url, max_tokens=2048)
+        raw = resp.raw
     except Exception:  # noqa: BLE001
         logger.exception("liability statement vision analysis failed")
         return None
@@ -769,19 +753,7 @@ async def analyze_liability_statement_for_split(
         parsed["payment_amount"] = grand
     parsed.setdefault("statement_type", "generic_loan")
 
-    try:
-        from ai_usage import record_llm
-        usage = getattr(resp, "usage", None)
-        if usage:
-            await record_llm(
-                feature="liability_split_vision", provider="openai",
-                model="gpt-4o",
-                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
-                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
-                company_id=None,
-            )
-    except Exception:  # noqa: BLE001
-        pass
+    await _record_vision_usage("liability_split_vision", resp.usage)
     return parsed
 
 
@@ -903,8 +875,7 @@ async def analyze_receipt_for_categorization(
     """
     if not attachment_data_url:
         return None
-    api_key = os.environ.get("OPENAI_API_KEY") or ""
-    if not api_key:
+    if not os.environ.get("EMERGENT_LLM_KEY"):
         return None
 
     coa_hint = ""
@@ -938,22 +909,8 @@ async def analyze_receipt_for_categorization(
     )
 
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=api_key)
-        resp = await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": _RECEIPT_CATEGORIZATION_PROMPT + (prompt_addendum or "")},
-                {"role": "user", "content": [
-                    {"type": "text", "text": context_hint},
-                    {"type": "image_url",
-                     "image_url": {"url": attachment_data_url, "detail": "high"}},
-                ]},
-            ],
-            max_tokens=3000,
-            response_format={"type": "json_object"},
-        )
-        raw = (resp.choices[0].message.content or "").strip()
+        resp = await _vision_json(_RECEIPT_CATEGORIZATION_PROMPT + (prompt_addendum or ""), context_hint, attachment_data_url, max_tokens=3000)
+        raw = resp.raw
     except Exception:  # noqa: BLE001
         logger.exception("receipt categorization vision failed")
         return None
@@ -1012,18 +969,6 @@ async def analyze_receipt_for_categorization(
     totals.setdefault("grand_total", grand)
     parsed["totals"] = totals
 
-    try:
-        from ai_usage import record_llm
-        usage = getattr(resp, "usage", None)
-        if usage:
-            await record_llm(
-                feature="receipt_categorization_vision", provider="openai",
-                model="gpt-4o",
-                input_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
-                output_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
-                company_id=None,
-            )
-    except Exception:  # noqa: BLE001
-        pass
+    await _record_vision_usage("receipt_categorization_vision", resp.usage)
     return parsed
 

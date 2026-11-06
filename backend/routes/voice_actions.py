@@ -557,7 +557,7 @@ async def _draft_email(intent: str,
         # Templated link/reminder emails go to Haiku (fast, cheap).
         # Proposals stay on Sonnet — dollars + stakes are involved.
         _model = ("claude-sonnet-4-5-20250929" if intent == "draft_proposal"
-                   else "claude-haiku-4-5-20250929")
+                   else "claude-haiku-4-5-20251001")
         chat = LlmChat(
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"email-{uuid.uuid4()}",

@@ -148,7 +148,7 @@ async def _run_planner(text: str, tz: Optional[str], now_local: Optional[str],
             api_key=os.environ.get("EMERGENT_LLM_KEY") or "unused",
             session_id=f"plan-{uuid.uuid4()}",
             system_message=PLANNER_SYSTEM,
-        ).with_model("anthropic", "claude-haiku-4-5-20250929")
+        ).with_model("anthropic", "claude-haiku-4-5-20251001")
         raw = await chat.send_message(UserMessage(text="\n".join(ctx)))
         return _extract_json(raw) or {}
     except Exception as e:
