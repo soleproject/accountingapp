@@ -4009,6 +4009,148 @@ async def bulk_set_contact(cid: str, payload: dict, user: dict = Depends(get_cur
     }
 
 
+def is_bank_like_account(acct: dict | None) -> bool:
+    """True for accounts that transactions *live on* (bank, cash, credit card)."""
+    if not acct:
+        return False
+    tags = {str(acct.get(k) or "").lower() for k in ("subtype", "detail_type")}
+    return bool(tags & {"cash_and_bank", "credit_card", "bank", "checking", "savings"}) or bool(acct.get("plaid_account_id"))
+
+
+async def _rehome_rows(cid: str, rows: list[dict], target: dict, actor: dict, *, action: str) -> dict:
+    """Move transactions onto `target` as their bank/card account.
+
+    Rows whose category was the target itself lose that category and go
+    back to review (the category was never a real classification).
+    """
+    from categorizer import ensure_uncategorized_accounts
+    uncat_exp, uncat_inc = await ensure_uncategorized_accounts(cid)
+    now = now_iso()
+    undo_token = await bulk_undo.snapshot(
+        company_id=cid, action=action,
+        summary=f"Moved {len(rows)} txn(s) onto {target.get('name') or target.get('code')}",
+        rows=rows, actor=actor,
+    )
+    recategorized = 0
+    for t in rows:
+        upd = {
+            "bank_account_id": target["id"],
+            "bank_account_name": target.get("name"),
+            "bank_account_code": target.get("code"),
+            "updated_at": now,
+        }
+        if t.get("category_account_id") == target["id"]:
+            uncat = uncat_inc if float(t.get("amount") or 0) > 0 else uncat_exp
+            upd.update({
+                "category_account_id": uncat["id"],
+                "category_account_code": uncat["code"],
+                "category_account_name": uncat["name"],
+                "needs_review": True,
+                "human_reviewed": False,
+                "ai_confidence": 0.0,
+                "ai_reasoning": f"Re-homed onto {target.get('name')}; previous category was the account itself",
+                "ai_source": "rehome",
+            })
+            recategorized += 1
+        await db.transactions.update_one({"id": t["id"], "company_id": cid}, {"$set": upd})
+    return {"updated": len(rows), "recategorized": recategorized, "undo_token": undo_token}
+
+
+@router.post("/companies/{cid}/transactions/bulk-rehome")
+async def bulk_rehome(cid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Move transactions so they LIVE on a bank/credit-card account
+    (`bank_account_id`), instead of being categorized to it.
+
+    Body: {"transaction_ids": [...], "bank_account_id": str}
+    """
+    await require_company(user, cid)
+    ids = [x for x in (payload.get("transaction_ids") or []) if x]
+    target_id = payload.get("bank_account_id")
+    if not ids or not target_id:
+        raise HTTPException(400, "transaction_ids and bank_account_id are required")
+    target = await db.accounts.find_one({"id": target_id, "company_id": cid})
+    if not target:
+        raise HTTPException(404, "Target account not found in this company")
+    if not is_bank_like_account(target):
+        raise HTTPException(400, "Target must be a bank, cash or credit-card account")
+    txns = await db.transactions.find({"id": {"$in": ids}, "company_id": cid}).to_list(len(ids))
+    skipped_closed, editable = [], []
+    for t in txns:
+        if await is_period_closed(cid, t.get("date")):
+            skipped_closed.append(t["id"])
+        else:
+            editable.append(t)
+    if not editable:
+        return {"ok": True, "updated": 0, "recategorized": 0, "skipped_closed": skipped_closed, "undo_token": None}
+    res = await _rehome_rows(cid, editable, target, user, action="bulk-rehome")
+    return {"ok": True, **res, "skipped_closed": skipped_closed}
+
+
+@router.get("/companies/{cid}/accounts/{aid}/category-side-rows")
+async def category_side_rows(cid: str, aid: str, user: dict = Depends(get_current_user)):
+    """Dry run for the repair: transactions that are *categorized to* this
+    bank/card account instead of living on it, grouped by where they live now."""
+    await require_company(user, cid)
+    acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if not acct:
+        raise HTTPException(404, "Account not found")
+    if not is_bank_like_account(acct):
+        return {"account": {"id": aid, "name": acct.get("name")}, "total": 0, "groups": []}
+    cur = db.transactions.find(
+        {"company_id": cid, "category_account_id": aid, "bank_account_id": {"$ne": aid}},
+        {"_id": 0, "id": 1, "bank_account_id": 1, "bank_account_name": 1, "amount": 1, "date": 1},
+    )
+    groups: dict[str, dict] = {}
+    async for t in cur:
+        key = t.get("bank_account_id") or ""
+        g = groups.setdefault(key, {"bank_account_id": key, "bank_account_name": t.get("bank_account_name") or "", "count": 0, "sum_amount": 0.0, "first_date": None, "last_date": None, "exists": None})
+        g["count"] += 1
+        g["sum_amount"] = round(g["sum_amount"] + float(t.get("amount") or 0), 2)
+        d = t.get("date")
+        if d:
+            g["first_date"] = min(g["first_date"] or d, d)
+            g["last_date"] = max(g["last_date"] or d, d)
+    for key, g in groups.items():
+        src = await db.accounts.find_one({"id": key, "company_id": cid}, {"_id": 0, "name": 1, "subtype": 1, "detail_type": 1}) if key else None
+        g["exists"] = bool(src)
+        if src:
+            g["bank_account_name"] = src.get("name") or g["bank_account_name"]
+            g["source_is_bank_like"] = is_bank_like_account(src)
+        else:
+            g["bank_account_name"] = g["bank_account_name"] or ("(no account)" if not key else "(deleted account)")
+            g["source_is_bank_like"] = False
+    out = sorted(groups.values(), key=lambda g: -g["count"])
+    return {"account": {"id": aid, "name": acct.get("name")}, "total": sum(g["count"] for g in out), "groups": out}
+
+
+@router.post("/companies/{cid}/accounts/{aid}/rehome-category-side")
+async def rehome_category_side(cid: str, aid: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Apply the repair for the chosen source groups.
+    Body: {"source_bank_account_ids": ["<id>", "" (for none), ...]}"""
+    await require_company(user, cid)
+    acct = await db.accounts.find_one({"id": aid, "company_id": cid})
+    if not acct or not is_bank_like_account(acct):
+        raise HTTPException(400, "Account must be a bank, cash or credit-card account")
+    sources = payload.get("source_bank_account_ids")
+    if not isinstance(sources, list) or not sources:
+        raise HTTPException(400, "source_bank_account_ids is required")
+    src_filter = {"$in": [s for s in sources if s] + ([None, ""] if "" in sources else [])}
+    txns = await db.transactions.find(
+        {"company_id": cid, "category_account_id": aid, "bank_account_id": src_filter}
+    ).to_list(None)
+    skipped_closed, editable = [], []
+    for t in txns:
+        if await is_period_closed(cid, t.get("date")):
+            skipped_closed.append(t["id"])
+        else:
+            editable.append(t)
+    if not editable:
+        return {"ok": True, "updated": 0, "recategorized": 0, "skipped_closed": skipped_closed, "undo_token": None}
+    res = await _rehome_rows(cid, editable, acct, user, action="rehome-category-side")
+    return {"ok": True, **res, "skipped_closed": skipped_closed}
+
+
+
 
 
 @router.post("/companies/{cid}/transactions/bulk-reclassify")
