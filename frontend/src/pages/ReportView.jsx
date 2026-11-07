@@ -131,28 +131,44 @@ function AccountDetailBody({ currentId, data, onReload, searchParams, setSearchP
 
   const doMove = async (targetId) => {
     if (selected.size === 0 || !targetId) return;
+    if (targetId === account?.id) { toast.error("That's the account they're already on — pick a different one."); return; }
     setApplying(true);
     try {
       const to = accounts.find(a => a.id === targetId);
-      const ids = Array.from(selected);
+      const jeRows = rows.filter(t => selected.has(t.id) && t.source === "JE");
+      const ids = rows.filter(t => selected.has(t.id) && t.source !== "JE").map(t => t.id);
+      if (!ids.length) {
+        toast.error("Only journal-entry rows are selected — edit those in Journal Entries, they can't be moved from here.");
+        return;
+      }
+      const extras = [];
+      if (jeRows.length) extras.push(`${jeRows.length} journal-entry row${jeRows.length === 1 ? "" : "s"} left as-is (edit in Journal Entries)`);
       if (isBankLike(to)) {
         const { data: res } = await api.post(`/companies/${currentId}/transactions/bulk-rehome`, {
           transaction_ids: ids,
           bank_account_id: targetId,
+          from_account_id: account?.id,
         });
-        toast.success(`Moved ${res.updated} transaction${res.updated === 1 ? "" : "s"} onto ${to?.name || "account"}`
-          + (res.recategorized ? ` · ${res.recategorized} sent back to review for a category` : ""));
+        if (res.recategorized) extras.push(`${res.recategorized} sent back to review for a category`);
+        if (res.repointed) extras.push(`${res.repointed} payment${res.repointed === 1 ? "" : "s"} re-pointed to ${to?.name}`);
+        if (res.skipped_closed?.length) extras.push(`${res.skipped_closed.length} skipped — closed period`);
+        if (res.missing) extras.push(`${res.missing} not found`);
+        const moved = res.updated || 0;
+        (moved ? toast.success : toast.warning)(`Moved ${moved} transaction${moved === 1 ? "" : "s"} onto ${to?.name || "account"}` + (extras.length ? ` · ${extras.join(" · ")}` : ""), { duration: 8000 });
       } else {
-        await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
+        const { data: res } = await api.post(`/companies/${currentId}/transactions/bulk-reclassify`, {
           transaction_ids: ids,
           category_account_id: targetId,
         });
-        toast.success(`Moved ${selected.size} transaction${selected.size === 1 ? "" : "s"} to ${to?.name || "account"}`);
+        if (res?.skipped_closed?.length) extras.push(`${res.skipped_closed.length} skipped — closed period`);
+        toast.success(`Moved ${res?.updated ?? ids.length} transaction${ids.length === 1 ? "" : "s"} to ${to?.name || "account"}` + (extras.length ? ` · ${extras.join(" · ")}` : ""), { duration: 8000 });
       }
       setMoving(false);
       onReload?.();
     } catch (e) {
-      toast.error(e?.response?.data?.detail || "Move failed");
+      console.error("move failed", e);
+      const st = e?.response?.status;
+      toast.error(e?.response?.data?.detail || (st ? `Move failed (HTTP ${st})` : "Move failed — no response from the server"));
     } finally {
       setApplying(false);
     }

@@ -4017,11 +4017,14 @@ def is_bank_like_account(acct: dict | None) -> bool:
     return bool(tags & {"cash_and_bank", "credit_card", "bank", "checking", "savings"}) or bool(acct.get("plaid_account_id"))
 
 
-async def _rehome_rows(cid: str, rows: list[dict], target: dict, actor: dict, *, action: str) -> dict:
+async def _rehome_rows(cid: str, rows: list[dict], target: dict, actor: dict, *, action: str,
+                       from_account_id: str | None = None) -> dict:
     """Move transactions onto `target` as their bank/card account.
 
-    Rows whose category was the target itself lose that category and go
-    back to review (the category was never a real classification).
+    Rows that merely *point at* `from_account_id` as their category (e.g. a
+    payment from checking categorized to the old card) are re-pointed to the
+    target instead of being re-homed. Rows whose category was the target
+    itself lose that category and go back to review.
     """
     from categorizer import ensure_uncategorized_accounts
     uncat_exp, uncat_inc = await ensure_uncategorized_accounts(cid)
@@ -4031,8 +4034,14 @@ async def _rehome_rows(cid: str, rows: list[dict], target: dict, actor: dict, *,
         summary=f"Moved {len(rows)} txn(s) onto {target.get('name') or target.get('code')}",
         rows=rows, actor=actor,
     )
-    recategorized = 0
+    recategorized = repointed = 0
     for t in rows:
+        if from_account_id and t.get("bank_account_id") != from_account_id and t.get("category_account_id") == from_account_id:
+            await db.transactions.update_one({"id": t["id"], "company_id": cid}, {"$set": {
+                "category_account_id": target["id"], "category_account_code": target.get("code"),
+                "category_account_name": target.get("name"), "updated_at": now}})
+            repointed += 1
+            continue
         upd = {
             "bank_account_id": target["id"],
             "bank_account_name": target.get("name"),
@@ -4053,7 +4062,7 @@ async def _rehome_rows(cid: str, rows: list[dict], target: dict, actor: dict, *,
             })
             recategorized += 1
         await db.transactions.update_one({"id": t["id"], "company_id": cid}, {"$set": upd})
-    return {"updated": len(rows), "recategorized": recategorized, "undo_token": undo_token}
+    return {"updated": len(rows), "recategorized": recategorized, "repointed": repointed, "undo_token": undo_token}
 
 
 @router.post("/companies/{cid}/transactions/bulk-rehome")
@@ -4074,6 +4083,7 @@ async def bulk_rehome(cid: str, payload: dict, user: dict = Depends(get_current_
     if not is_bank_like_account(target):
         raise HTTPException(400, "Target must be a bank, cash or credit-card account")
     txns = await db.transactions.find({"id": {"$in": ids}, "company_id": cid}).to_list(len(ids))
+    missing = len(ids) - len(txns)
     skipped_closed, editable = [], []
     for t in txns:
         if await is_period_closed(cid, t.get("date")):
@@ -4081,9 +4091,10 @@ async def bulk_rehome(cid: str, payload: dict, user: dict = Depends(get_current_
         else:
             editable.append(t)
     if not editable:
-        return {"ok": True, "updated": 0, "recategorized": 0, "skipped_closed": skipped_closed, "undo_token": None}
-    res = await _rehome_rows(cid, editable, target, user, action="bulk-rehome")
-    return {"ok": True, **res, "skipped_closed": skipped_closed}
+        return {"ok": True, "updated": 0, "recategorized": 0, "repointed": 0, "missing": missing, "skipped_closed": skipped_closed, "undo_token": None}
+    res = await _rehome_rows(cid, editable, target, user, action="bulk-rehome", from_account_id=payload.get("from_account_id"))
+    await _invalidate_dash(cid)
+    return {"ok": True, **res, "missing": missing, "skipped_closed": skipped_closed}
 
 
 @router.get("/companies/{cid}/accounts/{aid}/category-side-rows")
