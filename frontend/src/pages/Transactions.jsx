@@ -1594,25 +1594,47 @@ export default function Transactions() {
     params.set("page", String(page));
     params.set("limit", String(pageSize));
     const qs = `?${params.toString()}`;
-    let t, a, i, b;
+    const describe = (e, what) => {
+      const st = e?.response?.status;
+      const detail = typeof e?.response?.data?.detail === "string" ? ` — ${e.response.data.detail.slice(0, 120)}` : "";
+      return st ? `Couldn't load ${what} (HTTP ${st}${detail}).` : `Couldn't load ${what} — no response from the server (network or timeout).`;
+    };
+    const fetchTxns = () => api.get(`/companies/${currentId}/transactions${qs}`);
+    let t;
     try {
-      [t, a, i, b] = await Promise.all([
-        api.get(`/companies/${currentId}/transactions${qs}`),
-        api.get(`/companies/${currentId}/accounts`),
-        api.get(`/companies/${currentId}/invoices`),
-        api.get(`/companies/${currentId}/bills`),
-      ]);
-    } catch (e) {
-      if (seq === loadSeq.current) toast.error(e?.response?.status === 429 ? "Slow down a sec — too many requests. Retrying shortly." : "Couldn't load transactions.");
-      return;
+      t = await fetchTxns();
+    } catch (e1) {
+      if (seq !== loadSeq.current) return;
+      if (e1?.response?.status === 429) { toast.error("Slow down a sec — too many requests. Retrying shortly."); return; }
+      // One quiet retry — a refresh right after a bulk approve can race a busy backend.
+      await new Promise(r => setTimeout(r, 1500));
+      if (seq !== loadSeq.current) return;
+      try { t = await fetchTxns(); }
+      catch (e2) {
+        if (seq === loadSeq.current) {
+          console.error("transactions load failed", e2);
+          toast.error(describe(e2, "transactions"));
+        }
+        return;
+      }
     }
+    const [a, i, b] = await Promise.allSettled([
+      api.get(`/companies/${currentId}/accounts`),
+      api.get(`/companies/${currentId}/invoices`),
+      api.get(`/companies/${currentId}/bills`),
+    ]);
     if (seq !== loadSeq.current) return;
     setLoadedOnce(true);
     setTxns(t.data.transactions || []);
     setPagination(t.data.pagination || { total: (t.data.transactions || []).length, page: 1, pages: 1, limit: pageSize });
-    setAccts(a.data.accounts || []);
-    setInvoices(i.data.invoices || []);
-    setBills(b.data.bills || []);
+    if (a.status === "fulfilled") setAccts(a.value.data.accounts || []);
+    if (i.status === "fulfilled") setInvoices(i.value.data.invoices || []);
+    if (b.status === "fulfilled") setBills(b.value.data.bills || []);
+    const sideFail = [["accounts", a], ["invoices", i], ["bills", b]].find(([, r]) => r.status === "rejected");
+    if (sideFail) {
+      console.error(`${sideFail[0]} load failed`, sideFail[1].reason);
+      toast.warning(describe(sideFail[1].reason, sideFail[0]) + " Transactions are up to date.");
+    }
     if (similarFreshRef.current) {
       similarFreshRef.current = false;
       setSelected(new Set((t.data.transactions || []).map(r => r.id)));
