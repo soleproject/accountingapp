@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { X, Check, Sparkles, Search } from "lucide-react";
 import { emitAction, useActionListener } from "@/lib/createBus";
 import { api } from "@/lib/api";
@@ -80,12 +80,29 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
     const w = 240, h = ruleExists ? 52 : 96;
     const left = Math.max(8, Math.min(anchor.x - w + 24, window.innerWidth - w - 8));
     const top = anchor.y + 14 + h > window.innerHeight ? anchor.y - h - 14 : anchor.y + 14;
-    return { left, top, w };
+    return { left, top, w, h };
   })() : null;
+
+  // If the strip would sit on top of the modal, the modal's own footer
+  // buttons are already under the pointer — drop the strip entirely.
+  const modalRef = useRef(null);
+  const [stripHidden, setStripHidden] = useState(false);
+  useLayoutEffect(() => {
+    if (!strip || !modalRef.current) return;
+    const check = () => {
+      const r = modalRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const overlaps = strip.left < r.right && strip.left + strip.w > r.left && strip.top < r.bottom && strip.top + strip.h > r.top;
+      setStripHidden(overlaps);
+    };
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [strip?.left, strip?.top, strip?.w, strip?.h, ticked.size, visible.length]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px]" data-testid="similar-approve-modal">
-      {strip && (
+      {strip && !stripHidden && (
         <div className="fixed z-[60] flex flex-col gap-1.5 rounded-xl bg-white border border-fuchsia-200 shadow-2xl p-1.5"
              style={{ left: strip.left, top: strip.top, width: strip.w }} data-testid="similar-approve-quick-strip">
           <button type="button" disabled={busy || !ticked.size} onClick={() => run(false)} data-testid="similar-approve-quick-apply"
@@ -100,7 +117,7 @@ export function SimilarApproveModal({ currentId, similar, ruleExists, anchor, on
           )}
         </div>
       )}
-      <div className="w-[min(680px,94vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div ref={modalRef} className="w-[min(680px,94vw)] rounded-2xl border border-slate-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between px-5 pt-4 pb-3 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-fuchsia-700 font-semibold"><Sparkles size={12} /> {isDesc ? "Similar description" : "Same vendor"}</div>
