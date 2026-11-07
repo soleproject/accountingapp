@@ -598,6 +598,81 @@ async def _fan_out_multi_account(
     }
 
 
+def _account_confirm_key(fields: dict) -> str | None:
+    """Stable key for 'this statement belongs to that account': last-4 when
+    present, otherwise the normalized institution name."""
+    last4 = _re.sub(r"\D", "", str(fields.get("account_number") or ""))[-4:]
+    if last4:
+        return f"last4:{last4}"
+    bank = _re.sub(r"[^a-z0-9]", "", str(fields.get("bank_name") or "").lower())
+    return f"bank:{bank}" if bank else None
+
+
+async def _park_for_account_confirmation(cid: str, import_id: str, doc: dict, resolved: dict, fields: dict) -> dict:
+    kind_type = "liability" if resolved.get("is_liability") else "asset"
+    cands = await db.accounts.find(
+        {"company_id": cid, "type": kind_type, "active": True,
+         "$or": [{"detail_type": {"$in": ["cash_and_bank", "credit_card"]}},
+                 {"subtype": {"$in": ["cash_and_bank", "credit_card", "current_liability", "Bank"]}},
+                 {"plaid_account_id": {"$exists": True}}]},
+        {"_id": 0, "id": 1, "code": 1, "name": 1, "last4": 1},
+    ).sort("code", 1).to_list(500)
+    proposal = {
+        "matched": bool(resolved.get("account_id")),
+        "account_id": resolved.get("account_id"),
+        "account_name": resolved.get("account_name") if resolved.get("account_id") else None,
+        "suggested_name": resolved.get("account_name") if not resolved.get("account_id") else None,
+        "account_type": kind_type,
+        "bank_name": fields.get("bank_name"),
+        "last4": resolved.get("last4"),
+        "candidates": cands,
+    }
+    row = await db.statement_imports.find_one({"id": import_id}, {"ai_doc": 1})
+    upd = {
+        "status": "needs_account", "ai_stage": "needs_account", "account_proposal": proposal,
+        "stmt_last4": _doc_last4(doc),
+        "period_start": doc.get("period_start_date") or fields.get("period_start"),
+        "period_end": doc.get("period_end_date") or fields.get("period_end"),
+        "transaction_count": len(veryfi_service.extract_transactions(doc)),
+        "updated_at": now_iso(),
+    }
+    if not (row or {}).get("ai_doc"):
+        upd["held_doc"] = doc
+    await db.statement_imports.update_one({"id": import_id}, {"$set": upd})
+    return {"import_id": import_id, "status": "needs_account", "account_proposal": proposal}
+
+
+async def confirm_import_account(cid: str, import_id: str, account_id: str | None, create: bool,
+                                 categorize_fn, is_period_closed_fn) -> dict:
+    """Resume a parked import with the account the user confirmed/picked/created."""
+    row = await db.statement_imports.find_one({"id": import_id, "company_id": cid})
+    if not row:
+        raise HTTPException(404, "Import not found")
+    if row.get("status") != "needs_account":
+        raise HTTPException(400, "This import is not waiting for an account.")
+    doc = row.get("ai_doc") or row.get("held_doc")
+    if not doc:
+        raise HTTPException(400, "Statement data is no longer available — re-upload the file.")
+    if create:
+        resolved = await statement_account_resolver.resolve_statement_account(
+            cid, doc, account_kind_hint=row.get("account_kind_hint"), create=True)
+        if resolved.get("matched"):
+            # Someone created/renamed a matching account meanwhile — use it rather than duplicate.
+            pass
+        account_id = resolved["account_id"]
+    if not account_id:
+        raise HTTPException(400, "account_id or create=true is required")
+    acct = await db.accounts.find_one({"id": account_id, "company_id": cid})
+    if not acct:
+        raise HTTPException(404, "Account not found in this company")
+    await db.statement_imports.update_one(
+        {"id": import_id}, {"$set": {"account_id": account_id, "account_name": acct["name"],
+                                     "account_confirmed_at": now_iso(), "updated_at": now_iso()}})
+    return await _post_ai_doc(cid, import_id, doc, account_id, row.get("account_kind_hint"),
+                              categorize_fn, is_period_closed_fn, method=row.get("method") or "veryfi")
+
+
+
 async def _process_veryfi_result(
     cid: str,
     import_id: str,
@@ -636,7 +711,9 @@ async def _process_veryfi_result(
             account_kind_hint=account_kind_hint,
         )
 
-    # -------- Resolve/create the target CoA account --------
+    # -------- Resolve the target CoA account --------
+    _stmt_fields = statement_account_resolver._statement_fields(veryfi_data)
+    _confirm_key = _account_confirm_key(_stmt_fields)
     if account_id:
         acct = await db.accounts.find_one({"id": account_id, "company_id": cid})
         if not acct:
@@ -645,13 +722,22 @@ async def _process_veryfi_result(
             "account_id": acct["id"], "account_name": acct["name"],
             "account_code": acct["code"], "matched": True,
             "bank_name": None, "last4": None,
-            "starting_balance": statement_account_resolver
-                ._statement_fields(veryfi_data).get("starting_balance"),
+            "starting_balance": _stmt_fields.get("starting_balance"),
         }
+        # The user chose this account for this statement → remember it.
+        if _confirm_key:
+            await db.accounts.update_one({"id": acct["id"]}, {"$addToSet": {"confirmed_statement_keys": _confirm_key}})
     else:
         resolved = await statement_account_resolver.resolve_statement_account(
-            cid, veryfi_data, account_kind_hint=account_kind_hint,
+            cid, veryfi_data, account_kind_hint=account_kind_hint, create=False,
         )
+        confirmed = False
+        if resolved.get("account_id"):
+            acct = await db.accounts.find_one({"id": resolved["account_id"]}, {"confirmed_statement_keys": 1})
+            confirmed = bool(_confirm_key) and _confirm_key in ((acct or {}).get("confirmed_statement_keys") or [])
+        if not confirmed:
+            # Never create silently; never post to a never-confirmed match.
+            return await _park_for_account_confirmation(cid, import_id, veryfi_data, resolved, _stmt_fields)
 
     lines = veryfi_service.extract_transactions(veryfi_data)
     # Veryfi OCR sanity guards — see module-level docstring on
@@ -2067,6 +2153,9 @@ async def _post_ai_doc(cid, import_id, doc, account_id, account_kind_hint, categ
             cid, import_id, doc, account_id,
             categorize_fn=categorize_fn, is_period_closed_fn=is_period_closed_fn,
             account_kind_hint=account_kind_hint)
+        if isinstance(result, dict) and result.get("status") == "needs_account":
+            await db.statement_imports.update_one({"id": import_id}, {"$set": {"method": method, "updated_at": now_iso()}})
+            return result
         await db.statement_imports.update_one({"id": import_id}, {"$set": {"method": method, "ai_stage": "done", "updated_at": now_iso()}})
         return result
     except HTTPException as e:

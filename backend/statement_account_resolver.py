@@ -244,6 +244,7 @@ async def resolve_or_create_bank_account(
     starting_balance: float | None = None,
     is_liability: bool = False,
     source: str = "auto",
+    create: bool = True,
 ) -> dict:
     """Match or create the CoA row for a bank/credit account, regardless of
     whether the caller is Veryfi (bank statement OCR) or Plaid (live link).
@@ -288,7 +289,7 @@ async def resolve_or_create_bank_account(
                     "account_id": a["id"], "account_name": a["name"],
                     "account_code": a["code"], "matched": True,
                     "bank_name": bank_name, "last4": last4,
-                    "starting_balance": starting_balance,
+                    "starting_balance": starting_balance, "is_liability": is_liability,
                 }
 
     # 2) Fuzzy: institution-name substring on bank-flavored candidates.
@@ -324,6 +325,12 @@ async def resolve_or_create_bank_account(
     # 3) No match — create a new account. Assets number from 1010,
     # liabilities from 2100 (credit-card land).
     name = _build_account_name(bank_name, account_type, last4, is_liability=is_liability)
+    if not create:
+        return {
+            "account_id": None, "account_name": name, "account_code": None,
+            "matched": False, "bank_name": bank_name, "last4": last4,
+            "starting_balance": starting_balance, "is_liability": is_liability,
+        }
     code = await _next_account_code(company_id, 2100 if is_liability else 1010)
     account_id = str(uuid.uuid4())
     subtype = ("current_liability" if is_liability
@@ -376,6 +383,7 @@ async def resolve_or_create_bank_account(
 async def resolve_statement_account(
     company_id: str, veryfi_doc: dict,
     account_kind_hint: str | None = None,
+    create: bool = True,
 ) -> dict:
     """Veryfi-facing wrapper — pulls fields from the OCR doc, then delegates
     to `resolve_or_create_bank_account` for the actual match/create logic
@@ -410,6 +418,7 @@ async def resolve_statement_account(
         starting_balance=fields["starting_balance"],
         is_liability=is_liability,
         source="veryfi_statement",
+        create=create,
     )
 
 

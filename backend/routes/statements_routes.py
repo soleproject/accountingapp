@@ -172,6 +172,17 @@ async def statements_reject(cid: str, import_id: str, user: dict = Depends(get_c
     return await statements.reject_ai_import(cid, import_id)
 
 
+
+@router.post("/companies/{cid}/statements/imports/{import_id}/confirm-account")
+async def statements_confirm_account(cid: str, import_id: str, payload: dict, user: dict = Depends(get_current_user)):
+    """Resume an import parked in `needs_account` with the account the user confirmed, picked or created."""
+    await require_company(user, cid)
+    import statements
+    return await statements.confirm_import_account(
+        cid, import_id, payload.get("account_id"), bool(payload.get("create")),
+        categorize_fn=categorize_transaction, is_period_closed_fn=is_period_closed)
+
+
 @router.get("/companies/{cid}/statements/imports/{import_id}/export.xlsx", dependencies=[Depends(require_feature("statements_ai"))])
 async def statements_export_xlsx(cid: str, import_id: str, user: dict = Depends(get_current_user)):
     await require_company(user, cid)

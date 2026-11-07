@@ -1335,3 +1335,11 @@ Owner decisions: current = last 7 days by TRANSACTION DATE (not ingest), ingeste
 - Fix 3 (guard): report returns `category_side_count` + `account_is_bank_like`; ReportView shows amber banner + `CategorySideRepairDialog` (components/CategorySideRepairDialog.jsx).
 - Verified in preview on 'Michael C 4 AI Import, LLC' Mercury card (360 txns): reproduced -7,085.89 inversion, repair → balance -4,364.16 == sum, banner clears.
 - For Michelle (C2C Connect, Mercury ···8828, 996 txns): after publish open Account Detail → Review & fix → check groups → apply; then AI-categorize the rows sent to review.
+- Root cause of the ghost account: `POST /accounts/{src}/merge-into` only rewrote `category_account_id`/splits/JE lines and never `bank_account_id`/`account_id`, so merging two bank/card accounts left bank-side rows pointing at a deleted account. Fixed (moved.bank_side_transactions). Verified via API in preview.
+
+## 2026-11-06 — Statement import: account confirmation gate (no silent create)
+- `_process_veryfi_result` now resolves with `create=False`. If no explicit account_id and the match isn't confirmed for this statement key (`accounts.confirmed_statement_keys` ∋ `last4:XXXX` or `bank:name`), the import parks as `status=needs_account` with `account_proposal` {matched, account_id/name | suggested_name, account_type, bank_name, last4, candidates[]} (`_park_for_account_confirmation`). held_doc stored for Veryfi path; AI path already has ai_doc.
+- `POST /statements/imports/{id}/confirm-account` {account_id | create:true} → `confirm_import_account` → `_post_ai_doc`. Choosing/creating records the key on the account so later statements post automatically. Explicit account_id at upload also records the key.
+- Resolver: `resolve_or_create_bank_account(create=False)` preview mode; returns `is_liability`.
+- UI: `components/ImportAccountConfirm.jsx` card (matched → "Yes, post here"; no match → pick existing or Create "<suggested>") rendered under the import row in StatementsTab and on StatementImportDetail; status pill "confirm account"; upload/poll toasts.
+- Verified in preview with the real Mercury PDF: matched-unconfirmed → parked → confirm → 73 posted, key stored; re-upload → auto-posted; no-match company → parked → Create → account 2102 created + 73 posted.
